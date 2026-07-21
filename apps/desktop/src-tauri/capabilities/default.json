@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities required by the Lumen Source main window.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

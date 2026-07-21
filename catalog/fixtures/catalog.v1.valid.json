@@ -1,0 +1,121 @@
+{
+  "schema_version": "1",
+  "catalog_version": "2026.07.20.1",
+  "published_at": "2026-07-20T10:00:00Z",
+  "runtimes": [
+    {
+      "id": "ollama",
+      "display_name": "Ollama",
+      "platforms": ["linux-x86_64", "linux-aarch64", "darwin-arm64", "windows-x86_64"],
+      "install": {
+        "strategy": "archive",
+        "urls_by_platform": {
+          "linux-x86_64": "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-linux-amd64.tar.zst",
+          "linux-aarch64": "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-linux-arm64.tar.zst",
+          "darwin-arm64": "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-darwin.tgz",
+          "windows-x86_64": "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-windows-amd64.zip"
+        },
+        "sha256_by_platform": {
+          "linux-x86_64": "83b1f22841eb7f6c4900c6797f960ebaa09466874442ea5b8ae3da6980d3914c",
+          "linux-aarch64": "20fb8d14694f73b97dc41519e27ef06166236207e7efe793f1698a43722215f2",
+          "darwin-arm64": "346d28fe70f3ef3776e42100f5721510aa35fc07f3733f6629dbb117b1cfede9",
+          "windows-x86_64": "d5abdc21b64ee928d3c92880ac22da5e5b0a46b8b07179791dd8c711b35f8397"
+        },
+        "version": "0.32.1"
+      },
+      "default_endpoint": "http://127.0.0.1:11434",
+      "notes": "Runtime-native model pulls are pinned by model tag."
+    },
+    {
+      "id": "dummy-runtime",
+      "display_name": "Dummy Runtime",
+      "platforms": ["linux-x86_64", "linux-aarch64", "darwin-arm64", "windows-x86_64"],
+      "install": {
+        "strategy": "archive",
+        "urls_by_platform": {
+          "linux-x86_64": "https://example.com/dummy-runtime.tar.zst",
+          "linux-aarch64": "https://example.com/dummy-runtime.tar.zst",
+          "darwin-arm64": "https://example.com/dummy-runtime.tar.zst",
+          "windows-x86_64": "https://example.com/dummy-runtime.zip"
+        },
+        "sha256_by_platform": {
+          "linux-x86_64": "0",
+          "linux-aarch64": "0",
+          "darwin-arm64": "0",
+          "windows-x86_64": "0"
+        },
+        "version": "0.0.0-dummy"
+      },
+      "default_endpoint": "http://127.0.0.1:9999",
+      "notes": "Dummy runtime for UI testing only."
+    }
+  ],
+  "models": [
+    {
+      "id": "qwen2.5-coder-14b",
+      "display_name": "Qwen2.5 Coder 14B",
+      "description": "A code-focused model suitable for local programming assistance.",
+      "capabilities": ["chat", "code"],
+      "languages": ["en", "zh"],
+      "license": {
+        "spdx": "Apache-2.0",
+        "name": "Apache License 2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0"
+      },
+      "use_cases": ["programming", "general"],
+      "variants": [
+        {
+          "id": "qwen2.5-coder-14b-q4_k_m",
+          "runtime": "ollama",
+          "runtime_ref": "qwen2.5-coder:14b",
+          "parameters_b": 14.7,
+          "quantization": "Q4_K_M",
+          "requirements": {
+            "min_ram_gb": 12.0,
+            "min_vram_gb": null,
+            "min_storage_gb": 9.5,
+            "os": ["linux", "darwin", "windows"],
+            "accelerators": ["cuda", "metal", "rocm", "cpu"]
+          },
+          "artifact": null,
+          "performance_hint": {
+            "tokens_per_sec_estimate": 18.0,
+            "notes": "Estimate for a mid-range discrete GPU."
+          },
+          "recommended_for": ["programming"]
+        }
+      ]
+    },
+    {
+      "id": "dummy-test-model",
+      "display_name": "Dummy Test Model",
+      "description": "A dummy model entry for UI testing without performing any work.",
+      "capabilities": ["chat"],
+      "languages": ["en"],
+      "license": {
+        "name": "Dummy License",
+        "url": "https://example.com/dummy-license"
+      },
+      "use_cases": ["testing"],
+      "variants": [
+        {
+          "id": "dummy-test-model-variant",
+          "runtime": "dummy-runtime",
+          "runtime_ref": "dummy-test-model:latest",
+          "parameters_b": 0.1,
+          "quantization": null,
+          "requirements": {
+            "min_ram_gb": 0.5,
+            "min_vram_gb": null,
+            "min_storage_gb": 0.1,
+            "os": ["linux", "darwin", "windows"],
+            "accelerators": ["cpu"]
+          },
+          "artifact": null,
+          "performance_hint": null,
+          "recommended_for": ["testing"]
+        }
+      ]
+    }
+  ]
+}

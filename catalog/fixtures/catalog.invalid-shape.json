@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "catalog_version": "2026.07.20.invalid",
+  "published_at": "not-a-complete-catalog",
+  "runtimes": [
+    {
+      "id": "ollama",
+      "display_name": "Ollama",
+      "platforms": ["plan9-mips"],
+      "install": {
+        "strategy": "archive",
+        "urls_by_platform": {},
+        "sha256_by_platform": {},
+        "version": "0.9.6"
+      },
+      "default_endpoint": "http://127.0.0.1:11434"
+    }
+  ],
+  "models": "models must be an array"
+}

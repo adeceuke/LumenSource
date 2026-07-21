@@ -1,0 +1,12 @@
+.git
+.container-cache
+target
+**/target
+node_modules
+**/node_modules
+dist
+**/dist
+*.docx
+*.log
+.env
+.env.*

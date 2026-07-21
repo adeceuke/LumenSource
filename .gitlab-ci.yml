@@ -1,0 +1,60 @@
+stages:
+  - validate
+  - test
+  - build
+
+variables:
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  CARGO_TERM_COLOR: always
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cargo/registry/
+    - .cargo/git/
+    - target/
+    - apps/desktop/node_modules/
+
+rust:
+  image: rust:latest
+  stage: test
+  before_script:
+    - rustup component add rustfmt clippy
+  script:
+    - cargo fmt --all --check
+    - cargo clippy --workspace --exclude lumen-source-desktop --all-targets -- -D warnings
+    - cargo test --workspace --exclude lumen-source-desktop
+
+frontend:
+  image: node:22-bookworm
+  stage: validate
+  script:
+    - cd apps/desktop
+    - npm ci
+    - npm run typecheck
+    - npm run build
+
+linux-package:
+  image: node:22-bookworm
+  stage: build
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends
+      build-essential
+      curl
+      file
+      libayatana-appindicator3-dev
+      librsvg2-dev
+      libssl-dev
+      libwebkit2gtk-4.1-dev
+      wget
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+    - export PATH="$HOME/.cargo/bin:$PATH"
+  script:
+    - cd apps/desktop
+    - npm ci
+    - npm run tauri build
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - target/release/bundle/
