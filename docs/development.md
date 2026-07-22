@@ -81,9 +81,20 @@ sudo apt install \
 
 The exact package names differ on other distributions. Other operating systems
 are architectural targets but are not v0.1 release targets; see
-`docs/platform-support.md`.
+[platform support](platform-support.md).
 
 ## Checks
+
+The preferred check runs formatting, Clippy with warnings denied, every Rust
+test including the Tauri bridge, TypeScript type checking, and the production
+frontend build:
+
+```shell
+scripts/container.sh check
+```
+
+For a native machine without the GTK/WebKit development libraries, the shared
+Rust crates can still be checked separately:
 
 From the repository root:
 
@@ -105,3 +116,45 @@ npm run tauri dev
 The desktop package cannot be compiled natively on Linux unless the native
 Tauri dependencies are installed. The containerized build supplies those
 dependencies inside its image.
+
+## Testing the guided flow
+
+Use **Dummy Test Model** in a development build to exercise the wizard and
+models page without downloading a runtime or model. It is overlaid from the
+legacy test fixture and is not included in release builds. You can also select
+a compatible entry from `catalog/model-list.json` for an Ollama-backed test.
+
+1. Open **Add model** and keep local deployment selected.
+2. Continue through hardware detection and select any use case.
+3. Open **Choose from all available models** and select a catalog model;
+   verify its detail panel replaces the recommended model's information.
+4. Complete preflight and choose whether **Start model after installation** is
+   checked.
+5. Verify the Ready screen, copy controls, and model-list start/stop button.
+6. Reload the frontend and verify that a running model remains running.
+7. Install the same model again and verify both entries remain in the model
+   list after a frontend reload. Starting or stopping either entry should
+   update both because they reference the same runtime model.
+8. Open a model action menu and verify that clicking elsewhere or pressing
+   Escape closes it.
+9. Select a model row and verify that the full-body detail page opens on Logs,
+   the model name replaces **Local models**, and **Back to model list** returns
+   to the list.
+10. Verify the recorded lifecycle entries and test Copy and Clear.
+11. Open the **Performance** tab and verify that the selected model state,
+    total resident memory, model allocation in system RAM, GPU VRAM allocation,
+    and context capacity refresh every two seconds. Stop the model and verify that
+    its allocations fall to zero. Leave the page open long enough to verify
+    that each memory metric builds a line in the rolling graph.
+12. Start a stopped real model and verify that an in-row spinner and **Starting
+    model…** label remain visible until the runtime request finishes.
+13. Open the **API** tab and verify that its base URL, chat-completions URL, and
+    model identifier belong to the selected entry. Copy each value and the cURL
+    example, verifying that the button temporarily changes to **✓ Copied**.
+14. Complete the wizard and repeat the clipboard-feedback check on its Ready
+    screen.
+
+For cancellation testing, begin a real runtime/model download and select
+**Cancel installation**. The wizard should report cancellation, remain on the
+install step, remove temporary runtime download/staging files, and allow a
+retry.

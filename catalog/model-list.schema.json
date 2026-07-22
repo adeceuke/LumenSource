@@ -1,0 +1,536 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lumensource.dev/schemas/model-list.v2.schema.json",
+  "title": "Lumen Source model list",
+  "description": "Producer contract for an externally generated list of models that Lumen Source can validate and consume.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "catalog_version",
+    "generated_at",
+    "generator",
+    "models"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional URI or relative path of this JSON Schema."
+    },
+    "schema_version": {
+      "const": "2",
+      "description": "Version of this data contract, independent from the catalog content version."
+    },
+    "catalog_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Monotonically changing producer-defined version, for example 2026.07.21.1."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp at which the generator finished producing the file."
+    },
+    "generator": {
+      "$ref": "#/$defs/generator"
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/model"
+      }
+    }
+  },
+  "$defs": {
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "homepage_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "provider",
+        "description",
+        "homepage_url",
+        "license",
+        "capabilities",
+        "use_cases",
+        "languages",
+        "variants",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "type": ["string", "null"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "homepage_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "release_date": {
+          "type": ["string", "null"],
+          "format": "date"
+        },
+        "knowledge_cutoff": {
+          "type": ["string", "null"],
+          "description": "Free-form value supplied by the publisher, or null when unknown."
+        },
+        "license": {
+          "$ref": "#/$defs/license"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/tag"
+          },
+          "description": "Functional tags such as chat, code, vision, tools, embeddings, or reasoning."
+        },
+        "input_modalities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["text", "image", "audio", "video"]
+          }
+        },
+        "output_modalities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["text", "image", "audio", "video", "embedding"]
+          }
+        },
+        "use_cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/use_case"
+          }
+        },
+        "languages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "description": "BCP 47 language tag, or the literal value multilingual."
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "variants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/variant"
+          }
+        },
+        "sources": {
+          "$ref": "#/$defs/sources"
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "spdx",
+        "profile_id",
+        "name",
+        "url",
+        "classification",
+        "commercial_use",
+        "redistribution",
+        "derivatives",
+        "requires_user_acceptance",
+        "attribution",
+        "license_text",
+        "notice",
+        "ui_notice",
+        "summary",
+        "obligations",
+        "restrictions",
+        "geographic_restrictions",
+        "usage_policy_url",
+        "reviewed_at"
+      ],
+      "properties": {
+        "spdx": {
+          "type": ["string", "null"]
+        },
+        "profile_id": {
+          "$ref": "#/$defs/stable_id",
+          "description": "Stable identifier of the reviewed interpretation in license-profiles.json."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "classification": {
+          "enum": [
+            "permissive-open-source",
+            "community-license",
+            "responsible-ai-license",
+            "custom-terms",
+            "research-only-license",
+            "non-production-license",
+            "other"
+          ],
+          "description": "High-level license family for filtering and user-interface treatment."
+        },
+        "commercial_use": {
+          "$ref": "#/$defs/legal_permission"
+        },
+        "redistribution": {
+          "$ref": "#/$defs/legal_permission"
+        },
+        "derivatives": {
+          "$ref": "#/$defs/legal_permission"
+        },
+        "requires_user_acceptance": {
+          "type": "boolean",
+          "description": "Whether LumenSource must obtain explicit acknowledgement before model installation."
+        },
+        "attribution": {
+          "$ref": "#/$defs/legal_requirement"
+        },
+        "license_text": {
+          "enum": ["required-on-redistribution", "not-required", "unknown"]
+        },
+        "notice": {
+          "enum": ["required", "if-provided", "not-required", "unknown"]
+        },
+        "ui_notice": {
+          "enum": ["informational", "acknowledgement-required"],
+          "description": "Minimum notice behavior required from the catalog consumer."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Concise, non-authoritative explanation suitable for display to users."
+        },
+        "obligations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "restrictions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "geographic_restrictions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Territorial eligibility conditions that LumenSource must display and use for jurisdiction-aware filtering."
+        },
+        "usage_policy_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "reviewed_at": {
+          "type": "string",
+          "format": "date",
+          "description": "Date on which this human-readable interpretation was reviewed."
+        }
+      }
+    },
+    "legal_permission": {
+      "enum": ["permitted", "permitted-with-conditions", "not-permitted", "unknown"]
+    },
+    "legal_requirement": {
+      "enum": ["required", "not-required", "unknown"]
+    },
+    "use_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "suitability"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/tag"
+        },
+        "suitability": {
+          "enum": ["excellent", "good", "limited", "unsuitable"]
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "display_name",
+        "runtime",
+        "parameters_billion",
+        "quantization",
+        "context_window_tokens",
+        "model_size_bytes",
+        "download_item_count",
+        "size_is_estimate",
+        "requirements",
+        "recommended_for",
+        "sources"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime": {
+          "$ref": "#/$defs/runtime"
+        },
+        "parameters_billion": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "quantization": {
+          "type": ["string", "null"],
+          "description": "Quantization label such as Q4_K_M, or null for an unquantized model."
+        },
+        "context_window_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "model_size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Download/on-disk model size in bytes, excluding temporary installation headroom."
+        },
+        "download_item_count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of registry blobs in the pinned Ollama manifest, including its config blob and layers. Used only to explain per-item pull progress."
+        },
+        "size_is_estimate": {
+          "type": "boolean"
+        },
+        "requirements": {
+          "$ref": "#/$defs/requirements"
+        },
+        "recommended_for": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/tag"
+          }
+        },
+        "benchmarks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/benchmark"
+          },
+          "description": "Optional measured performance. Do not provide a hardware-independent tokens/second estimate."
+        },
+        "sources": {
+          "$ref": "#/$defs/sources"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "model_ref"],
+      "properties": {
+        "engine": {
+          "const": "ollama",
+          "description": "LumenSource currently integrates with Ollama only."
+        },
+        "model_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact Ollama model reference including its tag."
+        },
+        "digest": {
+          "type": ["string", "null"],
+          "description": "Immutable content digest when the producer can obtain one."
+        }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_system_ram_bytes",
+        "recommended_system_ram_bytes",
+        "minimum_vram_bytes",
+        "recommended_vram_bytes",
+        "minimum_free_storage_bytes",
+        "supported_os",
+        "supported_architectures",
+        "accelerators"
+      ],
+      "properties": {
+        "minimum_system_ram_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Hard minimum installed system RAM."
+        },
+        "recommended_system_ram_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Recommended installed system RAM; must not be lower than the minimum."
+        },
+        "minimum_vram_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Hard minimum dedicated/unified GPU memory, or null when GPU memory is not required."
+        },
+        "recommended_vram_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Recommended GPU memory, or null when no GPU recommendation applies."
+        },
+        "minimum_free_storage_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Free space required for the model plus safe installation overhead."
+        },
+        "supported_os": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["linux", "darwin", "windows"]
+          }
+        },
+        "supported_architectures": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["x86_64", "aarch64"]
+          }
+        },
+        "accelerators": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["cpu", "cuda", "rocm", "metal"]
+          }
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "benchmark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hardware", "tokens_per_second", "source"],
+      "properties": {
+        "hardware": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable CPU/GPU and memory configuration used for the measurement."
+        },
+        "tokens_per_second": {
+          "type": "number",
+          "minimum": 0
+        },
+        "context_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "notes": {
+          "type": ["string", "null"]
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "retrieved_at"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "retrieved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+      "description": "Stable lowercase identifier; do not derive it from mutable display text."
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+    }
+  }
+}

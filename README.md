@@ -1,6 +1,8 @@
 # Lumen Source
 
-Lumen Source is a desktop application that detects hardware, recommends compatible local AI models, installs the selected runtime and model, and exposes the runtime endpoint to external tools.
+Lumen Source is a desktop application that detects hardware, recommends
+compatible local AI models, installs the selected runtime and model, and
+exposes OpenAI-compatible connection details to external tools.
 
 Use `lumen-source` wherever the product name must be represented as one technical token.
 
@@ -40,9 +42,18 @@ scripts/setup-ubuntu-24.04.sh
 scripts/check-prerequisites.sh
 ```
 
-See `docs/development.md` for the complete dependency list and
-`docs/platform-support.md` for platform boundaries.
+See [development setup](docs/development.md), [platform support](docs/platform-support.md),
+and [current implementation](docs/current-implementation.md) for details.
 
-## v0.1 milestone
+## Current local workflow
 
-Detect hardware → fetch and verify catalog → recommend model → ensure Ollama/model → start runtime → show endpoint.
+Choose local deployment → detect hardware → load the catalog (and authenticate
+remote updates) → use the recommended model or choose another catalog model →
+run preflight checks → install the runtime/model → optionally start it → show
+endpoint details.
+
+The models page also reconciles Ollama's installed-model inventory (`/api/tags`)
+with its currently loaded models (`/api/ps`), and provides catalog-backed
+start/stop controls. The bundled model catalog is generated from
+`catalog/model-list.json`; development builds add a no-download dummy
+model/runtime from the test fixture. Release builds exclude it.

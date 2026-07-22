@@ -1,7 +1,9 @@
-//! Runtime abstraction, the Ollama adapter, and verified binary installation.
+//! Runtime abstraction, Ollama and dummy adapters, and verified binary installation.
 
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +15,51 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
+
+/// Cooperative cancellation shared by the desktop command and long-running
+/// runtime I/O. Cancellation is permanent and wakes an in-flight HTTP wait.
+#[derive(Clone, Default)]
+pub struct CancellationToken {
+    state: Arc<CancellationState>,
+}
+
+#[derive(Default)]
+struct CancellationState {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.state.cancelled.store(true, Ordering::Release);
+        self.state.notify.notify_waiters();
+        self.state.notify.notify_one();
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.state.cancelled.load(Ordering::Acquire)
+    }
+
+    pub fn check(&self) -> Result<(), RuntimeError> {
+        if self.is_cancelled() {
+            Err(RuntimeError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub async fn cancelled(&self) {
+        if self.is_cancelled() {
+            return;
+        }
+        self.state.notify.notified().await;
+    }
+}
 
 /// A progress notification emitted by a runtime operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +72,7 @@ pub enum RuntimeProgress {
     Installing,
     PullingModel {
         status: String,
+        digest: Option<String>,
         completed: Option<u64>,
         total: Option<u64>,
     },
@@ -46,6 +93,31 @@ where
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChatProgress {
+    Content(String),
+    Done,
+}
+
+pub trait ChatReporter: Send + Sync {
+    fn report(&self, progress: ChatProgress);
+}
+
+impl<F> ChatReporter for F
+where
+    F: Fn(ChatProgress) + Send + Sync,
+{
+    fn report(&self, progress: ChatProgress) {
+        self(progress);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeEndpoint {
     pub base_url: Url,
@@ -56,6 +128,24 @@ pub enum RuntimeStatus {
     Unavailable,
     Idle,
     Running { models: Vec<String> },
+}
+
+/// A model present in a runtime's local model store, whether loaded or stopped.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstalledModel {
+    pub name: String,
+    pub digest: Option<String>,
+    pub size_bytes: Option<u64>,
+}
+
+/// Memory reserved for one model currently loaded by Ollama. These values
+/// come from `/api/ps`; Ollama does not expose per-model processor utilization.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelAllocation {
+    pub name: String,
+    pub total_memory_bytes: u64,
+    pub vram_memory_bytes: u64,
+    pub context_length: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -84,21 +174,138 @@ pub enum RuntimeError {
     ExecutableNotFound,
     #[error("Ollama did not become healthy within the startup timeout")]
     StartupTimeout,
+    #[error("installation cancelled")]
+    Cancelled,
 }
 
 /// Operations required from an inference runtime.
 #[async_trait]
 pub trait Runtime: Send + Sync {
     async fn health(&self) -> Result<(), RuntimeError>;
+    async fn installed_models(&self) -> Result<Vec<InstalledModel>, RuntimeError>;
     async fn pull_model(
         &self,
         model: &str,
         progress: &dyn ProgressReporter,
     ) -> Result<(), RuntimeError>;
+    async fn delete_model(&self, model: &str) -> Result<(), RuntimeError>;
     async fn start(&self, model: &str) -> Result<(), RuntimeError>;
     async fn stop(&self, model: &str) -> Result<(), RuntimeError>;
     async fn status(&self) -> Result<RuntimeStatus, RuntimeError>;
     fn endpoint(&self) -> RuntimeEndpoint;
+}
+
+/// An in-memory runtime used to exercise the complete install/start/stop UI
+/// without downloading a model or launching an inference server.
+#[derive(Clone)]
+pub struct DummyRuntime {
+    endpoint: RuntimeEndpoint,
+    state: Arc<Mutex<DummyState>>,
+}
+
+#[derive(Default)]
+struct DummyState {
+    installed: BTreeSet<String>,
+    running: BTreeSet<String>,
+}
+
+impl DummyRuntime {
+    pub fn new(base_url: &str) -> Result<Self, RuntimeError> {
+        let mut url =
+            Url::parse(base_url).map_err(|error| RuntimeError::InvalidUrl(error.to_string()))?;
+        if !url.path().ends_with('/') {
+            url.set_path(&format!("{}/", url.path()));
+        }
+        Ok(Self {
+            endpoint: RuntimeEndpoint { base_url: url },
+            state: Arc::new(Mutex::new(DummyState::default())),
+        })
+    }
+}
+
+#[async_trait]
+impl Runtime for DummyRuntime {
+    async fn health(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    async fn installed_models(&self) -> Result<Vec<InstalledModel>, RuntimeError> {
+        Ok(self
+            .state
+            .lock()
+            .await
+            .installed
+            .iter()
+            .map(|name| InstalledModel {
+                name: name.clone(),
+                digest: Some(format!("dummy:{name}")),
+                size_bytes: Some(0),
+            })
+            .collect())
+    }
+
+    async fn pull_model(
+        &self,
+        model: &str,
+        progress: &dyn ProgressReporter,
+    ) -> Result<(), RuntimeError> {
+        self.pull_model_cancellable(model, progress, &CancellationToken::new())
+            .await
+    }
+
+    async fn delete_model(&self, model: &str) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().await;
+        state.running.remove(model);
+        state.installed.remove(model);
+        Ok(())
+    }
+
+    async fn start(&self, model: &str) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().await;
+        state.installed.insert(model.to_owned());
+        state.running.insert(model.to_owned());
+        Ok(())
+    }
+
+    async fn stop(&self, model: &str) -> Result<(), RuntimeError> {
+        self.state.lock().await.running.remove(model);
+        Ok(())
+    }
+
+    async fn status(&self) -> Result<RuntimeStatus, RuntimeError> {
+        let models: Vec<String> = self.state.lock().await.running.iter().cloned().collect();
+        if models.is_empty() {
+            Ok(RuntimeStatus::Idle)
+        } else {
+            Ok(RuntimeStatus::Running { models })
+        }
+    }
+
+    fn endpoint(&self) -> RuntimeEndpoint {
+        self.endpoint.clone()
+    }
+}
+
+impl DummyRuntime {
+    pub async fn pull_model_cancellable(
+        &self,
+        model: &str,
+        progress: &dyn ProgressReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        cancellation.check()?;
+        progress.report(RuntimeProgress::PullingModel {
+            status: "Simulating model installation…".to_owned(),
+            digest: Some("dummy-model".to_owned()),
+            completed: Some(1),
+            total: Some(1),
+        });
+        cancellation.check()?;
+        self.state.lock().await.installed.insert(model.to_owned());
+        cancellation.check()?;
+        progress.report(RuntimeProgress::Ready);
+        Ok(())
+    }
 }
 
 /// Ollama's fixed HTTP API adapter.
@@ -106,7 +313,7 @@ pub trait Runtime: Send + Sync {
 pub struct OllamaRuntime {
     client: Client,
     endpoint: RuntimeEndpoint,
-    owned_process: Arc<Mutex<Option<Child>>>,
+    launched_process: Arc<Mutex<Option<Child>>>,
     executable: Arc<Mutex<PathBuf>>,
 }
 
@@ -124,7 +331,7 @@ impl OllamaRuntime {
         Ok(Self {
             client: Client::new(),
             endpoint: RuntimeEndpoint { base_url: url },
-            owned_process: Arc::new(Mutex::new(None)),
+            launched_process: Arc::new(Mutex::new(None)),
             executable: Arc::new(Mutex::new(executable)),
         })
     }
@@ -133,7 +340,7 @@ impl OllamaRuntime {
         Self {
             client,
             endpoint: RuntimeEndpoint { base_url },
-            owned_process: Arc::new(Mutex::new(None)),
+            launched_process: Arc::new(Mutex::new(None)),
             executable: Arc::new(Mutex::new(PathBuf::from("ollama"))),
         }
     }
@@ -160,11 +367,30 @@ impl OllamaRuntime {
     /// Ensures the local Ollama server is reachable, starting the fixed
     /// `ollama serve` executable when necessary. No shell is involved.
     pub async fn ensure_running(&self) -> Result<(), RuntimeError> {
-        if self.health().await.is_ok() {
+        self.ensure_running_cancellable(&CancellationToken::new())
+            .await
+    }
+
+    pub async fn ensure_running_cancellable(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        cancellation.check()?;
+        let healthy = tokio::select! {
+            _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+            result = self.health() => result.is_ok(),
+        };
+        if healthy {
             return Ok(());
         }
 
-        let mut process = self.owned_process.lock().await;
+        cancellation.check()?;
+        let mut process = self.launched_process.lock().await;
+        if let Some(child) = process.as_mut() {
+            if child.try_wait()?.is_some() {
+                *process = None;
+            }
+        }
         if process.is_none() {
             let executable = self.executable.lock().await.clone();
             let child = Command::new(executable)
@@ -172,7 +398,6 @@ impl OllamaRuntime {
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .kill_on_drop(true)
                 .spawn()
                 .map_err(|error| {
                     if error.kind() == std::io::ErrorKind::NotFound {
@@ -186,10 +411,18 @@ impl OllamaRuntime {
         drop(process);
 
         for _ in 0..50 {
-            if self.health().await.is_ok() {
+            cancellation.check()?;
+            let healthy = tokio::select! {
+                _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+                result = self.health() => result.is_ok(),
+            };
+            if healthy {
                 return Ok(());
             }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            tokio::select! {
+                _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {},
+            }
         }
         Err(RuntimeError::StartupTimeout)
     }
@@ -213,6 +446,146 @@ impl OllamaRuntime {
     pub async fn executable_path(&self) -> PathBuf {
         self.executable.lock().await.clone()
     }
+
+    pub async fn pull_model_cancellable(
+        &self,
+        model: &str,
+        progress: &dyn ProgressReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        cancellation.check()?;
+        let request = self
+            .client
+            .post(self.api_url("api/pull")?)
+            .json(&PullRequest {
+                name: model,
+                stream: true,
+            })
+            .send();
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+            response = request => response?,
+        };
+        let mut stream = Self::checked(response).await?.bytes_stream();
+        let mut pending = Vec::new();
+        loop {
+            let chunk = tokio::select! {
+                _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+                chunk = stream.next() => chunk,
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
+            pending.extend_from_slice(&chunk?);
+            while let Some(index) = pending.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = pending.drain(..=index).collect();
+                report_pull_line(&line, progress)?;
+            }
+        }
+        cancellation.check()?;
+        if !pending.is_empty() {
+            report_pull_line(&pending, progress)?;
+        }
+        progress.report(RuntimeProgress::Ready);
+        Ok(())
+    }
+
+    pub async fn chat_cancellable(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        reporter: &dyn ChatReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        cancellation.check()?;
+        let request = self
+            .client
+            .post(self.api_url("api/chat")?)
+            .json(&ChatRequest {
+                model,
+                messages,
+                stream: true,
+                keep_alive: -1,
+            })
+            .send();
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+            response = request => response?,
+        };
+        let mut stream = Self::checked(response).await?.bytes_stream();
+        let mut pending = Vec::new();
+        let mut done = false;
+        loop {
+            let chunk = tokio::select! {
+                _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+                chunk = stream.next() => chunk,
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
+            pending.extend_from_slice(&chunk?);
+            while let Some(index) = pending.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = pending.drain(..=index).collect();
+                done |= report_chat_line(&line, reporter)?;
+            }
+        }
+        cancellation.check()?;
+        if !pending.is_empty() {
+            done |= report_chat_line(&pending, reporter)?;
+        }
+        if !done {
+            reporter.report(ChatProgress::Done);
+        }
+        Ok(())
+    }
+
+    /// Loads an embedding-only model and keeps it resident without routing it
+    /// through Ollama's unsupported generation endpoint.
+    pub async fn start_embedding(&self, model: &str) -> Result<(), RuntimeError> {
+        self.set_embedding_keep_alive(model, -1).await
+    }
+
+    /// Unloads an embedding-only model through the same API that loaded it.
+    pub async fn stop_embedding(&self, model: &str) -> Result<(), RuntimeError> {
+        self.set_embedding_keep_alive(model, 0).await
+    }
+
+    async fn set_embedding_keep_alive(
+        &self,
+        model: &str,
+        keep_alive: i64,
+    ) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .post(self.api_url("api/embed")?)
+            .json(&EmbedRequest {
+                model,
+                input: "LumenSource runtime check",
+                keep_alive,
+            })
+            .send()
+            .await?;
+        Self::checked(response).await?;
+        Ok(())
+    }
+
+    pub async fn model_allocation(
+        &self,
+        model: &str,
+    ) -> Result<Option<ModelAllocation>, RuntimeError> {
+        let response = self.client.get(self.api_url("api/ps")?).send().await?;
+        let list: ProcessList = Self::checked(response).await?.json().await?;
+        Ok(list
+            .models
+            .into_iter()
+            .find(|loaded| same_model_reference(&loaded.name, model))
+            .map(|loaded| ModelAllocation {
+                name: loaded.name,
+                total_memory_bytes: loaded.total_memory_bytes.unwrap_or_default(),
+                vram_memory_bytes: loaded.vram_memory_bytes.unwrap_or_default(),
+                context_length: loaded.context_length,
+            }))
+    }
 }
 
 #[derive(Serialize)]
@@ -221,12 +594,41 @@ struct PullRequest<'a> {
     stream: bool,
 }
 
+#[derive(Serialize)]
+struct DeleteRequest<'a> {
+    model: &'a str,
+}
+
 #[derive(Deserialize)]
 struct PullResponse {
     status: String,
+    digest: Option<String>,
     completed: Option<u64>,
     total: Option<u64>,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ChatRequest<'a> {
+    model: &'a str,
+    messages: &'a [ChatMessage],
+    stream: bool,
+    keep_alive: i64,
+}
+
+#[derive(Deserialize)]
+struct ChatResponse {
+    #[serde(default)]
+    message: Option<ChatResponseMessage>,
+    #[serde(default)]
+    done: bool,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ChatResponseMessage {
+    #[serde(default)]
+    content: String,
 }
 
 #[derive(Serialize)]
@@ -234,6 +636,13 @@ struct GenerateRequest<'a> {
     model: &'a str,
     prompt: &'a str,
     stream: bool,
+    keep_alive: i64,
+}
+
+#[derive(Serialize)]
+struct EmbedRequest<'a> {
+    model: &'a str,
+    input: &'a str,
     keep_alive: i64,
 }
 
@@ -246,6 +655,27 @@ struct ProcessList {
 #[derive(Deserialize)]
 struct ProcessModel {
     name: String,
+    #[serde(default, rename = "size")]
+    total_memory_bytes: Option<u64>,
+    #[serde(default, rename = "size_vram")]
+    vram_memory_bytes: Option<u64>,
+    #[serde(default)]
+    context_length: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct InstalledModelList {
+    #[serde(default)]
+    models: Vec<OllamaInstalledModel>,
+}
+
+#[derive(Deserialize)]
+struct OllamaInstalledModel {
+    name: String,
+    #[serde(default)]
+    digest: Option<String>,
+    #[serde(default, rename = "size")]
+    size_bytes: Option<u64>,
 }
 
 #[async_trait]
@@ -256,33 +686,37 @@ impl Runtime for OllamaRuntime {
         Ok(())
     }
 
+    async fn installed_models(&self) -> Result<Vec<InstalledModel>, RuntimeError> {
+        let response = self.client.get(self.api_url("api/tags")?).send().await?;
+        let list: InstalledModelList = Self::checked(response).await?.json().await?;
+        Ok(list
+            .models
+            .into_iter()
+            .map(|model| InstalledModel {
+                name: model.name,
+                digest: model.digest,
+                size_bytes: model.size_bytes,
+            })
+            .collect())
+    }
+
     async fn pull_model(
         &self,
         model: &str,
         progress: &dyn ProgressReporter,
     ) -> Result<(), RuntimeError> {
+        self.pull_model_cancellable(model, progress, &CancellationToken::new())
+            .await
+    }
+
+    async fn delete_model(&self, model: &str) -> Result<(), RuntimeError> {
         let response = self
             .client
-            .post(self.api_url("api/pull")?)
-            .json(&PullRequest {
-                name: model,
-                stream: true,
-            })
+            .delete(self.api_url("api/delete")?)
+            .json(&DeleteRequest { model })
             .send()
             .await?;
-        let mut stream = Self::checked(response).await?.bytes_stream();
-        let mut pending = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            pending.extend_from_slice(&chunk?);
-            while let Some(index) = pending.iter().position(|byte| *byte == b'\n') {
-                let line: Vec<u8> = pending.drain(..=index).collect();
-                report_pull_line(&line, progress)?;
-            }
-        }
-        if !pending.is_empty() {
-            report_pull_line(&pending, progress)?;
-        }
-        progress.report(RuntimeProgress::Ready);
+        Self::checked(response).await?;
         Ok(())
     }
 
@@ -358,10 +792,49 @@ fn report_pull_line(line: &[u8], progress: &dyn ProgressReporter) -> Result<(), 
     }
     progress.report(RuntimeProgress::PullingModel {
         status: update.status,
+        digest: update.digest,
         completed: update.completed,
         total: update.total,
     });
     Ok(())
+}
+
+fn report_chat_line(line: &[u8], reporter: &dyn ChatReporter) -> Result<bool, RuntimeError> {
+    let line = line
+        .strip_suffix(b"\n")
+        .unwrap_or(line)
+        .strip_suffix(b"\r")
+        .unwrap_or(line);
+    if line.is_empty() {
+        return Ok(false);
+    }
+    let update: ChatResponse = serde_json::from_slice(line)?;
+    if let Some(error) = update.error {
+        return Err(RuntimeError::Remote(error));
+    }
+    if let Some(message) = update.message {
+        if !message.content.is_empty() {
+            reporter.report(ChatProgress::Content(message.content));
+        }
+    }
+    if update.done {
+        reporter.report(ChatProgress::Done);
+    }
+    Ok(update.done)
+}
+
+fn same_model_reference(left: &str, right: &str) -> bool {
+    normalize_model_reference(left) == normalize_model_reference(right)
+}
+
+fn normalize_model_reference(reference: &str) -> String {
+    let reference = reference.trim();
+    let last_slash = reference.rfind('/').map_or(0, |index| index + 1);
+    if reference[last_slash..].contains(':') {
+        reference.to_owned()
+    } else {
+        format!("{reference}:latest")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -396,39 +869,46 @@ impl ArtifactInstaller {
         install_dir: &Path,
         progress: &dyn ProgressReporter,
     ) -> Result<PathBuf, RuntimeError> {
+        self.install_cancellable(artifact, install_dir, progress, &CancellationToken::new())
+            .await
+    }
+
+    pub async fn install_cancellable(
+        &self,
+        artifact: &Artifact,
+        install_dir: &Path,
+        progress: &dyn ProgressReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<PathBuf, RuntimeError> {
         validate_artifact_name(&artifact.executable_name)?;
         tokio::fs::create_dir_all(install_dir).await?;
         let destination = install_dir.join(&artifact.executable_name);
         let temporary = install_dir.join(format!("{}.download", artifact.executable_name));
-        let response = Self::download_response(&self.client, artifact).await?;
-        let total = response.content_length();
-        let mut file = tokio::fs::File::create(&temporary).await?;
-        let mut stream = response.bytes_stream();
-        let mut hasher = Sha256::new();
-        let mut downloaded = 0_u64;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            file.write_all(&chunk).await?;
-            hasher.update(&chunk);
-            downloaded = downloaded.saturating_add(chunk.len() as u64);
-            progress.report(RuntimeProgress::Downloading { downloaded, total });
+        let result = async {
+            let actual =
+                Self::download_to_file(&self.client, artifact, &temporary, progress, cancellation)
+                    .await?;
+            cancellation.check()?;
+            progress.report(RuntimeProgress::Verifying);
+            if !actual.eq_ignore_ascii_case(&artifact.sha256) {
+                return Err(RuntimeError::ChecksumMismatch {
+                    expected: artifact.sha256.clone(),
+                    actual,
+                });
+            }
+            cancellation.check()?;
+            progress.report(RuntimeProgress::Installing);
+            set_executable(&temporary).await?;
+            cancellation.check()?;
+            tokio::fs::rename(&temporary, &destination).await?;
+            progress.report(RuntimeProgress::Ready);
+            Ok(destination)
         }
-        file.flush().await?;
-        drop(file);
-        progress.report(RuntimeProgress::Verifying);
-        let actual = hex::encode(hasher.finalize());
-        if !actual.eq_ignore_ascii_case(&artifact.sha256) {
+        .await;
+        if result.is_err() {
             let _ = tokio::fs::remove_file(&temporary).await;
-            return Err(RuntimeError::ChecksumMismatch {
-                expected: artifact.sha256.clone(),
-                actual,
-            });
         }
-        progress.report(RuntimeProgress::Installing);
-        set_executable(&temporary).await?;
-        tokio::fs::rename(&temporary, &destination).await?;
-        progress.report(RuntimeProgress::Ready);
-        Ok(destination)
+        result
     }
 
     /// Installs a verified `.tar.zst` runtime distribution without executing
@@ -439,6 +919,24 @@ impl ArtifactInstaller {
         install_dir: &Path,
         executable_relative_path: &Path,
         progress: &dyn ProgressReporter,
+    ) -> Result<PathBuf, RuntimeError> {
+        self.install_tar_zst_cancellable(
+            artifact,
+            install_dir,
+            executable_relative_path,
+            progress,
+            &CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub async fn install_tar_zst_cancellable(
+        &self,
+        artifact: &Artifact,
+        install_dir: &Path,
+        executable_relative_path: &Path,
+        progress: &dyn ProgressReporter,
+        cancellation: &CancellationToken,
     ) -> Result<PathBuf, RuntimeError> {
         validate_artifact_name(&artifact.executable_name)?;
         let parent = install_dir
@@ -452,76 +950,109 @@ impl ArtifactInstaller {
         }
         tokio::fs::create_dir_all(&staging_dir).await?;
 
-        let response = Self::download_response(&self.client, artifact).await?;
+        let result = async {
+            let actual = Self::download_to_file(
+                &self.client,
+                artifact,
+                &archive_path,
+                progress,
+                cancellation,
+            )
+            .await?;
+            cancellation.check()?;
+            progress.report(RuntimeProgress::Verifying);
+            if !actual.eq_ignore_ascii_case(&artifact.sha256) {
+                return Err(RuntimeError::ChecksumMismatch {
+                    expected: artifact.sha256.clone(),
+                    actual,
+                });
+            }
+
+            cancellation.check()?;
+            progress.report(RuntimeProgress::Installing);
+            let archive = archive_path.clone();
+            let destination = staging_dir.clone();
+            let extraction_cancellation = cancellation.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), RuntimeError> {
+                let file = std::fs::File::open(archive)?;
+                let decoder = zstd::Decoder::new(file)?;
+                let mut archive = tar::Archive::new(decoder);
+                for entry in archive.entries()? {
+                    extraction_cancellation.check()?;
+                    let mut entry = entry?;
+                    if !entry.unpack_in(&destination)? {
+                        return Err(RuntimeError::InvalidArtifactName(
+                            "archive entry escapes the installation directory".to_owned(),
+                        ));
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|error| RuntimeError::Io(std::io::Error::other(error)))??;
+
+            cancellation.check()?;
+            let executable = staging_dir.join(executable_relative_path);
+            if !tokio::fs::try_exists(&executable).await? {
+                return Err(RuntimeError::InvalidArtifactName(format!(
+                    "archive does not contain {}",
+                    executable_relative_path.display()
+                )));
+            }
+            set_executable(&executable).await?;
+            cancellation.check()?;
+            if tokio::fs::try_exists(install_dir).await? {
+                tokio::fs::remove_dir_all(install_dir).await?;
+            }
+            tokio::fs::rename(&staging_dir, install_dir).await?;
+            tokio::fs::remove_file(&archive_path).await?;
+            progress.report(RuntimeProgress::Ready);
+            Ok(install_dir.join(executable_relative_path))
+        }
+        .await;
+        if result.is_err() {
+            let _ = tokio::fs::remove_file(&archive_path).await;
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+        }
+        result
+    }
+
+    async fn download_to_file(
+        client: &Client,
+        artifact: &Artifact,
+        destination: &Path,
+        progress: &dyn ProgressReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<String, RuntimeError> {
+        cancellation.check()?;
+        let request = client.get(artifact.url.clone()).send();
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+            response = request => response?,
+        };
+        let response = OllamaRuntime::checked(response).await?;
         let total = response.content_length();
-        let mut file = tokio::fs::File::create(&archive_path).await?;
+        let mut file = tokio::fs::File::create(destination).await?;
         let mut stream = response.bytes_stream();
         let mut hasher = Sha256::new();
         let mut downloaded = 0_u64;
-        while let Some(chunk) = stream.next().await {
+        loop {
+            let chunk = tokio::select! {
+                _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+                chunk = stream.next() => chunk,
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
             let chunk = chunk?;
             file.write_all(&chunk).await?;
             hasher.update(&chunk);
             downloaded = downloaded.saturating_add(chunk.len() as u64);
             progress.report(RuntimeProgress::Downloading { downloaded, total });
         }
+        cancellation.check()?;
         file.flush().await?;
-        drop(file);
-
-        progress.report(RuntimeProgress::Verifying);
-        let actual = hex::encode(hasher.finalize());
-        if !actual.eq_ignore_ascii_case(&artifact.sha256) {
-            let _ = tokio::fs::remove_file(&archive_path).await;
-            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-            return Err(RuntimeError::ChecksumMismatch {
-                expected: artifact.sha256.clone(),
-                actual,
-            });
-        }
-
-        progress.report(RuntimeProgress::Installing);
-        let archive = archive_path.clone();
-        let destination = staging_dir.clone();
-        tokio::task::spawn_blocking(move || -> Result<(), RuntimeError> {
-            let file = std::fs::File::open(archive)?;
-            let decoder = zstd::Decoder::new(file)?;
-            let mut archive = tar::Archive::new(decoder);
-            for entry in archive.entries()? {
-                let mut entry = entry?;
-                if !entry.unpack_in(&destination)? {
-                    return Err(RuntimeError::InvalidArtifactName(
-                        "archive entry escapes the installation directory".to_owned(),
-                    ));
-                }
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|error| RuntimeError::Io(std::io::Error::other(error)))??;
-
-        let executable = staging_dir.join(executable_relative_path);
-        if !tokio::fs::try_exists(&executable).await? {
-            return Err(RuntimeError::InvalidArtifactName(format!(
-                "archive does not contain {}",
-                executable_relative_path.display()
-            )));
-        }
-        set_executable(&executable).await?;
-        if tokio::fs::try_exists(install_dir).await? {
-            tokio::fs::remove_dir_all(install_dir).await?;
-        }
-        tokio::fs::rename(&staging_dir, install_dir).await?;
-        tokio::fs::remove_file(&archive_path).await?;
-        progress.report(RuntimeProgress::Ready);
-        Ok(install_dir.join(executable_relative_path))
-    }
-
-    async fn download_response(
-        client: &Client,
-        artifact: &Artifact,
-    ) -> Result<reqwest::Response, RuntimeError> {
-        let response = client.get(artifact.url.clone()).send().await?;
-        OllamaRuntime::checked(response).await
+        Ok(hex::encode(hasher.finalize()))
     }
 }
 
@@ -624,14 +1155,198 @@ mod tests {
             }
         };
         let result = report_pull_line(
-            br#"{"status":"pulling","completed":2,"total":4}"#,
+            br#"{"status":"pulling","digest":"sha256:abc","completed":2,"total":4}"#,
             &reporter,
         );
         assert!(result.is_ok());
-        let count = updates
-            .lock()
-            .map(|values| values.len())
-            .unwrap_or_default();
-        assert_eq!(count, 1);
+        let Ok(values) = updates.lock() else {
+            panic!("progress values should remain available");
+        };
+        assert_eq!(
+            values.as_slice(),
+            &[RuntimeProgress::PullingModel {
+                status: "pulling".to_owned(),
+                digest: Some("sha256:abc".to_owned()),
+                completed: Some(2),
+                total: Some(4),
+            }]
+        );
+    }
+
+    #[test]
+    fn chat_progress_parses_content_and_completion_lines() {
+        let updates = std::sync::Mutex::new(Vec::new());
+        let reporter = |progress| {
+            if let Ok(mut values) = updates.lock() {
+                values.push(progress);
+            }
+        };
+
+        let content = report_chat_line(
+            br#"{"message":{"role":"assistant","content":"Hello"},"done":false}"#,
+            &reporter,
+        );
+        let done = report_chat_line(
+            br#"{"message":{"role":"assistant","content":""},"done":true}"#,
+            &reporter,
+        );
+
+        assert!(matches!(content, Ok(false)));
+        assert!(matches!(done, Ok(true)));
+        let Ok(values) = updates.lock() else {
+            panic!("chat progress values should remain available");
+        };
+        assert_eq!(
+            values.as_slice(),
+            &[
+                ChatProgress::Content("Hello".to_owned()),
+                ChatProgress::Done
+            ]
+        );
+    }
+
+    #[test]
+    fn ollama_delete_request_uses_the_runtime_model_identifier() {
+        let Ok(serialized) = serde_json::to_value(DeleteRequest {
+            model: "qwen2.5:latest",
+        }) else {
+            panic!("delete request should serialize");
+        };
+
+        assert_eq!(serialized, serde_json::json!({ "model": "qwen2.5:latest" }));
+    }
+
+    #[test]
+    fn ollama_embedding_lifecycle_request_uses_embed_fields() {
+        let Ok(serialized) = serde_json::to_value(EmbedRequest {
+            model: "bge-m3:567m",
+            input: "LumenSource runtime check",
+            keep_alive: -1,
+        }) else {
+            panic!("embedding lifecycle request should serialize");
+        };
+
+        assert_eq!(
+            serialized,
+            serde_json::json!({
+                "model": "bge-m3:567m",
+                "input": "LumenSource runtime check",
+                "keep_alive": -1
+            })
+        );
+    }
+
+    #[test]
+    fn parses_installed_models_from_ollama_tags_shape() {
+        let parsed = serde_json::from_slice::<InstalledModelList>(
+            br#"{
+            "models": [
+                {
+                    "name": "qwen2.5-coder:14b",
+                    "model": "qwen2.5-coder:14b",
+                    "modified_at": "2026-07-21T10:00:00Z",
+                    "size": 9876543210,
+                    "digest": "sha256:abc"
+                },
+                { "name": "small:latest" }
+            ]
+        }"#,
+        );
+        let Ok(list) = parsed else {
+            panic!("valid Ollama tags response should parse");
+        };
+
+        assert_eq!(list.models.len(), 2);
+        assert_eq!(list.models[0].name, "qwen2.5-coder:14b");
+        assert_eq!(list.models[0].size_bytes, Some(9_876_543_210));
+        assert_eq!(list.models[0].digest.as_deref(), Some("sha256:abc"));
+        assert_eq!(list.models[1].size_bytes, None);
+    }
+
+    #[test]
+    fn parses_per_model_memory_from_ollama_process_shape() {
+        let parsed = serde_json::from_slice::<ProcessList>(
+            br#"{
+                "models": [{
+                    "name": "qwen2.5-coder:14b",
+                    "size": 10000,
+                    "size_vram": 7500,
+                    "context_length": 32768
+                }]
+            }"#,
+        );
+        let Ok(list) = parsed else {
+            panic!("valid Ollama process response should parse");
+        };
+
+        assert_eq!(list.models.len(), 1);
+        assert_eq!(list.models[0].total_memory_bytes, Some(10_000));
+        assert_eq!(list.models[0].vram_memory_bytes, Some(7_500));
+        assert_eq!(list.models[0].context_length, Some(32_768));
+        assert!(same_model_reference(
+            "qwen2.5-coder",
+            "qwen2.5-coder:latest"
+        ));
+    }
+
+    #[tokio::test]
+    async fn dummy_runtime_has_a_complete_in_memory_lifecycle() {
+        let Ok(runtime) = DummyRuntime::new("http://127.0.0.1:9999") else {
+            panic!("fixed dummy URL should be valid");
+        };
+        let events = std::sync::Mutex::new(Vec::new());
+        let reporter = |event| {
+            if let Ok(mut events) = events.lock() {
+                events.push(event);
+            }
+        };
+
+        assert!(runtime.pull_model("dummy:latest", &reporter).await.is_ok());
+        assert!(runtime.start("dummy:latest").await.is_ok());
+        assert!(matches!(
+            runtime.status().await,
+            Ok(RuntimeStatus::Running { models }) if models == ["dummy:latest"]
+        ));
+        assert!(runtime.stop("dummy:latest").await.is_ok());
+        assert!(matches!(runtime.status().await, Ok(RuntimeStatus::Idle)));
+        assert!(matches!(
+            runtime.installed_models().await,
+            Ok(models) if models.len() == 1 && models[0].name == "dummy:latest"
+        ));
+        assert!(runtime.delete_model("dummy:latest").await.is_ok());
+        assert!(matches!(
+            runtime.installed_models().await,
+            Ok(models) if models.is_empty()
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancellation_wakes_waiters_and_prevents_dummy_installation() {
+        let cancellation = CancellationToken::new();
+        let waiter = cancellation.clone();
+        let waiting = tokio::spawn(async move {
+            waiter.cancelled().await;
+        });
+        cancellation.cancel();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+                .await
+                .is_ok()
+        );
+
+        let Ok(runtime) = DummyRuntime::new("http://127.0.0.1:9999") else {
+            panic!("fixed dummy URL should be valid");
+        };
+        let reporter = |_: RuntimeProgress| {};
+        assert!(matches!(
+            runtime
+                .pull_model_cancellable("cancelled:latest", &reporter, &cancellation)
+                .await,
+            Err(RuntimeError::Cancelled)
+        ));
+        assert!(matches!(
+            runtime.installed_models().await,
+            Ok(models) if models.is_empty()
+        ));
     }
 }

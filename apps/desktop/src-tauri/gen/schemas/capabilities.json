@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Capabilities required by the Lumen Source main window.","local":true,"windows":["main"],"permissions":["core:default"]}}
+{"default":{"identifier":"default","description":"Capabilities required by the Lumen Source main window.","local":true,"windows":["main"],"permissions":["core:default","opener:default"]}}

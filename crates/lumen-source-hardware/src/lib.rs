@@ -16,6 +16,7 @@ const KIB: u64 = 1024;
 pub struct HardwareFacts {
     pub os: OsFacts,
     pub cpu: CpuFacts,
+    pub memory: MemoryFacts,
     pub total_ram_bytes: u64,
     pub available_ram_bytes: u64,
     pub storage: StorageFacts,
@@ -36,6 +37,18 @@ pub struct CpuFacts {
     pub architecture: String,
     pub logical_cores: usize,
     pub physical_cores: Option<usize>,
+    /// Best available reported CPU frequency. On Linux this prefers the
+    /// firmware/kernel maximum and falls back to `/proc/cpuinfo`.
+    pub frequency_mhz: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryFacts {
+    /// Normalized memory generation, for example `DDR4` or `LPDDR5`.
+    pub kind: Option<String>,
+    /// Effective transfer rate. DDR memory vendors commonly label this as
+    /// MHz, but MT/s is the technically accurate unit.
+    pub speed_mts: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,18 +173,25 @@ impl LinuxHardwareProbe {
 #[async_trait]
 impl HardwareProbe for LinuxHardwareProbe {
     async fn hardware_facts(&self) -> Result<HardwareFacts, ProbeError> {
-        let (cpuinfo, meminfo, os_release, storage, accelerators) = tokio::join!(
+        let (cpuinfo, cpu_frequency, meminfo, memory_hardware, os_release, storage, accelerators) = tokio::join!(
             read_interface("/proc/cpuinfo", "/proc/cpuinfo"),
+            read_optional("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq"),
             read_interface("/proc/meminfo", "/proc/meminfo"),
+            detect_memory_hardware(),
             read_optional("/etc/os-release"),
             storage_facts(&self.storage_path),
             detect_accelerators(),
         );
         let memory = parse_meminfo(&meminfo?)?;
+        let mut cpu = parse_cpuinfo(&cpuinfo?);
+        if let Some(frequency) = cpu_frequency.as_deref().and_then(parse_frequency_khz) {
+            cpu.frequency_mhz = Some(frequency);
+        }
 
         Ok(HardwareFacts {
             os: parse_os_release(os_release.as_deref()),
-            cpu: parse_cpuinfo(&cpuinfo?),
+            cpu,
+            memory: memory_hardware,
             total_ram_bytes: memory.total,
             available_ram_bytes: memory.available,
             storage: storage?,
@@ -259,6 +279,10 @@ fn parse_cpuinfo(input: &str) -> CpuFacts {
         })
     };
     let physical_cores = field("cpu cores").and_then(|value| value.parse().ok());
+    let frequency_mhz = field("cpu MHz")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(|value| value.round() as u64);
 
     CpuFacts {
         model: field("model name")
@@ -267,7 +291,125 @@ fn parse_cpuinfo(input: &str) -> CpuFacts {
         architecture: std::env::consts::ARCH.to_owned(),
         logical_cores,
         physical_cores,
+        frequency_mhz,
     }
+}
+
+fn parse_frequency_khz(input: &str) -> Option<u64> {
+    input
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .map(|value| value / 1_000)
+        .filter(|value| *value > 0)
+}
+
+async fn detect_memory_hardware() -> MemoryFacts {
+    let (sysfs, dmidecode) = tokio::join!(read_edac_memory(), read_dmidecode_memory());
+    MemoryFacts {
+        kind: sysfs.kind.or(dmidecode.kind),
+        speed_mts: sysfs.speed_mts.or(dmidecode.speed_mts),
+    }
+}
+
+async fn read_edac_memory() -> MemoryFacts {
+    let mut result = MemoryFacts::default();
+    let mut controllers = match fs::read_dir("/sys/devices/system/edac/mc").await {
+        Ok(entries) => entries,
+        Err(_) => return result,
+    };
+
+    while let Ok(Some(controller)) = controllers.next_entry().await {
+        let mut dimms = match fs::read_dir(controller.path()).await {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        while let Ok(Some(dimm)) = dimms.next_entry().await {
+            if !dimm.file_name().to_string_lossy().starts_with("dimm") {
+                continue;
+            }
+            if result.kind.is_none() {
+                result.kind = read_optional(dimm.path().join("dimm_mem_type"))
+                    .await
+                    .as_deref()
+                    .and_then(normalize_memory_kind);
+            }
+            if result.speed_mts.is_none() {
+                result.speed_mts = read_optional(dimm.path().join("dimm_speed"))
+                    .await
+                    .as_deref()
+                    .and_then(parse_memory_speed);
+            }
+            if result.kind.is_some() && result.speed_mts.is_some() {
+                return result;
+            }
+        }
+    }
+    result
+}
+
+async fn read_dmidecode_memory() -> MemoryFacts {
+    let output = match Command::new("dmidecode")
+        .args(["--type", "17"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return MemoryFacts::default(),
+    };
+    parse_dmidecode_memory(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_dmidecode_memory(input: &str) -> MemoryFacts {
+    let kind = input.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("Type:")
+            .and_then(normalize_memory_kind)
+    });
+    let configured_speed = input.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("Configured Memory Speed:")
+            .and_then(parse_memory_speed)
+    });
+    let speed = configured_speed.or_else(|| {
+        input.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("Speed:")
+                .and_then(parse_memory_speed)
+        })
+    });
+    MemoryFacts {
+        kind,
+        speed_mts: speed,
+    }
+}
+
+fn normalize_memory_kind(input: &str) -> Option<String> {
+    let normalized = input.trim().to_ascii_uppercase().replace([' ', '_'], "-");
+    if normalized.is_empty() || normalized.contains("UNKNOWN") {
+        return None;
+    }
+    for generation in ["5", "4", "3", "2"] {
+        if normalized.contains(&format!("LPDDR{generation}"))
+            || normalized.contains(&format!("LOW-POWER-DDR{generation}"))
+        {
+            return Some(format!("LPDDR{generation}"));
+        }
+        if normalized.contains(&format!("DDR{generation}")) {
+            return Some(format!("DDR{generation}"));
+        }
+    }
+    None
+}
+
+fn parse_memory_speed(input: &str) -> Option<u64> {
+    input
+        .split_whitespace()
+        .find_map(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
 }
 
 fn parse_os_release(input: Option<&str>) -> OsFacts {
@@ -529,11 +671,25 @@ mod tests {
         ));
 
         let cpu = parse_cpuinfo(
-            "processor : 0\nmodel name : Golden Lake\ncpu cores : 8\nprocessor : 1\n",
+            "processor : 0\nmodel name : Golden Lake\ncpu cores : 8\ncpu MHz : 3199.75\nprocessor : 1\n",
         );
         assert_eq!(cpu.model.as_deref(), Some("Golden Lake"));
         assert_eq!(cpu.logical_cores, 2);
         assert_eq!(cpu.physical_cores, Some(8));
+        assert_eq!(cpu.frequency_mhz, Some(3200));
+    }
+
+    #[test]
+    fn parses_memory_type_and_configured_transfer_rate() {
+        let memory = parse_dmidecode_memory(
+            "Memory Device\n\tType: DDR5\n\tSpeed: 5600 MT/s\n\tConfigured Memory Speed: 5200 MT/s\n",
+        );
+        assert_eq!(memory.kind.as_deref(), Some("DDR5"));
+        assert_eq!(memory.speed_mts, Some(5200));
+        assert_eq!(
+            normalize_memory_kind("Low-Power-DDR3-RAM").as_deref(),
+            Some("LPDDR3")
+        );
     }
 
     #[test]

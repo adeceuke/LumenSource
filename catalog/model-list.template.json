@@ -1,0 +1,123 @@
+{
+  "$schema": "./model-list.schema.json",
+  "schema_version": "2",
+  "catalog_version": "YYYY.MM.DD.N",
+  "generated_at": "2026-01-01T00:00:00Z",
+  "generator": {
+    "name": "replace-with-generator-name",
+    "version": "0.1.0",
+    "homepage_url": "https://example.com/model-list-generator"
+  },
+  "models": [
+    {
+      "id": "provider-example-model",
+      "display_name": "Example Model",
+      "provider": "Example Provider",
+      "family": "Example Family",
+      "description": "Replace this entry with a concise, factual description of the model.",
+      "homepage_url": "https://example.com/models/example-model",
+      "release_date": "2026-01-01",
+      "knowledge_cutoff": null,
+      "license": {
+        "spdx": "Apache-2.0",
+        "profile_id": "apache-2.0",
+        "name": "Apache License 2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0",
+        "classification": "permissive-open-source",
+        "commercial_use": "permitted",
+        "redistribution": "permitted-with-conditions",
+        "derivatives": "permitted-with-conditions",
+        "requires_user_acceptance": false,
+        "attribution": "required",
+        "license_text": "required-on-redistribution",
+        "notice": "if-provided",
+        "ui_notice": "informational",
+        "summary": "Permissive open-source license allowing commercial use, modification, and redistribution subject to license, notice, and attribution conditions.",
+        "obligations": [
+          "Provide a copy of the license when redistributing the model or derivatives.",
+          "Retain applicable copyright and attribution notices."
+        ],
+        "restrictions": [
+          "No trademark rights are granted."
+        ],
+        "geographic_restrictions": [],
+        "usage_policy_url": null,
+        "reviewed_at": "2026-01-01"
+      },
+      "capabilities": ["chat", "code"],
+      "input_modalities": ["text"],
+      "output_modalities": ["text"],
+      "use_cases": [
+        {
+          "id": "programming",
+          "suitability": "excellent",
+          "notes": "Replace with a short explanation supported by a source."
+        },
+        {
+          "id": "general",
+          "suitability": "good",
+          "notes": null
+        }
+      ],
+      "languages": ["en"],
+      "limitations": [
+        "Replace with an important limitation, or use an empty array when none are documented."
+      ],
+      "variants": [
+        {
+          "id": "provider-example-model-8b-q4_k_m",
+          "display_name": "8B Q4_K_M",
+          "runtime": {
+            "engine": "ollama",
+            "model_ref": "example-model:8b-q4_K_M",
+            "digest": null
+          },
+          "parameters_billion": 8.0,
+          "quantization": "Q4_K_M",
+          "context_window_tokens": 32768,
+          "model_size_bytes": 5000000000,
+          "size_is_estimate": true,
+          "requirements": {
+            "minimum_system_ram_bytes": 8589934592,
+            "recommended_system_ram_bytes": 17179869184,
+            "minimum_vram_bytes": null,
+            "recommended_vram_bytes": 8589934592,
+            "minimum_free_storage_bytes": 6442450944,
+            "supported_os": ["linux", "darwin", "windows"],
+            "supported_architectures": ["x86_64", "aarch64"],
+            "accelerators": ["cpu", "cuda", "rocm", "metal"],
+            "notes": "Requirements must describe this exact variant, not the unquantized model family."
+          },
+          "recommended_for": ["programming", "general"],
+          "benchmarks": [
+            {
+              "hardware": "Replace with the complete measured CPU/GPU and memory configuration",
+              "tokens_per_second": 0,
+              "context_tokens": null,
+              "notes": "Remove the benchmarks array when no measured result is available; never invent a value.",
+              "source": {
+                "url": "https://example.com/benchmarks/example-model",
+                "retrieved_at": "2026-01-01T00:00:00Z",
+                "notes": null
+              }
+            }
+          ],
+          "sources": [
+            {
+              "url": "https://example.com/models/example-model/variants/8b-q4_k_m",
+              "retrieved_at": "2026-01-01T00:00:00Z",
+              "notes": "Source for the runtime reference, size, context window, and requirements."
+            }
+          ]
+        }
+      ],
+      "sources": [
+        {
+          "url": "https://example.com/models/example-model",
+          "retrieved_at": "2026-01-01T00:00:00Z",
+          "notes": "Primary source for model-level metadata."
+        }
+      ]
+    }
+  ]
+}

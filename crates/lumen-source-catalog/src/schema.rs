@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::CatalogError;
 
 pub const CURRENT_SCHEMA_VERSION: &str = "1";
+pub const CURRENT_MODEL_LIST_SCHEMA_VERSION: &str = "2";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,7 +19,19 @@ pub struct Catalog {
 
 impl Catalog {
     pub fn from_slice(bytes: &[u8]) -> Result<Self, CatalogError> {
-        let catalog: Self = serde_json::from_slice(bytes)?;
+        let value: serde_json::Value = serde_json::from_slice(bytes)?;
+        let catalog = if value.get("generated_at").is_some() {
+            let model_list: ModelList = serde_json::from_value(value)?;
+            if model_list.schema_version != CURRENT_MODEL_LIST_SCHEMA_VERSION {
+                return Err(CatalogError::UnsupportedSchemaVersion {
+                    expected: CURRENT_MODEL_LIST_SCHEMA_VERSION,
+                    found: model_list.schema_version,
+                });
+            }
+            ModelList::into_catalog(model_list)
+        } else {
+            serde_json::from_value(value)?
+        };
         catalog.validate_schema_version()?;
         Ok(catalog)
     }
@@ -65,6 +78,8 @@ pub struct InstallStrategy(pub String);
 pub struct ModelEntry {
     pub id: String,
     pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub description: String,
     pub capabilities: Vec<String>,
     pub languages: Vec<String>,
@@ -78,9 +93,49 @@ pub struct ModelEntry {
 pub struct License {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spdx: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(default = "unknown_legal_value")]
+    pub classification: String,
+    #[serde(default = "unknown_legal_value")]
+    pub commercial_use: String,
+    #[serde(default = "unknown_legal_value")]
+    pub redistribution: String,
+    #[serde(default = "unknown_legal_value")]
+    pub derivatives: String,
+    #[serde(default)]
+    pub requires_user_acceptance: bool,
+    #[serde(default = "unknown_legal_value")]
+    pub attribution: String,
+    #[serde(default = "unknown_legal_value")]
+    pub license_text: String,
+    #[serde(default = "unknown_legal_value")]
+    pub notice: String,
+    #[serde(default = "informational_ui_notice")]
+    pub ui_notice: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub obligations: Vec<String>,
+    #[serde(default)]
+    pub restrictions: Vec<String>,
+    #[serde(default)]
+    pub geographic_restrictions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_policy_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_at: Option<String>,
+}
+
+fn unknown_legal_value() -> String {
+    "unknown".to_owned()
+}
+
+fn informational_ui_notice() -> String {
+    "informational".to_owned()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,12 +146,265 @@ pub struct ModelVariant {
     pub runtime_ref: String,
     pub parameters_b: f64,
     pub quantization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_item_count: Option<u32>,
     pub requirements: Requirements,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<Artifact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub performance_hint: Option<PerformanceHint>,
     pub recommended_for: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelList {
+    #[serde(rename = "$schema")]
+    schema: Option<String>,
+    schema_version: String,
+    catalog_version: String,
+    generated_at: String,
+    generator: ModelListGenerator,
+    models: Vec<ModelListModel>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListGenerator {
+    name: String,
+    version: String,
+    homepage_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListModel {
+    id: String,
+    display_name: String,
+    provider: String,
+    family: Option<String>,
+    description: String,
+    homepage_url: String,
+    release_date: Option<String>,
+    knowledge_cutoff: Option<String>,
+    license: License,
+    capabilities: Vec<String>,
+    #[serde(default)]
+    input_modalities: Vec<String>,
+    #[serde(default)]
+    output_modalities: Vec<String>,
+    use_cases: Vec<ModelListUseCase>,
+    languages: Vec<String>,
+    #[serde(default)]
+    limitations: Vec<String>,
+    variants: Vec<ModelListVariant>,
+    sources: Vec<ModelListSource>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListUseCase {
+    id: String,
+    suitability: String,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListVariant {
+    id: String,
+    display_name: String,
+    runtime: ModelListRuntime,
+    parameters_billion: f64,
+    quantization: Option<String>,
+    context_window_tokens: u32,
+    model_size_bytes: u64,
+    download_item_count: u32,
+    size_is_estimate: bool,
+    requirements: ModelListRequirements,
+    recommended_for: Vec<String>,
+    #[serde(default)]
+    benchmarks: Vec<ModelListBenchmark>,
+    sources: Vec<ModelListSource>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListRuntime {
+    engine: String,
+    model_ref: String,
+    digest: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListRequirements {
+    minimum_system_ram_bytes: u64,
+    recommended_system_ram_bytes: u64,
+    minimum_vram_bytes: Option<u64>,
+    recommended_vram_bytes: Option<u64>,
+    minimum_free_storage_bytes: u64,
+    supported_os: Vec<OperatingSystem>,
+    supported_architectures: Vec<String>,
+    accelerators: Vec<Accelerator>,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelListBenchmark {
+    tokens_per_second: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelListSource {
+    url: String,
+    retrieved_at: String,
+    notes: Option<String>,
+}
+
+impl ModelList {
+    fn into_catalog(model_list: Self) -> Catalog {
+        let _producer_metadata = (
+            model_list.schema,
+            model_list.generator.name,
+            model_list.generator.version,
+            model_list.generator.homepage_url,
+        );
+        Catalog {
+            schema_version: CURRENT_SCHEMA_VERSION.to_owned(),
+            catalog_version: model_list.catalog_version,
+            published_at: model_list.generated_at,
+            runtimes: vec![ollama_runtime()],
+            models: model_list
+                .models
+                .into_iter()
+                .map(ModelListModel::into_model)
+                .collect(),
+        }
+    }
+}
+
+impl ModelListModel {
+    fn into_model(self) -> ModelEntry {
+        let _model_metadata = (
+            self.family,
+            self.homepage_url,
+            self.release_date,
+            self.knowledge_cutoff,
+            self.input_modalities,
+            self.output_modalities,
+            self.limitations,
+        );
+        let _sources = self
+            .sources
+            .into_iter()
+            .map(|source| (source.url, source.retrieved_at, source.notes))
+            .collect::<Vec<_>>();
+        ModelEntry {
+            id: self.id,
+            display_name: self.display_name,
+            provider: Some(self.provider),
+            description: self.description,
+            capabilities: self.capabilities,
+            languages: self.languages,
+            license: self.license,
+            use_cases: self
+                .use_cases
+                .into_iter()
+                .filter(|use_case| use_case.suitability != "unsuitable")
+                .map(|use_case| {
+                    let _notes = use_case.notes;
+                    use_case.id
+                })
+                .collect(),
+            variants: self
+                .variants
+                .into_iter()
+                .map(ModelListVariant::into_variant)
+                .collect(),
+        }
+    }
+}
+
+impl ModelListVariant {
+    fn into_variant(self) -> ModelVariant {
+        let _variant_metadata = (self.display_name, self.size_is_estimate);
+        let performance_hint = self.benchmarks.first().map(|benchmark| PerformanceHint {
+            tokens_per_sec_estimate: Some(benchmark.tokens_per_second),
+            notes: Some(
+                "Measured benchmark from the model list; see its attributed source.".to_owned(),
+            ),
+        });
+        let _sources = self
+            .sources
+            .into_iter()
+            .map(|source| (source.url, source.retrieved_at, source.notes))
+            .collect::<Vec<_>>();
+        let requirements = self.requirements;
+        let _requirements_metadata = (
+            requirements.recommended_system_ram_bytes,
+            requirements.recommended_vram_bytes,
+            requirements.supported_architectures,
+            requirements.notes,
+        );
+        ModelVariant {
+            id: self.id,
+            runtime: self.runtime.engine,
+            runtime_ref: self.runtime.model_ref,
+            parameters_b: self.parameters_billion,
+            quantization: self.quantization,
+            context_window_tokens: Some(self.context_window_tokens),
+            runtime_digest: self.runtime.digest,
+            download_item_count: Some(self.download_item_count),
+            requirements: Requirements {
+                min_ram_gb: bytes_to_gib(requirements.minimum_system_ram_bytes),
+                min_vram_gb: requirements.minimum_vram_bytes.map(bytes_to_gib),
+                min_storage_gb: bytes_to_gib(requirements.minimum_free_storage_bytes),
+                os: Some(requirements.supported_os),
+                accelerators: requirements.accelerators,
+            },
+            artifact: Some(Artifact {
+                url: None,
+                sha256: None,
+                size_bytes: Some(self.model_size_bytes),
+            }),
+            performance_hint,
+            recommended_for: self.recommended_for,
+        }
+    }
+}
+
+fn bytes_to_gib(bytes: u64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+}
+
+fn ollama_runtime() -> RuntimeEntry {
+    RuntimeEntry {
+        id: "ollama".to_owned(),
+        display_name: "Ollama".to_owned(),
+        platforms: vec![
+            Platform::LinuxX86_64,
+            Platform::LinuxAarch64,
+            Platform::DarwinArm64,
+            Platform::WindowsX86_64,
+        ],
+        install: Install {
+            strategy: InstallStrategy("external".to_owned()),
+            urls_by_platform: BTreeMap::new(),
+            sha256_by_platform: BTreeMap::new(),
+            version: "Ollama".to_owned(),
+        },
+        default_endpoint: "http://127.0.0.1:11434".to_owned(),
+        notes: Some(
+            "Model-list entries are installed through a locally available Ollama runtime."
+                .to_owned(),
+        ),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -165,6 +473,7 @@ mod tests {
     use super::*;
 
     const VALID: &[u8] = include_bytes!("../../../catalog/fixtures/catalog.v1.valid.json");
+    const MODEL_LIST: &[u8] = include_bytes!("../../../catalog/model-list.json");
     const INVALID_SCHEMA: &[u8] =
         include_bytes!("../../../catalog/fixtures/catalog.invalid-schema.json");
     const INVALID_SHAPE: &[u8] =
@@ -183,19 +492,55 @@ mod tests {
     }
 
     #[test]
+    fn parses_generated_model_list_as_a_catalog() {
+        let catalog = Catalog::from_slice(MODEL_LIST).unwrap();
+
+        assert_eq!(catalog.catalog_version, "2026.07.22.6");
+        assert_eq!(catalog.models.len(), 36);
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .map(|model| model.variants.len())
+                .sum::<usize>(),
+            90
+        );
+        assert_eq!(catalog.models[0].variants[0].runtime_ref, "bge-m3:567m");
+        assert_eq!(catalog.models[0].provider.as_deref(), Some("BAAI"));
+        assert_eq!(catalog.models[0].variants[0].download_item_count, Some(3));
+        assert_eq!(
+            catalog.models[0].variants[0].context_window_tokens,
+            Some(8_192)
+        );
+        assert_eq!(
+            catalog.models[0].variants[0]
+                .artifact
+                .as_ref()
+                .and_then(|artifact| artifact.size_bytes),
+            Some(1_157_672_605)
+        );
+        assert_eq!(catalog.models[0].license.profile_id.as_deref(), Some("mit"));
+        assert_eq!(catalog.models[0].license.commercial_use, "permitted");
+    }
+
+    #[test]
     fn includes_a_dummy_catalog_model_for_ui_testing() {
         let catalog = Catalog::from_slice(VALID).unwrap();
 
-        let dummy_model = catalog
+        let Some(dummy_model) = catalog
             .models
             .iter()
             .find(|model| model.id == "dummy-test-model")
-            .expect("dummy model should be present in the catalog fixture");
-        let runtime = catalog
+        else {
+            panic!("dummy model should be present in the catalog fixture");
+        };
+        let Some(runtime) = catalog
             .runtimes
             .iter()
             .find(|runtime| runtime.id == dummy_model.variants[0].runtime)
-            .expect("dummy model runtime should be present in the catalog fixture");
+        else {
+            panic!("dummy model runtime should be present in the catalog fixture");
+        };
 
         assert_eq!(dummy_model.display_name, "Dummy Test Model");
         assert_eq!(runtime.install.version, "0.0.0-dummy");

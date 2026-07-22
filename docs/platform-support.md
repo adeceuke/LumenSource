@@ -9,11 +9,17 @@ be advertised until it has its own clean-machine acceptance run.
 The release gate is:
 
 1. Install Lumen Source on a clean Ubuntu 24.04 machine.
-2. Detect CPU, RAM, storage, and available GPU acceleration.
+2. Detect CPU details (including frequency), RAM capacity and best-effort
+   generation/speed, storage, and available GPU acceleration.
 3. Fetch and authenticate the catalog.
-4. Recommend and install a compatible Ollama model.
-5. Start the runtime and expose working endpoint details.
+4. Recommend and install a compatible Ollama model, with automatic start
+   controlled by the installation checkbox.
+5. Start and stop the selected model and expose working endpoint details.
 6. Obtain a response from that endpoint using an external client.
+
+Development builds add the test-fixture dummy runtime for repeatable wizard and
+models-page testing, but it is excluded from release builds and does not satisfy
+the external inference acceptance step.
 
 ## Cross-platform architecture constraints
 
@@ -41,10 +47,15 @@ targets. Code added for Ubuntu must preserve these boundaries:
 | Capability | Ubuntu 24.04 v0.1 | macOS future | Windows future |
 | --- | --- | --- | --- |
 | Desktop shell | Tauri/WebKitGTK | Tauri/WKWebView | Tauri/WebView2 |
-| Hardware facts | `/proc`, system APIs, fixed vendor tools | system APIs, `system_profiler`/Metal | Windows APIs, WMI/DXGI |
+| Hardware facts | `/proc`, CPU/EDAC sysfs, DMI, fixed vendor tools | system APIs, `system_profiler`/Metal | Windows APIs, WMI/DXGI |
 | Initial runtime | Ollama | Ollama, later MLX | Ollama |
 | Packaging | deb/AppImage | app bundle/dmg, notarized | MSI/NSIS, code-signed |
 | Service/agent | deferred | launchd | Windows Service |
+
+The current desktop exposes only local deployment. The remote host/agent choice
+is visible in the wizard but remains disabled. macOS and Windows catalog
+metadata exists to preserve schema portability; it does not imply that their
+hardware probes, runtime installers, or packages are release-ready.
 
 Platform-specific implementations should be added as sibling modules, not as
 conditionals spread through recommendation or orchestration code.

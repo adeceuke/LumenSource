@@ -3,13 +3,17 @@ export type WizardStep =
   | "hardware"
   | "intent"
   | "suggestion"
-  | "requirements"
-  | "download";
+  | "license"
+  | "download"
+  | "ready";
 
 export interface HardwareProfile {
   cpu: string;
   cpuCores: number;
+  cpuFrequencyMhz?: number;
   memoryBytes: number;
+  memoryKind?: string;
+  memorySpeedMts?: number;
   gpu?: {
     name: string;
     memoryBytes?: number;
@@ -38,16 +42,44 @@ export interface CatalogSummary {
   models: CatalogModelSummary[];
 }
 
-export type UseIntent = "chat" | "code" | "creative";
+export type UseIntent = "chat" | "code" | "creative" | "research";
 
 export interface Recommendation {
   modelId: string;
+  runtimeId: string;
   name: string;
+  provider: string;
   description: string;
+  version: string;
   sizeBytes: number;
   contextWindow: number;
-  fit: "ideal" | "good" | "limited";
+  runtimeDigest?: string;
+  fit: "ideal" | "good" | "limited" | "incompatible";
   reasons: string[];
+  recommended: boolean;
+  compatible: boolean;
+  license: ModelLicense;
+}
+
+export interface ModelLicense {
+  profileId?: string;
+  name: string;
+  url?: string;
+  classification: string;
+  commercialUse: "permitted" | "permitted-with-conditions" | "not-permitted" | "unknown";
+  redistribution: "permitted" | "permitted-with-conditions" | "not-permitted" | "unknown";
+  derivatives: "permitted" | "permitted-with-conditions" | "not-permitted" | "unknown";
+  requiresUserAcceptance: boolean;
+  attribution: "required" | "not-required" | "unknown";
+  licenseText: string;
+  notice: string;
+  uiNotice: "informational" | "acknowledgement-required";
+  summary: string;
+  obligations: string[];
+  restrictions: string[];
+  geographicRestrictions: string[];
+  usagePolicyUrl?: string;
+  reviewedAt?: string;
 }
 
 export interface PreflightCheck {
@@ -66,13 +98,18 @@ export interface PreflightReport {
 
 export interface InstallRequest {
   modelId: string;
+  licenseBasis: "catalog" | "separate";
+  licenseReference?: string;
+  licenseAcknowledged: boolean;
 }
 
 export interface InstallProgress {
   modelId: string;
-  phase: "preparing" | "downloading" | "verifying" | "installing" | "complete";
+  phase: "preparing" | "downloading" | "verifying" | "installing" | "complete" | "cancelled";
   completedBytes: number;
   totalBytes: number;
+  currentItem?: number;
+  totalItems?: number;
   message: string;
 }
 
@@ -82,20 +119,56 @@ export interface RuntimeStatus {
   message?: string;
 }
 
+export interface PerformanceSnapshot {
+  modelId: string;
+  state: "running" | "stopped" | "unavailable";
+  sampledAtUnixMs: number;
+  allocatedMemoryBytes: number;
+  allocatedVramBytes: number;
+  allocatedSystemMemoryBytes: number;
+  contextLength?: number;
+}
+
 export interface EndpointDetails {
   baseUrl: string;
   chatCompletionsUrl: string;
+  completionsUrl: string;
+  embeddingsUrl: string;
   model: string;
   apiKeyRequired: boolean;
+  apiAvailable: boolean;
+  chatAvailable: boolean;
+  embeddingsAvailable: boolean;
 }
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export type ChatEvent =
+  | { event: "delta"; content: string }
+  | { event: "done" };
 
 export interface RunningModelEntry {
   id: string;
   name: string;
   modelId: string;
   modelName: string;
+  runtimeModelId?: string;
   version: string;
   location: "local" | "remote";
   running: boolean;
+  managed?: boolean;
+  digest?: string;
+  sizeBytes?: number;
+  licenseBasis?: "catalog" | "separate";
+  licenseReference?: string;
+  licenseAcknowledgedAt?: string;
+  licenseProfileId?: string;
+  licenseName?: string;
+  licenseUrl?: string;
+  licenseReviewedAt?: string;
+  licenseCatalogVersion?: string;
   logs: string[];
 }

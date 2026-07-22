@@ -7,8 +7,8 @@ use async_trait::async_trait;
 pub use lumen_source_hardware::{HardwareFacts, UsageSnapshot};
 use lumen_source_hardware::{HardwareProbe, ProbeError};
 use lumen_source_runtime::{
-    Artifact, ArtifactInstaller, ProgressReporter, Runtime, RuntimeEndpoint, RuntimeError,
-    RuntimeStatus,
+    Artifact, ArtifactInstaller, InstalledModel, ProgressReporter, Runtime, RuntimeEndpoint,
+    RuntimeError, RuntimeStatus,
 };
 use thiserror::Error;
 
@@ -47,6 +47,7 @@ pub trait Host: Send + Sync {
         model: &str,
         progress: &dyn ProgressReporter,
     ) -> Result<(), HostError>;
+    async fn installed_models(&self) -> Result<Vec<InstalledModel>, HostError>;
     async fn start(&self, model: &str) -> Result<RuntimeEndpoint, HostError>;
     async fn stop(&self, model: &str) -> Result<(), HostError>;
     async fn status(&self) -> Result<HostStatus, HostError>;
@@ -114,6 +115,10 @@ where
         Ok(self.runtime.pull_model(model, progress).await?)
     }
 
+    async fn installed_models(&self) -> Result<Vec<InstalledModel>, HostError> {
+        Ok(self.runtime.installed_models().await?)
+    }
+
     async fn start(&self, model: &str) -> Result<RuntimeEndpoint, HostError> {
         self.runtime.start(model).await?;
         Ok(self.runtime.endpoint())
@@ -134,7 +139,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lumen_source_hardware::{CpuFacts, OsFacts, StorageFacts};
+    use lumen_source_hardware::{CpuFacts, MemoryFacts, OsFacts, StorageFacts};
     use lumen_source_runtime::{RuntimeProgress, Url};
     use std::sync::Mutex;
 
@@ -155,6 +160,11 @@ mod tests {
                     architecture: "x86_64".to_owned(),
                     logical_cores: 8,
                     physical_cores: Some(4),
+                    frequency_mhz: Some(3_600),
+                },
+                memory: MemoryFacts {
+                    kind: Some("DDR4".to_owned()),
+                    speed_mts: Some(3_200),
                 },
                 total_ram_bytes: 16,
                 available_ram_bytes: 12,
@@ -206,6 +216,14 @@ mod tests {
             Ok(())
         }
 
+        async fn installed_models(&self) -> Result<Vec<InstalledModel>, RuntimeError> {
+            Ok(vec![InstalledModel {
+                name: "model:latest".to_owned(),
+                digest: Some("sha256:test".to_owned()),
+                size_bytes: Some(42),
+            }])
+        }
+
         async fn pull_model(
             &self,
             model: &str,
@@ -213,6 +231,11 @@ mod tests {
         ) -> Result<(), RuntimeError> {
             self.record(&format!("pull:{model}"));
             progress.report(RuntimeProgress::Ready);
+            Ok(())
+        }
+
+        async fn delete_model(&self, model: &str) -> Result<(), RuntimeError> {
+            self.record(&format!("delete:{model}"));
             Ok(())
         }
 
@@ -240,11 +263,14 @@ mod tests {
         let runtime = Arc::new(FakeRuntime::create()?);
         let host = LocalHost::new(Arc::new(FakeProbe), Arc::clone(&runtime));
         let facts = host.hardware_facts().await?;
+        let installed = host.installed_models().await?;
         let endpoint = host.start("model").await?;
+        host.stop("model").await?;
         assert_eq!(facts.cpu.logical_cores, 8);
+        assert_eq!(installed[0].name, "model:latest");
         assert_eq!(endpoint, runtime.endpoint);
         let calls = runtime.calls.lock().map_err(|error| error.to_string())?;
-        assert_eq!(calls.as_slice(), ["start:model"]);
+        assert_eq!(calls.as_slice(), ["start:model", "stop:model"]);
         Ok(())
     }
 }

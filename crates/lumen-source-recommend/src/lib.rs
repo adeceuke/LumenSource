@@ -174,10 +174,6 @@ fn score_variant(
         if contains_tag(&model.use_cases, use_case) {
             score += 35.0;
             explanations.push(format!("model is designed for the {use_case} use case"));
-        } else {
-            explanations.push(format!(
-                "model is compatible, but does not explicitly list {use_case}"
-            ));
         }
         if contains_tag(&variant.recommended_for, use_case) {
             score += 15.0;
@@ -322,11 +318,35 @@ fn round_score(score: f64) -> f64 {
 mod tests {
     use super::*;
     use lumen_source_catalog::{License, ModelVariant};
-    use lumen_source_hardware::{AcceleratorFacts, CpuFacts, OsFacts, StorageFacts};
+    use lumen_source_hardware::{AcceleratorFacts, CpuFacts, MemoryFacts, OsFacts, StorageFacts};
     use std::path::PathBuf;
 
     fn gib(value: u64) -> u64 {
         value * 1024 * 1024 * 1024
+    }
+
+    fn license(name: &str, spdx: Option<&str>) -> License {
+        License {
+            spdx: spdx.map(str::to_owned),
+            profile_id: None,
+            name: name.to_owned(),
+            url: None,
+            classification: "unknown".to_owned(),
+            commercial_use: "unknown".to_owned(),
+            redistribution: "unknown".to_owned(),
+            derivatives: "unknown".to_owned(),
+            requires_user_acceptance: false,
+            attribution: "unknown".to_owned(),
+            license_text: "unknown".to_owned(),
+            notice: "unknown".to_owned(),
+            ui_notice: "informational".to_owned(),
+            summary: String::new(),
+            obligations: Vec::new(),
+            restrictions: Vec::new(),
+            geographic_restrictions: Vec::new(),
+            usage_policy_url: None,
+            reviewed_at: None,
+        }
     }
 
     fn golden_hardware() -> HardwareFacts {
@@ -342,6 +362,11 @@ mod tests {
                 architecture: "x86_64".to_owned(),
                 logical_cores: 16,
                 physical_cores: Some(8),
+                frequency_mhz: Some(4_200),
+            },
+            memory: MemoryFacts {
+                kind: Some("DDR5".to_owned()),
+                speed_mts: Some(5_600),
             },
             total_ram_bytes: gib(32),
             available_ram_bytes: gib(24),
@@ -373,6 +398,9 @@ mod tests {
             runtime_ref: format!("golden:{id}"),
             parameters_b: 7.0,
             quantization: Some("q4".to_owned()),
+            context_window_tokens: None,
+            runtime_digest: None,
+            download_item_count: None,
             requirements: Requirements {
                 min_ram_gb,
                 min_vram_gb,
@@ -399,14 +427,11 @@ mod tests {
                 ModelEntry {
                     id: "coder".to_owned(),
                     display_name: "Golden Coder".to_owned(),
+                    provider: Some("Test Publisher".to_owned()),
                     description: "Coding model".to_owned(),
                     capabilities: vec!["text".to_owned()],
                     languages: vec!["en".to_owned()],
-                    license: License {
-                        spdx: Some("Apache-2.0".to_owned()),
-                        name: "Apache 2.0".to_owned(),
-                        url: None,
-                    },
+                    license: license("Apache 2.0", Some("Apache-2.0")),
                     use_cases: vec!["coding".to_owned()],
                     variants: vec![
                         variant(
@@ -430,14 +455,11 @@ mod tests {
                 ModelEntry {
                     id: "generic".to_owned(),
                     display_name: "Generic".to_owned(),
+                    provider: Some("Test Publisher".to_owned()),
                     description: "General model".to_owned(),
                     capabilities: vec!["text".to_owned()],
                     languages: vec!["en".to_owned()],
-                    license: License {
-                        spdx: None,
-                        name: "Test".to_owned(),
-                        url: None,
-                    },
+                    license: license("Test", None),
                     use_cases: vec!["chat".to_owned()],
                     variants: vec![variant(
                         "cpu",

@@ -1,7 +1,7 @@
 {
   "name": "@lumen-source/desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "2",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "react": "latest",
     "react-dom": "latest"
   },

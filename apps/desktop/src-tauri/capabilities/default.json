@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Capabilities required by the Lumen Source main window.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "opener:default"]
 }

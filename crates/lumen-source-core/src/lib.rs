@@ -304,9 +304,9 @@ where
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use lumen_source_hardware::{CpuFacts, OsFacts, ProbeError, StorageFacts};
+    use lumen_source_hardware::{CpuFacts, MemoryFacts, OsFacts, ProbeError, StorageFacts};
     use lumen_source_host::HostStatus;
-    use lumen_source_runtime::{ProgressReporter, RuntimeStatus, Url};
+    use lumen_source_runtime::{InstalledModel, ProgressReporter, RuntimeStatus, Url};
     use std::sync::Mutex as StdMutex;
 
     struct FakeHost {
@@ -328,6 +328,11 @@ mod tests {
                     architecture: "x86_64".to_owned(),
                     logical_cores: 4,
                     physical_cores: Some(2),
+                    frequency_mhz: Some(3_200),
+                },
+                memory: MemoryFacts {
+                    kind: Some("DDR4".to_owned()),
+                    speed_mts: Some(3_200),
                 },
                 total_ram_bytes: 8,
                 available_ram_bytes: 6,
@@ -365,6 +370,10 @@ mod tests {
         ) -> Result<(), HostError> {
             progress.report(RuntimeProgress::Ready);
             Ok(())
+        }
+
+        async fn installed_models(&self) -> Result<Vec<InstalledModel>, HostError> {
+            Ok(Vec::new())
         }
 
         async fn start(&self, _model: &str) -> Result<RuntimeEndpoint, HostError> {
