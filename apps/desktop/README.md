@@ -38,9 +38,27 @@ The wizard identifies each model publisher using its plain-text name from the
 catalog. It does not display or download company logos, imitate company brand
 styles, or imply endorsement by model publishers.
 
-The bundled catalog is `catalog/model-list.json`. Development builds overlay a
-dummy model and its dedicated in-memory runtime from the legacy test fixture for
-install and lifecycle coverage without downloads. Release builds exclude it.
+The desktop fetches and signature-verifies the production catalog at startup.
+A successful response becomes the last-known-good cached catalog. If the
+network or verification fails, the desktop uses that verified cache; if no
+verified cache exists, it falls back to the bundled `catalog/model-list.json`.
+Development builds overlay a dummy model and its dedicated in-memory runtime
+from the legacy test fixture for install and lifecycle coverage without
+downloads. Release builds exclude it.
+
+The footer identifies the active source as **Latest catalog**, **Cached
+catalog**, or **Bundled catalog**, together with the revision and model count.
+Green means the catalog was fetched and verified at startup, amber identifies a
+last-known-good cached copy, and the neutral bundled state means no verified
+network or cached catalog was available. Hovering the status shows the full
+fallback explanation.
+
+The footer also exposes the usage-statistics privacy choice. Telemetry is
+disabled until the user explicitly chooses to share weekly aggregate model,
+reliability, and coarse hardware statistics. Upload failure is non-fatal and
+silent; queued reports are retried at the next startup or recorded occurrence.
+See [usage telemetry](../../docs/telemetry.md) for the payload and ingestion
+contract.
 
 ## Command surface
 
@@ -113,9 +131,16 @@ chat-completions URL, exact runtime model identifier, authentication requirement
 loaded state, and a copyable cURL example. The endpoint is runtime-wide and the
 model identifier selects the model for each request. Dummy endpoint values are
 clearly marked as non-functional placeholders.
-Current UI boundaries:
-remote deployment is disabled; Remove stops the selected model when necessary,
-deletes it from Ollama's local model store, and clears its Lumen Source entries. See
+Current UI boundaries: the remote preview supports Linux-to-Linux SSH targets
+with an existing Ollama installation. It starts `ollama serve` as the SSH user
+when needed and detects the target's CPU, RAM, storage, and supported GPUs for
+recommendation and preflight, but does not install remote services.
+The wizard selects from saved non-secret target
+profiles; **Add target machine** opens the connection-settings dialog and
+selects the new target after saving. SSH keys and agents are preferred; a
+password can be supplied for one connection but is never saved, so reconnecting
+requires it again. Remove stops the selected model when necessary,
+deletes it from the selected Ollama model store, and clears its Lumen Source entries. See
 [current implementation](../../docs/current-implementation.md) for the complete
 behavior and limitations.
 

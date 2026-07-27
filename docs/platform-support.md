@@ -52,10 +52,29 @@ targets. Code added for Ubuntu must preserve these boundaries:
 | Packaging | deb/AppImage | app bundle/dmg, notarized | MSI/NSIS, code-signed |
 | Service/agent | deferred | launchd | Windows Service |
 
-The current desktop exposes only local deployment. The remote host/agent choice
-is visible in the wizard but remains disabled. macOS and Windows catalog
+The current desktop exposes local deployment plus a Linux-to-Linux remote
+preview backed by the controller's OpenSSH client. macOS and Windows catalog
 metadata exists to preserve schema portability; it does not imply that their
-hardware probes, runtime installers, or packages are release-ready.
+remote targets, hardware probes, runtime installers, or packages are
+release-ready.
 
 Platform-specific implementations should be added as sibling modules, not as
 conditionals spread through recommendation or orchestration code.
+
+## Planned remote platform support
+
+Remote deployment must support Linux, macOS, and Windows as both controller and
+target operating systems. The preferred agentless design tunnels to an existing
+loopback-only Ollama service, and SSH can provide that transport on all three.
+macOS exposes SSH through Remote Login; Windows provides OpenSSH Server, although
+it is optional or disabled on many installations.
+
+The common transport and Ollama API do not remove the need for platform
+adapters. Linux remote hardware collection is implemented; storage paths,
+runtime packages, GPU discovery, permissions, and durable lifecycle management
+still differ across operating systems. A Windows target without OpenSSH may
+require the user to enable it or, in a later adapter, use WinRM/PowerShell
+Remoting.
+
+See [`remote-hosts.md`](remote-hosts.md) for the no-agent boundary, platform
+matrix, architecture, security requirements, phases, and acceptance gates.

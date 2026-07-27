@@ -20,8 +20,18 @@ use lumen_source_runtime::{
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock};
+use zeroize::Zeroizing;
+
+use crate::remote::{
+    connect as connect_remote, RemoteAuthentication, RemoteConnectionReport, RemoteSession,
+    RemoteTargetConfig, RemoteTargetProfile,
+};
+use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
 
 const BUNDLED_CATALOG: &[u8] = include_bytes!("../../../../catalog/model-list.json");
+const PRODUCTION_CATALOG_URL: &str = "https://lumensource.dev/v2/model-list.json";
+const PRODUCTION_CATALOG_SIGNATURE_URL: &str = "https://lumensource.dev/v2/model-list.json.sig";
+const PRODUCTION_CATALOG_PUBLIC_KEY: &str = "r3ICuFyaSuGGQwO/xKO6sxjEiJJHAqjO+FSknV583q0=";
 #[cfg(test)]
 const TEST_CATALOG: &[u8] = include_bytes!("../../../../catalog/fixtures/catalog.v1.valid.json");
 #[cfg(debug_assertions)]
@@ -42,6 +52,8 @@ struct PersistedState {
     #[serde(default)]
     selected_runtime: Option<String>,
     runtime_executable: Option<PathBuf>,
+    #[serde(default)]
+    remote_targets: Vec<RemoteTargetConfig>,
     models: Vec<PersistedModelEntry>,
 }
 
@@ -81,6 +93,10 @@ pub struct PersistedModelEntry {
     pub runtime_model_id: Option<String>,
     pub version: String,
     pub location: String,
+    #[serde(default = "local_target_id")]
+    pub target_id: String,
+    #[serde(default)]
+    pub target_name: Option<String>,
     pub running: bool,
     #[serde(default = "default_managed")]
     pub managed: bool,
@@ -111,6 +127,10 @@ fn default_managed() -> bool {
     true
 }
 
+fn local_target_id() -> String {
+    "local".to_owned()
+}
+
 pub struct SharedCoreAdapter {
     probe: Arc<PlatformHardwareProbe>,
     runtime: Arc<OllamaRuntime>,
@@ -123,7 +143,9 @@ pub struct SharedCoreAdapter {
     state_write: Mutex<()>,
     active_install: Mutex<Option<ActiveInstall>>,
     active_chat: Mutex<Option<ActiveChat>>,
+    remote_session: RwLock<Option<Arc<RemoteSession>>>,
     state_path: PathBuf,
+    telemetry: Telemetry,
 }
 
 impl SharedCoreAdapter {
@@ -131,6 +153,7 @@ impl SharedCoreAdapter {
         let data_root = dirs::data_local_dir()
             .ok_or_else(|| "No local application data directory is available".to_owned())?;
         let state_path = data_root.join("lumen-source/state.json");
+        let telemetry = Telemetry::new(&data_root);
         let persisted = std::fs::read(&state_path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<PersistedState>(&bytes).ok())
@@ -163,17 +186,172 @@ impl SharedCoreAdapter {
             state_write: Mutex::new(()),
             active_install: Mutex::new(None),
             active_chat: Mutex::new(None),
+            remote_session: RwLock::new(None),
             state_path,
+            telemetry,
         })
     }
 
-    pub async fn detect_hardware(&self) -> Result<HardwareProfile, String> {
-        let facts = self
-            .probe
-            .hardware_facts()
+    pub async fn telemetry_preference(&self) -> Result<Option<bool>, String> {
+        self.telemetry.preference().await
+    }
+
+    pub async fn set_telemetry_enabled(&self, enabled: bool) -> Result<(), String> {
+        self.telemetry.set_enabled(enabled).await?;
+        if enabled {
+            self.telemetry.retry_upload();
+        }
+        Ok(())
+    }
+
+    pub fn retry_telemetry_upload(&self) {
+        self.telemetry.retry_upload();
+    }
+
+    pub async fn remote_targets(&self) -> Vec<RemoteTargetProfile> {
+        let mut targets = self
+            .state
+            .read()
             .await
-            .map_err(|error| error.to_string())?;
-        Ok(HardwareProfile::from(&facts))
+            .remote_targets
+            .iter()
+            .cloned()
+            .map(RemoteTargetProfile::from)
+            .collect::<Vec<_>>();
+        targets.sort_by_key(|target| target.target_name.to_lowercase());
+        targets
+    }
+
+    pub async fn save_remote_target(
+        &self,
+        config: RemoteTargetConfig,
+    ) -> Result<RemoteTargetProfile, String> {
+        let config = config.normalized();
+        config.validate()?;
+        let profile = RemoteTargetProfile::from(config.clone());
+        {
+            let mut state = self.state.write().await;
+            state
+                .remote_targets
+                .retain(|target| target.target_id() != profile.target_id);
+            state.remote_targets.push(config);
+        }
+        self.flush_state().await?;
+        Ok(profile)
+    }
+
+    pub async fn check_remote_target(
+        &self,
+        config: RemoteTargetConfig,
+        password: Option<Zeroizing<String>>,
+    ) -> Result<RemoteConnectionReport, String> {
+        let config = config.normalized();
+        let attempt = connect_remote(config.clone(), password).await?;
+        if let Some(session) = attempt.session {
+            let target_id = config.target_id();
+            {
+                let mut state = self.state.write().await;
+                state
+                    .remote_targets
+                    .retain(|target| target.target_id() != target_id);
+                state.remote_targets.push(config);
+            }
+            *self.remote_session.write().await = Some(session);
+            self.flush_state().await?;
+        }
+        Ok(attempt.report)
+    }
+
+    async fn runtime_for_target(&self, target_id: &str) -> Result<Arc<OllamaRuntime>, String> {
+        if target_id == "local" {
+            return Ok(Arc::clone(&self.runtime));
+        }
+        if let Some(session) = self.remote_session.read().await.clone() {
+            if session.target_id() == target_id && session.healthy().await {
+                return Ok(Arc::clone(&session.runtime));
+            }
+        }
+        let config = self
+            .state
+            .read()
+            .await
+            .remote_targets
+            .iter()
+            .find(|target| target.target_id() == target_id)
+            .cloned()
+            .ok_or_else(|| format!("Remote target `{target_id}` is not configured"))?;
+        if config.authentication == RemoteAuthentication::Password {
+            return Err(
+                "The password-authenticated SSH session is disconnected. Reconnect this target from Add model and enter its password again; LumenSource does not save SSH passwords."
+                    .to_owned(),
+            );
+        }
+        let attempt = connect_remote(config, None).await?;
+        let Some(session) = attempt.session else {
+            let detail = attempt
+                .report
+                .checks
+                .iter()
+                .filter(|check| check.status == "fail")
+                .map(|check| {
+                    check.guidance.as_deref().map_or_else(
+                        || check.detail.clone(),
+                        |guidance| format!("{} {guidance}", check.detail),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            return Err(if detail.is_empty() {
+                "The remote target is unavailable".to_owned()
+            } else {
+                detail
+            });
+        };
+        let runtime = Arc::clone(&session.runtime);
+        *self.remote_session.write().await = Some(session);
+        Ok(runtime)
+    }
+
+    async fn hardware_for_target(&self, target_id: &str) -> Result<HardwareFacts, String> {
+        if target_id == "local" {
+            return self
+                .probe
+                .hardware_facts()
+                .await
+                .map_err(|error| error.to_string());
+        }
+        self.runtime_for_target(target_id).await?;
+        self.remote_session
+            .read()
+            .await
+            .as_ref()
+            .filter(|session| session.target_id() == target_id)
+            .map(|session| session.hardware.clone())
+            .ok_or_else(|| "The remote target hardware profile is unavailable".to_owned())
+    }
+
+    pub async fn detect_hardware(&self, target_id: &str) -> Result<HardwareProfile, String> {
+        let facts = self.hardware_for_target(target_id).await?;
+        let profile = HardwareProfile::from(&facts);
+        if target_id == "local" {
+            let vram_tier = facts
+                .accelerators
+                .iter()
+                .filter_map(|accelerator| accelerator.total_vram_bytes)
+                .max()
+                .map(memory_tier)
+                .unwrap_or_else(|| "none".to_owned());
+            self.telemetry.record(TelemetryEvent::Hardware {
+                ram_tier: memory_tier(facts.total_ram_bytes),
+                vram_tier,
+                accelerator: facts
+                    .accelerators
+                    .first()
+                    .map(|accelerator| accelerator_backend(accelerator.kind).to_owned())
+                    .unwrap_or_else(|| "cpu-only".to_owned()),
+            });
+        }
+        Ok(profile)
     }
 
     pub async fn load_catalog(&self, refresh: bool) -> Result<CatalogSummary, String> {
@@ -183,30 +361,30 @@ impl SharedCoreAdapter {
             }
         }
 
-        let mut loaded = if refresh {
-            match self.load_remote_catalog().await {
-                Ok(remote) => remote,
-                Err(error) if self.catalog.read().await.is_some() => {
-                    return self.catalog.read().await.as_ref().map(summary).ok_or(error);
-                }
-                Err(_) => bundled_catalog()?,
+        let mut loaded = match self.load_remote_catalog().await {
+            Ok(remote) => remote,
+            Err(error) if self.catalog.read().await.is_some() => {
+                return self.catalog.read().await.as_ref().map(summary).ok_or(error);
             }
-        } else {
-            bundled_catalog()?
+            Err(_) => bundled_catalog()?,
         };
         add_development_catalog_entries(&mut loaded.catalog);
         let result = summary(&loaded);
+        self.telemetry.record(TelemetryEvent::CatalogLoad {
+            revision: result.revision.clone(),
+            source: result.source.clone(),
+        });
         *self.catalog.write().await = Some(loaded);
         Ok(result)
     }
 
     async fn load_remote_catalog(&self) -> Result<LoadedCatalog, String> {
         let catalog_url = std::env::var("LUMEN_SOURCE_CATALOG_URL")
-            .map_err(|_| "LUMEN_SOURCE_CATALOG_URL is not configured".to_owned())?;
+            .unwrap_or_else(|_| PRODUCTION_CATALOG_URL.to_owned());
         let signature_url = std::env::var("LUMEN_SOURCE_CATALOG_SIGNATURE_URL")
-            .map_err(|_| "LUMEN_SOURCE_CATALOG_SIGNATURE_URL is not configured".to_owned())?;
+            .unwrap_or_else(|_| PRODUCTION_CATALOG_SIGNATURE_URL.to_owned());
         let encoded_key = std::env::var("LUMEN_SOURCE_CATALOG_PUBLIC_KEY")
-            .map_err(|_| "LUMEN_SOURCE_CATALOG_PUBLIC_KEY is not configured".to_owned())?;
+            .unwrap_or_else(|_| PRODUCTION_CATALOG_PUBLIC_KEY.to_owned());
         let key = STANDARD
             .decode(encoded_key.trim())
             .map_err(|error| format!("Catalog public key is not valid base64: {error}"))?;
@@ -236,29 +414,32 @@ impl SharedCoreAdapter {
         })
     }
 
-    pub async fn recommendations(&self, intent: &str) -> Result<Vec<Recommendation>, String> {
+    pub async fn recommendations(
+        &self,
+        intent: &str,
+        target_id: &str,
+    ) -> Result<Vec<Recommendation>, String> {
         let catalog = self.catalog_clone().await?;
-        let hardware = self
-            .probe
-            .hardware_facts()
-            .await
-            .map_err(|error| error.to_string())?;
+        let hardware = self.hardware_for_target(target_id).await?;
         let request = RecommendationRequest {
             use_case: Some(intent_use_case(intent)?.to_owned()),
             priorities: Vec::new(),
             max_results: 0,
         };
         let report = recommend(&catalog, &hardware, &request);
+        let supports_runtime = |runtime: &str| {
+            runtime == OLLAMA_RUNTIME || (target_id == "local" && runtime == DUMMY_RUNTIME)
+        };
         let recommended_variant_id = report
             .recommendations
             .iter()
-            .find(|item| matches!(item.runtime_id.as_str(), OLLAMA_RUNTIME | DUMMY_RUNTIME))
+            .find(|item| supports_runtime(&item.runtime_id))
             .map(|item| item.variant_id.clone());
         let mut mapped = Vec::new();
         for item in report
             .recommendations
             .into_iter()
-            .filter(|item| matches!(item.runtime_id.as_str(), OLLAMA_RUNTIME | DUMMY_RUNTIME))
+            .filter(|item| supports_runtime(&item.runtime_id))
         {
             let (model, variant) = find_variant(&catalog, &item.variant_id)?;
             let runtime = catalog
@@ -298,7 +479,7 @@ impl SharedCoreAdapter {
 
         for item in report.exclusions {
             let (model, variant) = find_variant(&catalog, &item.variant_id)?;
-            if !matches!(variant.runtime.as_str(), OLLAMA_RUNTIME | DUMMY_RUNTIME) {
+            if !supports_runtime(&variant.runtime) {
                 continue;
             }
             let runtime = catalog
@@ -331,15 +512,87 @@ impl SharedCoreAdapter {
         Ok(mapped)
     }
 
-    pub async fn preflight(&self, variant_id: &str) -> Result<PreflightReport, String> {
+    pub async fn preflight(
+        &self,
+        variant_id: &str,
+        target_id: &str,
+    ) -> Result<PreflightReport, String> {
         let catalog = self.catalog_clone().await?;
         let (_, variant) = find_variant(&catalog, variant_id)?;
         ensure_supported_runtime(variant)?;
-        let facts = self
-            .probe
-            .hardware_facts()
-            .await
-            .map_err(|error| error.to_string())?;
+        let facts = self.hardware_for_target(target_id).await?;
+        if target_id != "local" {
+            if variant.runtime != OLLAMA_RUNTIME {
+                return Err("Remote targets support Ollama catalog models only".to_owned());
+            }
+            let compatibility = recommend(&catalog, &facts, &RecommendationRequest::default());
+            let hardware_reasons = compatibility
+                .exclusions
+                .iter()
+                .find(|exclusion| exclusion.variant_id == variant_id)
+                .map(|exclusion| {
+                    exclusion
+                        .reasons
+                        .iter()
+                        .filter(|reason| !reason.contains("free storage"))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let hardware_ok = hardware_reasons.is_empty();
+            let hardware_detail = if hardware_ok {
+                "The selected catalog variant matches the remote target hardware.".to_owned()
+            } else {
+                hardware_reasons.join(" ")
+            };
+            let required = (variant.requirements.min_storage_gb * GIB).ceil() as u64;
+            let available = facts.storage.available_bytes;
+            let storage_ok = available >= required;
+            return Ok(PreflightReport {
+                can_install: hardware_ok && storage_ok,
+                required_bytes: required,
+                available_bytes: available,
+                checks: vec![
+                    check(
+                        "connection",
+                        "Remote Linux connection",
+                        "pass",
+                        "The SSH tunnel to the remote Linux target is available.",
+                    ),
+                    check(
+                        "hardware",
+                        "Remote hardware compatibility",
+                        if hardware_ok { "pass" } else { "fail" },
+                        &hardware_detail,
+                    ),
+                    check(
+                        "storage",
+                        "Remote available storage",
+                        if storage_ok { "pass" } else { "fail" },
+                        if storage_ok {
+                            "Enough free space is available on the target filesystem."
+                        } else {
+                            "The model requires more free storage on the target filesystem."
+                        },
+                    ),
+                    check(
+                        "runtime",
+                        "Remote Ollama service",
+                        "pass",
+                        "Ollama is installed and its loopback API is reachable on the target.",
+                    ),
+                    check(
+                        "source",
+                        "Model source",
+                        "pass",
+                        &format!(
+                            "The remote Ollama service will pull the catalog-pinned model reference `{}`.",
+                            variant.runtime_ref
+                        ),
+                    ),
+                ],
+            });
+        }
         let compatibility = recommend(&catalog, &facts, &RecommendationRequest::default());
         let hardware_reasons = compatibility
             .exclusions
@@ -451,6 +704,7 @@ impl SharedCoreAdapter {
         &self,
         app: AppHandle,
         variant_id: String,
+        target_id: String,
         license_basis: String,
         license_reference: Option<String>,
         license_acknowledged: bool,
@@ -462,6 +716,11 @@ impl SharedCoreAdapter {
             license_acknowledged,
         )
         .await?;
+        let telemetry_model_id = {
+            let catalog = self.catalog_clone().await?;
+            let (model, _) = find_variant(&catalog, &variant_id)?;
+            model.id.clone()
+        };
         let cancellation = CancellationToken::new();
         {
             let mut active = self.active_install.lock().await;
@@ -477,8 +736,18 @@ impl SharedCoreAdapter {
             });
         }
 
-        let result = self.install_inner(app, variant_id, &cancellation).await;
+        let telemetry_variant_id = variant_id.clone();
+        let result = self
+            .install_inner(app, variant_id, &target_id, &cancellation)
+            .await;
         self.active_install.lock().await.take();
+        self.telemetry.record(TelemetryEvent::ModelInstall {
+            model_id: telemetry_model_id,
+            variant_id: telemetry_variant_id,
+            deployment: deployment_kind(&target_id),
+            succeeded: result.is_ok(),
+            failure: result.as_ref().err().map(|error| failure_category(error)),
+        });
         result
     }
 
@@ -524,6 +793,7 @@ impl SharedCoreAdapter {
         &self,
         app: AppHandle,
         variant_id: String,
+        target_id: &str,
         cancellation: &CancellationToken,
     ) -> Result<(), String> {
         let catalog = self.catalog_clone().await?;
@@ -544,6 +814,8 @@ impl SharedCoreAdapter {
                 None,
                 if variant.runtime == DUMMY_RUNTIME {
                     "Preparing dummy test runtime…"
+                } else if target_id != "local" {
+                    "Preparing the remote Ollama pull…"
                 } else {
                     "Starting Ollama…"
                 },
@@ -559,12 +831,15 @@ impl SharedCoreAdapter {
             let _ = progress_app.emit("install-progress", payload);
         };
 
+        if target_id != "local" && variant.runtime != OLLAMA_RUNTIME {
+            return Err("Remote targets support Ollama catalog models only".to_owned());
+        }
         if variant.runtime == DUMMY_RUNTIME {
             self.dummy_runtime
                 .pull_model_cancellable(&runtime_ref, &reporter, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
-        } else {
+        } else if target_id == "local" {
             cancellation.check().map_err(|error| error.to_string())?;
             let runtime_healthy = tokio::select! {
                 _ = cancellation.cancelled() => return Err("installation cancelled".to_owned()),
@@ -609,6 +884,12 @@ impl SharedCoreAdapter {
                 .pull_model_cancellable(&runtime_ref, &reporter, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
+        } else {
+            let runtime = self.runtime_for_target(target_id).await?;
+            runtime
+                .pull_model_cancellable(&runtime_ref, &reporter, cancellation)
+                .await
+                .map_err(|error| error.to_string())?;
         }
         cancellation.check().map_err(|error| error.to_string())?;
         *self.installed_model.write().await = Some(runtime_ref);
@@ -630,43 +911,74 @@ impl SharedCoreAdapter {
         Ok(())
     }
 
-    pub async fn start(&self, variant_id: String) -> Result<RuntimeStatus, String> {
+    pub async fn start(
+        &self,
+        variant_id: String,
+        target_id: String,
+    ) -> Result<RuntimeStatus, String> {
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, &variant_id)?;
+        let telemetry_model_id = model.id.clone();
+        let telemetry_variant_id = variant.id.clone();
         ensure_supported_runtime(variant)?;
-        if variant.runtime == DUMMY_RUNTIME {
-            self.dummy_runtime
-                .start(&variant.runtime_ref)
-                .await
-                .map_err(|error| error.to_string())?;
-        } else {
-            self.runtime
-                .ensure_running()
-                .await
-                .map_err(|error| error.to_string())?;
-            if model_is_embedding_only(model) {
-                self.runtime
-                    .start_embedding(&variant.runtime_ref)
-                    .await
-                    .map_err(|error| error.to_string())?;
-            } else {
-                self.host
+        let result: Result<RuntimeStatus, String> = async {
+            if target_id != "local" && variant.runtime != OLLAMA_RUNTIME {
+                return Err("Remote targets support Ollama catalog models only".to_owned());
+            }
+            if variant.runtime == DUMMY_RUNTIME {
+                self.dummy_runtime
                     .start(&variant.runtime_ref)
                     .await
                     .map_err(|error| error.to_string())?;
+            } else {
+                let runtime = self.runtime_for_target(&target_id).await?;
+                if target_id == "local" {
+                    runtime
+                        .ensure_running()
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                if model_is_embedding_only(model) {
+                    runtime
+                        .start_embedding(&variant.runtime_ref)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                } else {
+                    runtime
+                        .start(&variant.runtime_ref)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
             }
+            *self.installed_model.write().await = Some(variant.runtime_ref.clone());
+            *self.selected_runtime.write().await = Some(variant.runtime.clone());
+            self.persist_state().await?;
+            Ok(RuntimeStatus {
+                state: "running".to_owned(),
+                model_id: Some(variant.runtime_ref.clone()),
+                message: Some(if target_id == "local" {
+                    "Listening on localhost".to_owned()
+                } else {
+                    "Listening through the remote SSH tunnel".to_owned()
+                }),
+            })
         }
-        *self.installed_model.write().await = Some(variant.runtime_ref.clone());
-        *self.selected_runtime.write().await = Some(variant.runtime.clone());
-        self.persist_state().await?;
-        Ok(RuntimeStatus {
-            state: "running".to_owned(),
-            model_id: Some(variant.runtime_ref.clone()),
-            message: Some("Listening on localhost".to_owned()),
-        })
+        .await;
+        self.telemetry.record(TelemetryEvent::ModelStart {
+            model_id: telemetry_model_id,
+            variant_id: telemetry_variant_id,
+            deployment: deployment_kind(&target_id),
+            succeeded: result.is_ok(),
+            failure: result.as_ref().err().map(|error| failure_category(error)),
+        });
+        result
     }
 
-    pub async fn stop(&self, variant_id: String) -> Result<RuntimeStatus, String> {
+    pub async fn stop(
+        &self,
+        variant_id: String,
+        target_id: String,
+    ) -> Result<RuntimeStatus, String> {
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, &variant_id)?;
         ensure_supported_runtime(variant)?;
@@ -680,19 +992,23 @@ impl SharedCoreAdapter {
                 }
             }
         }
+        if target_id != "local" && variant.runtime != OLLAMA_RUNTIME {
+            return Err("Remote targets support Ollama catalog models only".to_owned());
+        }
         if variant.runtime == DUMMY_RUNTIME {
             self.dummy_runtime
                 .stop(&variant.runtime_ref)
                 .await
                 .map_err(|error| error.to_string())?;
         } else {
+            let runtime = self.runtime_for_target(&target_id).await?;
             if model_is_embedding_only(model) {
-                self.runtime
+                runtime
                     .stop_embedding(&variant.runtime_ref)
                     .await
                     .map_err(|error| error.to_string())?;
             } else {
-                self.host
+                runtime
                     .stop(&variant.runtime_ref)
                     .await
                     .map_err(|error| error.to_string())?;
@@ -733,6 +1049,7 @@ impl SharedCoreAdapter {
         &self,
         model_id: &str,
         runtime_model_id: &str,
+        target_id: &str,
     ) -> Result<PerformanceSnapshot, String> {
         let catalog = self.catalog_clone().await?;
         let is_dummy = catalog.models.iter().any(|model| {
@@ -741,10 +1058,19 @@ impl SharedCoreAdapter {
                 .iter()
                 .any(|variant| variant.id == model_id && variant.runtime == DUMMY_RUNTIME)
         });
+        let runtime = if is_dummy {
+            None
+        } else {
+            Some(self.runtime_for_target(target_id).await?)
+        };
         let runtime_status = if is_dummy {
             self.dummy_runtime.status().await
         } else {
-            self.runtime.status().await
+            runtime
+                .as_ref()
+                .ok_or_else(|| "The Ollama runtime is unavailable".to_owned())?
+                .status()
+                .await
         }
         .map_err(|error| error.to_string())?;
         let state = match runtime_status {
@@ -766,7 +1092,9 @@ impl SharedCoreAdapter {
             }
         };
         let allocation = if !is_dummy && state == "running" {
-            self.runtime
+            runtime
+                .as_ref()
+                .ok_or_else(|| "The Ollama runtime is unavailable".to_owned())?
                 .model_allocation(runtime_model_id)
                 .await
                 .map_err(|error| error.to_string())?
@@ -797,6 +1125,7 @@ impl SharedCoreAdapter {
         &self,
         model_id: &str,
         runtime_model_id: &str,
+        target_id: &str,
         messages: Vec<ChatMessage>,
         reporter: &(dyn Fn(ChatEvent) + Send + Sync),
     ) -> Result<(), String> {
@@ -816,11 +1145,8 @@ impl SharedCoreAdapter {
         if !same_ollama_reference(&variant.runtime_ref, runtime_model_id) {
             return Err("The runtime model identifier does not match the catalog entry".to_owned());
         }
-        let running = self
-            .runtime
-            .status()
-            .await
-            .map_err(|error| error.to_string())?;
+        let runtime = self.runtime_for_target(target_id).await?;
+        let running = runtime.status().await.map_err(|error| error.to_string())?;
         if !matches!(running, CoreRuntimeStatus::Running { ref models } if models.iter().any(|model| same_ollama_reference(model, runtime_model_id)))
         {
             return Err("Start this model before opening a chat".to_owned());
@@ -842,8 +1168,7 @@ impl SharedCoreAdapter {
             ChatProgress::Content(content) => reporter(ChatEvent::Delta { content }),
             ChatProgress::Done => reporter(ChatEvent::Done),
         };
-        let result = self
-            .runtime
+        let result = runtime
             .chat_cancellable(runtime_model_id, &messages, &chat_reporter, &cancellation)
             .await
             .map_err(|error| {
@@ -854,6 +1179,16 @@ impl SharedCoreAdapter {
                 }
             });
         self.active_chat.lock().await.take();
+        self.telemetry.record(TelemetryEvent::Chat {
+            model_id: model.id.clone(),
+            variant_id: variant.id.clone(),
+            deployment: deployment_kind(target_id),
+            outcome: match &result {
+                Ok(()) => ChatOutcome::Succeeded,
+                Err(error) if error == "chat cancelled" => ChatOutcome::Cancelled,
+                Err(_) => ChatOutcome::Failed,
+            },
+        });
         result
     }
 
@@ -867,7 +1202,7 @@ impl SharedCoreAdapter {
         }
     }
 
-    pub async fn endpoint(&self) -> Result<EndpointDetails, String> {
+    pub async fn endpoint(&self, target_id: &str) -> Result<EndpointDetails, String> {
         let model = self
             .installed_model
             .read()
@@ -890,7 +1225,7 @@ impl SharedCoreAdapter {
         let endpoint = if is_dummy {
             self.dummy_runtime.endpoint()
         } else {
-            self.runtime.endpoint()
+            self.runtime_for_target(target_id).await?.endpoint()
         };
         endpoint_details(
             endpoint,
@@ -905,6 +1240,7 @@ impl SharedCoreAdapter {
         &self,
         model_id: &str,
         runtime_model_id: &str,
+        target_id: &str,
     ) -> Result<EndpointDetails, String> {
         if runtime_model_id.trim().is_empty() {
             return Err("The model does not expose a runtime model identifier".to_owned());
@@ -915,7 +1251,7 @@ impl SharedCoreAdapter {
         let endpoint = if is_dummy {
             self.dummy_runtime.endpoint()
         } else {
-            self.runtime.endpoint()
+            self.runtime_for_target(target_id).await?.endpoint()
         };
         endpoint_details(
             endpoint,
@@ -928,6 +1264,12 @@ impl SharedCoreAdapter {
 
     pub async fn load_models(&self) -> Result<Vec<PersistedModelEntry>, String> {
         let persisted = self.state.read().await.models.clone();
+        let (local_persisted, mut remote_persisted): (Vec<_>, Vec<_>) = persisted
+            .into_iter()
+            .partition(|model| model.target_id == "local");
+        for model in &mut remote_persisted {
+            model.running = false;
+        }
         let catalog = self.catalog_clone().await?;
         let dummy_installed = self
             .dummy_runtime
@@ -947,10 +1289,11 @@ impl SharedCoreAdapter {
             if !self.runtime.executable_available().await {
                 let models = reconcile_unavailable_models(
                     &catalog,
-                    persisted,
+                    local_persisted,
                     &dummy_installed,
                     &dummy_running,
                 );
+                let models = with_remote_models(models, remote_persisted);
                 self.replace_models(models.clone()).await?;
                 return Ok(models);
             }
@@ -978,7 +1321,14 @@ impl SharedCoreAdapter {
         if let Some(model) = running.first() {
             *self.installed_model.write().await = Some(model.clone());
         }
-        let models = reconcile_models(catalog, persisted, installed, &dummy_installed, &running);
+        let models = reconcile_models(
+            catalog,
+            local_persisted,
+            installed,
+            &dummy_installed,
+            &running,
+        );
+        let models = with_remote_models(models, remote_persisted);
         self.replace_models(models.clone()).await?;
         Ok(models)
     }
@@ -997,10 +1347,27 @@ impl SharedCoreAdapter {
             .find(|model| model.id == model_id)
             .cloned()
             .ok_or_else(|| "The model is no longer in the local model list".to_owned())?;
+        let target_id = entry.target_id.clone();
         let runtime_model_id = entry.runtime_model_id.as_deref().ok_or_else(|| {
             "The model has no runtime identifier and cannot be deleted".to_owned()
         })?;
         let catalog = self.catalog_clone().await?;
+        let telemetry_model_id = catalog
+            .models
+            .iter()
+            .find(|model| {
+                model
+                    .variants
+                    .iter()
+                    .any(|variant| variant.id == entry.model_id)
+            })
+            .map(|model| model.id.clone())
+            .unwrap_or_else(|| "custom".to_owned());
+        let telemetry_variant_id = if entry.managed {
+            entry.model_id.clone()
+        } else {
+            "custom".to_owned()
+        };
         let is_dummy = catalog.models.iter().any(|model| {
             model
                 .variants
@@ -1008,6 +1375,7 @@ impl SharedCoreAdapter {
                 .any(|variant| variant.id == entry.model_id && variant.runtime == DUMMY_RUNTIME)
         });
 
+        let result: Result<Vec<PersistedModelEntry>, String> = async {
         if is_dummy {
             let status = self
                 .dummy_runtime
@@ -1026,23 +1394,22 @@ impl SharedCoreAdapter {
                 .await
                 .map_err(|error| error.to_string())?;
         } else {
-            self.runtime
-                .ensure_running()
-                .await
-                .map_err(|error| error.to_string())?;
-            let status = self
-                .runtime
-                .status()
-                .await
-                .map_err(|error| error.to_string())?;
+            let runtime = self.runtime_for_target(&target_id).await?;
+            if target_id == "local" {
+                runtime
+                    .ensure_running()
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+            let status = runtime.status().await.map_err(|error| error.to_string())?;
             if matches!(status, CoreRuntimeStatus::Running { ref models } if models.iter().any(|model| same_ollama_reference(model, runtime_model_id)))
             {
-                self.runtime
+                runtime
                     .stop(runtime_model_id)
                     .await
                     .map_err(|error| error.to_string())?;
             }
-            self.runtime
+            runtime
                 .delete_model(runtime_model_id)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -1051,10 +1418,10 @@ impl SharedCoreAdapter {
         let models = {
             let mut state = self.state.write().await;
             state.models.retain(|model| {
-                !model
-                    .runtime_model_id
-                    .as_deref()
-                    .is_some_and(|runtime_id| same_ollama_reference(runtime_id, runtime_model_id))
+                model.target_id != target_id
+                    || !model.runtime_model_id.as_deref().is_some_and(|runtime_id| {
+                        same_ollama_reference(runtime_id, runtime_model_id)
+                    })
             });
             state.models.clone()
         };
@@ -1070,6 +1437,16 @@ impl SharedCoreAdapter {
         }
         self.persist_state().await?;
         Ok(models)
+        }
+        .await;
+        self.telemetry.record(TelemetryEvent::ModelUninstall {
+            model_id: telemetry_model_id,
+            variant_id: telemetry_variant_id,
+            deployment: deployment_kind(&target_id),
+            succeeded: result.is_ok(),
+            failure: result.as_ref().err().map(|error| failure_category(error)),
+        });
+        result
     }
 
     async fn catalog_clone(&self) -> Result<Catalog, String> {
@@ -1173,6 +1550,15 @@ fn accelerator_backend(kind: AcceleratorKind) -> &'static str {
         AcceleratorKind::Intel => "intel",
         AcceleratorKind::Other => "other",
     }
+}
+
+fn deployment_kind(target_id: &str) -> String {
+    if target_id == "local" {
+        "local"
+    } else {
+        "remote"
+    }
+    .to_owned()
 }
 
 #[derive(Clone, Serialize)]
@@ -1786,6 +2172,8 @@ fn reconcile_models(
                     runtime_model_id: Some(installed_model.name.clone()),
                     version: runtime_version,
                     location: "local".to_owned(),
+                    target_id: local_target_id(),
+                    target_name: None,
                     running: is_running,
                     managed: true,
                     digest: installed_model.digest.clone(),
@@ -1834,6 +2222,8 @@ fn reconcile_models(
                     runtime_model_id: Some(installed_model.name.clone()),
                     version: "External Ollama model".to_owned(),
                     location: "local".to_owned(),
+                    target_id: local_target_id(),
+                    target_name: None,
                     running: is_running,
                     managed: false,
                     digest: installed_model.digest.clone(),
@@ -1934,6 +2324,8 @@ fn upsert_dummy_models(
             runtime_model_id: Some(installed_model.name.clone()),
             version,
             location: "local".to_owned(),
+            target_id: local_target_id(),
+            target_name: None,
             running: is_running,
             managed: true,
             digest: installed_model.digest.clone(),
@@ -1949,6 +2341,15 @@ fn upsert_dummy_models(
             logs: vec!["Discovered in the dummy test runtime.".to_owned()],
         });
     }
+}
+
+fn with_remote_models(
+    mut local_models: Vec<PersistedModelEntry>,
+    remote_models: Vec<PersistedModelEntry>,
+) -> Vec<PersistedModelEntry> {
+    local_models.extend(remote_models);
+    sort_models(&mut local_models);
+    local_models
 }
 
 fn sort_models(models: &mut [PersistedModelEntry]) {
@@ -1984,6 +2385,17 @@ fn discovered_id(model: &InstalledModel) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_catalog_defaults_use_https_and_a_32_byte_ed25519_key() {
+        assert!(PRODUCTION_CATALOG_URL.starts_with("https://"));
+        assert!(PRODUCTION_CATALOG_SIGNATURE_URL.starts_with("https://"));
+        let Ok(public_key) = STANDARD.decode(PRODUCTION_CATALOG_PUBLIC_KEY) else {
+            panic!("production catalog public key should be valid base64");
+        };
+
+        assert_eq!(public_key.len(), 32);
+    }
 
     #[test]
     fn maps_every_wizard_intent_to_a_catalog_use_case() {
@@ -2134,6 +2546,8 @@ mod tests {
             runtime_model_id: Some("qwen2.5-coder:14b".to_owned()),
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
+            target_id: local_target_id(),
+            target_name: None,
             running: false,
             managed: true,
             digest: None,
@@ -2183,6 +2597,8 @@ mod tests {
             runtime_model_id: Some("dummy-test-model:latest".to_owned()),
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
+            target_id: local_target_id(),
+            target_name: None,
             running: false,
             managed: true,
             digest: None,
@@ -2224,6 +2640,8 @@ mod tests {
             runtime_model_id: Some("dummy-test-model:latest".to_owned()),
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
+            target_id: local_target_id(),
+            target_name: None,
             running: false,
             managed: true,
             digest: None,
@@ -2246,6 +2664,8 @@ mod tests {
             runtime_model_id: Some("qwen2.5-coder:14b".to_owned()),
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
+            target_id: local_target_id(),
+            target_name: None,
             running: true,
             managed: true,
             digest: None,

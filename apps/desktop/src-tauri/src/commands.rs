@@ -5,22 +5,74 @@ use crate::bridge::{
 use lumen_source_runtime::ChatMessage;
 use serde::Deserialize;
 use tauri::{ipc::Channel, AppHandle, State};
+use zeroize::Zeroizing;
+
+use crate::remote::{RemoteConnectionReport, RemoteTargetConfig, RemoteTargetProfile};
+
+#[tauri::command]
+pub async fn telemetry_preference(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<Option<bool>, String> {
+    core.telemetry_preference().await
+}
+
+#[tauri::command]
+pub async fn set_telemetry_enabled(
+    core: State<'_, SharedCoreAdapter>,
+    enabled: bool,
+) -> Result<(), String> {
+    core.set_telemetry_enabled(enabled).await
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallRequest {
     model_id: String,
+    #[serde(default)]
+    target_id: Option<String>,
     license_basis: String,
     #[serde(default)]
     license_reference: Option<String>,
     license_acknowledged: bool,
 }
 
+fn normalize_target_id(value: Option<String>) -> String {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "local".to_owned())
+}
+
+#[tauri::command]
+pub async fn load_remote_targets(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<Vec<RemoteTargetProfile>, String> {
+    Ok(core.remote_targets().await)
+}
+
+#[tauri::command]
+pub async fn save_remote_target(
+    core: State<'_, SharedCoreAdapter>,
+    config: RemoteTargetConfig,
+) -> Result<RemoteTargetProfile, String> {
+    core.save_remote_target(config).await
+}
+
+#[tauri::command]
+pub async fn check_remote_target(
+    core: State<'_, SharedCoreAdapter>,
+    config: RemoteTargetConfig,
+    password: Option<String>,
+) -> Result<RemoteConnectionReport, String> {
+    core.check_remote_target(config, password.map(Zeroizing::new))
+        .await
+}
+
 #[tauri::command]
 pub async fn detect_hardware(
     core: State<'_, SharedCoreAdapter>,
+    target_id: Option<String>,
 ) -> Result<HardwareProfile, String> {
-    core.detect_hardware().await
+    core.detect_hardware(&normalize_target_id(target_id)).await
 }
 
 #[tauri::command]
@@ -37,16 +89,20 @@ pub async fn refresh_catalog(core: State<'_, SharedCoreAdapter>) -> Result<Catal
 pub async fn get_recommendations(
     core: State<'_, SharedCoreAdapter>,
     intent: String,
+    target_id: Option<String>,
 ) -> Result<Vec<Recommendation>, String> {
-    core.recommendations(&intent).await
+    core.recommendations(&intent, &normalize_target_id(target_id))
+        .await
 }
 
 #[tauri::command]
 pub async fn run_preflight(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
+    target_id: Option<String>,
 ) -> Result<PreflightReport, String> {
-    core.preflight(&model_id).await
+    core.preflight(&model_id, &normalize_target_id(target_id))
+        .await
 }
 
 #[tauri::command]
@@ -58,6 +114,7 @@ pub async fn install_model(
     core.install(
         app,
         request.model_id,
+        normalize_target_id(request.target_id),
         request.license_basis,
         request.license_reference,
         request.license_acknowledged,
@@ -74,16 +131,18 @@ pub async fn cancel_install(core: State<'_, SharedCoreAdapter>) -> Result<bool, 
 pub async fn start_runtime(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
+    target_id: Option<String>,
 ) -> Result<RuntimeStatus, String> {
-    core.start(model_id).await
+    core.start(model_id, normalize_target_id(target_id)).await
 }
 
 #[tauri::command]
 pub async fn stop_runtime(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
+    target_id: Option<String>,
 ) -> Result<RuntimeStatus, String> {
-    core.stop(model_id).await
+    core.stop(model_id, normalize_target_id(target_id)).await
 }
 
 #[tauri::command]
@@ -96,15 +155,22 @@ pub async fn model_performance(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
     runtime_model_id: String,
+    target_id: Option<String>,
 ) -> Result<PerformanceSnapshot, String> {
-    core.performance(&model_id, &runtime_model_id).await
+    core.performance(
+        &model_id,
+        &runtime_model_id,
+        &normalize_target_id(target_id),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn endpoint_details(
     core: State<'_, SharedCoreAdapter>,
+    target_id: Option<String>,
 ) -> Result<EndpointDetails, String> {
-    core.endpoint().await
+    core.endpoint(&normalize_target_id(target_id)).await
 }
 
 #[tauri::command]
@@ -112,8 +178,14 @@ pub async fn model_endpoint_details(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
     runtime_model_id: String,
+    target_id: Option<String>,
 ) -> Result<EndpointDetails, String> {
-    core.model_endpoint(&model_id, &runtime_model_id).await
+    core.model_endpoint(
+        &model_id,
+        &runtime_model_id,
+        &normalize_target_id(target_id),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -121,14 +193,21 @@ pub async fn chat_with_model(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
     runtime_model_id: String,
+    target_id: Option<String>,
     messages: Vec<ChatMessage>,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
     let reporter = |event| {
         let _ = on_event.send(event);
     };
-    core.chat(&model_id, &runtime_model_id, messages, &reporter)
-        .await
+    core.chat(
+        &model_id,
+        &runtime_model_id,
+        &normalize_target_id(target_id),
+        messages,
+        &reporter,
+    )
+    .await
 }
 
 #[tauri::command]

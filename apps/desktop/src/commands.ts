@@ -11,19 +11,31 @@ import type {
   PerformanceSnapshot,
   PreflightReport,
   Recommendation,
+  RemoteConnectionReport,
+  RemoteTargetConfig,
+  RemoteTargetProfile,
   RunningModelEntry,
   RuntimeStatus,
   UseIntent,
 } from "./types";
 
 export const desktopCommands = {
-  detectHardware: () => invoke<HardwareProfile>("detect_hardware"),
+  telemetryPreference: () => invoke<boolean | null>("telemetry_preference"),
+  setTelemetryEnabled: (enabled: boolean) =>
+    invoke<void>("set_telemetry_enabled", { enabled }),
+  detectHardware: (targetId: string) =>
+    invoke<HardwareProfile>("detect_hardware", { targetId }),
+  loadRemoteTargets: () => invoke<RemoteTargetProfile[]>("load_remote_targets"),
+  saveRemoteTarget: (config: RemoteTargetConfig) =>
+    invoke<RemoteTargetProfile>("save_remote_target", { config }),
+  checkRemoteTarget: (config: RemoteTargetConfig, password?: string) =>
+    invoke<RemoteConnectionReport>("check_remote_target", { config, password }),
   loadCatalog: () => invoke<CatalogSummary>("load_catalog"),
   refreshCatalog: () => invoke<CatalogSummary>("refresh_catalog"),
-  recommendations: (intent: UseIntent) =>
-    invoke<Recommendation[]>("get_recommendations", { intent }),
-  preflight: (modelId: string) =>
-    invoke<PreflightReport>("run_preflight", { modelId }),
+  recommendations: (intent: UseIntent, targetId: string) =>
+    invoke<Recommendation[]>("get_recommendations", { intent, targetId }),
+  preflight: (modelId: string, targetId: string) =>
+    invoke<PreflightReport>("run_preflight", { modelId, targetId }),
   install: (request: InstallRequest) =>
     invoke<void>("install_model", { request }),
   cancelInstall: () => invoke<boolean>("cancel_install"),
@@ -31,24 +43,25 @@ export const desktopCommands = {
     handler: (progress: InstallProgress) => void,
   ): Promise<UnlistenFn> =>
     listen<InstallProgress>("install-progress", ({ payload }) => handler(payload)),
-  start: (modelId: string) =>
-    invoke<RuntimeStatus>("start_runtime", { modelId }),
-  stop: (modelId: string) => invoke<RuntimeStatus>("stop_runtime", { modelId }),
+  start: (modelId: string, targetId: string) =>
+    invoke<RuntimeStatus>("start_runtime", { modelId, targetId }),
+  stop: (modelId: string, targetId: string) => invoke<RuntimeStatus>("stop_runtime", { modelId, targetId }),
   status: () => invoke<RuntimeStatus>("runtime_status"),
-  performance: (modelId: string, runtimeModelId: string) =>
-    invoke<PerformanceSnapshot>("model_performance", { modelId, runtimeModelId }),
-  endpoint: () => invoke<EndpointDetails>("endpoint_details"),
-  modelEndpoint: (modelId: string, runtimeModelId: string) =>
-    invoke<EndpointDetails>("model_endpoint_details", { modelId, runtimeModelId }),
+  performance: (modelId: string, runtimeModelId: string, targetId: string) =>
+    invoke<PerformanceSnapshot>("model_performance", { modelId, runtimeModelId, targetId }),
+  endpoint: (targetId: string) => invoke<EndpointDetails>("endpoint_details", { targetId }),
+  modelEndpoint: (modelId: string, runtimeModelId: string, targetId: string) =>
+    invoke<EndpointDetails>("model_endpoint_details", { modelId, runtimeModelId, targetId }),
   chat: (
     modelId: string,
     runtimeModelId: string,
+    targetId: string,
     messages: ChatMessage[],
     handler: (event: ChatEvent) => void,
   ) => {
     const onEvent = new Channel<ChatEvent>();
     onEvent.onmessage = handler;
-    return invoke<void>("chat_with_model", { modelId, runtimeModelId, messages, onEvent });
+    return invoke<void>("chat_with_model", { modelId, runtimeModelId, targetId, messages, onEvent });
   },
   cancelChat: () => invoke<boolean>("cancel_chat"),
   loadModels: () => invoke<RunningModelEntry[]>("load_models"),

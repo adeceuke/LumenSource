@@ -6,10 +6,10 @@ target.
 
 ## Guided installation wizard
 
-The wizard implements this local flow:
+The wizard implements local and Linux remote flows:
 
-1. Select deployment. Local deployment is available; remote deployment is
-   visible but disabled.
+1. Select deployment. Local deployment is available. The Linux remote preview
+   connects through OpenSSH to an existing target Ollama service.
 2. Detect CPU, memory, storage, operating system, and supported GPU hardware.
 3. Select a use case: chat, code, creative writing, or research.
 4. Review the highest-ranked compatible variant or select any supported variant
@@ -80,18 +80,52 @@ rate.
 
 ## Catalog behavior
 
-The desktop embeds the schema-v2 `catalog/model-list.json` artifact so the local
-flow works without catalog-service configuration. On refresh, a remote catalog is used
-only when all of these environment variables are configured:
+At startup, the desktop fetches the production catalog from
+`https://lumensource.dev/v2/model-list.json` and its detached signature. It
+accepts the catalog only after verifying the Ed25519 signature over the exact
+response bytes with the public key compiled into LumenSource. Only a verified,
+schema-compatible network catalog replaces the last-known-good cache.
+
+The startup fallback order is:
+
+1. The signature-verified production catalog fetched over HTTPS.
+2. The last signature-verified catalog saved in the operating system's
+   application-cache directory.
+3. The schema-v2 `catalog/model-list.json` artifact bundled with the
+   application.
+
+The persistent footer makes the active source visible:
+
+- **Latest catalog** (green) means the catalog was fetched and verified during
+  this startup.
+- **Cached catalog** (amber) means the online fetch failed and LumenSource is
+  using the last verified copy saved on this device.
+- **Bundled catalog** (neutral) means neither the network catalog nor a verified
+  cache was available, so LumenSource is using its build-time catalog.
+
+The footer also shows the catalog revision and model count. Hovering the status
+explains the active fallback. The following environment variables remain
+available as optional development overrides:
 
 - `LUMEN_SOURCE_CATALOG_URL`
 - `LUMEN_SOURCE_CATALOG_SIGNATURE_URL`
 - `LUMEN_SOURCE_CATALOG_PUBLIC_KEY`
+- `LUMEN_SOURCE_TELEMETRY_URL`
 
-Remote catalogs are fetched over HTTPS, verified with an Ed25519 detached
-signature over the exact catalog bytes, and cached as the last-known-good
-catalog. The bundled catalog remains the fallback when remote catalog settings
-are absent or unavailable during desktop startup.
+## Optional usage telemetry
+
+The footer exposes an explicit usage-statistics choice. Until the user opts in,
+no telemetry is collected. Weekly aggregate reports contain catalog delivery,
+coarse hardware tiers, catalog model and variant identifiers, and install,
+uninstall, start, and built-in chat outcome counts. Prompts, responses, files,
+remote connection details, arbitrary strings, and raw errors are excluded.
+
+Reports remain in a bounded 52-week local queue while offline. A successful
+2xx server acknowledgement removes the submitted batch; timeouts, connection
+failures, and non-2xx responses leave it intact for a silent retry at the next
+startup or recorded occurrence. Telemetry never changes the result of a
+catalog, model, runtime, or chat operation. The complete client payload and
+server contract are documented in [usage telemetry](telemetry.md).
 
 ## Ollama installation and lifecycle
 
@@ -220,7 +254,18 @@ errors remain visible through the application error banner.
 
 ## Current boundaries
 
-- The remote-host/agent deployment path is not implemented.
+- Linux-to-Linux remote deployment controls an existing target Ollama
+  installation through an authenticated SSH tunnel and does not require a
+  Lumen Source agent. It checks SSH and Linux, finds Ollama through the SSH
+  user's login or interactive shell and common install paths, starts a stopped
+  `ollama serve`, checks its loopback API, and collects normalized CPU, memory,
+  storage, and supported GPU facts for recommendation and preflight. The
+  deployment step uses an initially empty selector backed by saved non-secret
+  target profiles; adding a target happens in a dialog and selects the saved
+  target. SSH keys/agents are preferred; a password may be supplied for the
+  current connection but is never persisted and cannot reconnect automatically.
+  Remote runtime installation is not implemented. See
+  [`remote-hosts.md`](remote-hosts.md).
 - Linux hardware probing is implemented; macOS and Windows probes remain
   planned adapters.
 - Ollama does not expose per-model processor utilization or per-request

@@ -18,7 +18,10 @@ Use `lumen-source` wherever the product name must be represented as one technica
 - `catalog/` — catalog schema notes and test fixtures
 - `docs/` — documentation index
 
-The remote Lumen Source Agent is intentionally deferred until the local v0.1 flow is proven. The host abstraction is the extension point for a later agent-backed host.
+Remote deployment has a Linux-to-Linux preview that connects agentlessly to an
+existing target Ollama service through SSH. A managed Lumen Source Agent,
+remote macOS/Windows hardware adapters and remote runtime installation remain deferred. See the
+[remote host plan](docs/remote-hosts.md).
 
 ## v0.1 platform
 
@@ -43,7 +46,8 @@ scripts/check-prerequisites.sh
 ```
 
 See [development setup](docs/development.md), [platform support](docs/platform-support.md),
-and [current implementation](docs/current-implementation.md) for details.
+[remote host planning](docs/remote-hosts.md), and
+[current implementation](docs/current-implementation.md) for details.
 
 ## Current local workflow
 

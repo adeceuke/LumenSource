@@ -13,6 +13,9 @@ import type {
   PerformanceSnapshot,
   PreflightReport,
   Recommendation,
+  RemoteConnectionReport,
+  RemoteTargetConfig,
+  RemoteTargetProfile,
   RunningModelEntry,
   UseIntent,
   WizardStep,
@@ -38,6 +41,16 @@ const WIZARD_TITLES: Record<WizardStep, string> = {
   ready: "Ready to connect",
 };
 
+function emptyRemoteTarget(): RemoteTargetConfig {
+  return {
+    name: "",
+    host: "",
+    port: 22,
+    username: "",
+    authentication: "key",
+  };
+}
+
 function formatBytes(bytes: number): string {
   const gibibytes = bytes / (1024 ** 3);
   return `${gibibytes.toFixed(gibibytes >= 10 ? 0 : 1)} GiB`;
@@ -46,6 +59,18 @@ function formatBytes(bytes: number): string {
 function formatLegalValue(value: string): string {
   return value.replaceAll("-", " ").replace(/^./, (letter) => letter.toUpperCase());
 }
+
+const CATALOG_SOURCE_LABELS: Record<CatalogSummary["source"], string> = {
+  network: "Latest catalog",
+  cache: "Cached catalog",
+  bundled: "Bundled catalog",
+};
+
+const CATALOG_SOURCE_DETAILS: Record<CatalogSummary["source"], string> = {
+  network: "Fetched from lumensource.dev and signature-verified at startup.",
+  cache: "The online catalog was unavailable. Using the last signature-verified copy saved on this device.",
+  bundled: "No verified cached catalog was available. Using the catalog included with this version of LumenSource.",
+};
 
 function progressPercent(progress?: InstallProgress): number {
   if (!progress) return 0;
@@ -155,6 +180,15 @@ function App() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<WizardStep>("location");
   const [wizardLocation, setWizardLocation] = useState<"local" | "remote">("local");
+  const [remoteTargets, setRemoteTargets] = useState<RemoteTargetProfile[]>([]);
+  const [selectedRemoteTargetId, setSelectedRemoteTargetId] = useState("");
+  const [remoteTargetDialogOpen, setRemoteTargetDialogOpen] = useState(false);
+  const [remoteTargetSaveLoading, setRemoteTargetSaveLoading] = useState(false);
+  const [remoteTargetDialogError, setRemoteTargetDialogError] = useState<string>();
+  const [remoteConfig, setRemoteConfig] = useState<RemoteTargetConfig>(emptyRemoteTarget);
+  const [remotePassword, setRemotePassword] = useState("");
+  const [remoteReport, setRemoteReport] = useState<RemoteConnectionReport>();
+  const [remoteCheckLoading, setRemoteCheckLoading] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [installCancellable, setInstallCancellable] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -200,14 +234,19 @@ function App() {
   const [hardwareError, setHardwareError] = useState<string>();
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [copiedField, setCopiedField] = useState<string>();
+  const [telemetryEnabled, setTelemetryEnabled] = useState<boolean>();
+  const [telemetryDialogOpen, setTelemetryDialogOpen] = useState(false);
+  const [telemetrySaving, setTelemetrySaving] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const contentPanelRef = useRef<HTMLDivElement>(null);
   const chatTranscriptRef = useRef<HTMLDivElement>(null);
   const copyFeedbackTimerRef = useRef<number | undefined>(undefined);
   const pendingModelSaveRef = useRef<RunningModelEntry[] | null>(null);
   const modelSaveInFlightRef = useRef(false);
+  const selectedRemoteTarget = remoteTargets.find((target) => target.targetId === selectedRemoteTargetId);
   const detailModel = runningModels.find((model) => model.id === detailModelId);
   const detailChatMessages = detailModelId ? chatSessions[detailModelId] ?? [] : [];
+  const wizardTargetId = wizardLocation === "remote" ? remoteReport?.targetId : "local";
 
   useEffect(() => {
     void desktopCommands.refreshCatalog().then((value) => {
@@ -219,6 +258,19 @@ function App() {
     }).catch((loadError: unknown) => {
       setError(messageFromError(loadError));
     }).finally(() => setModelsLoaded(true));
+
+    void desktopCommands.loadRemoteTargets().then(setRemoteTargets).catch((loadError: unknown) => {
+      setError(messageFromError(loadError));
+    });
+
+    void desktopCommands.telemetryPreference().then((preference) => {
+      setTelemetryEnabled(preference ?? false);
+      if (preference === null) setTelemetryDialogOpen(true);
+    }).catch(() => {
+      // Telemetry is optional. A local preference read failure must not affect
+      // the application or enable collection.
+      setTelemetryEnabled(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -333,7 +385,7 @@ function App() {
       if (refreshInFlight) return;
       refreshInFlight = true;
       try {
-        const snapshot = await desktopCommands.performance(modelId, runtimeModelId);
+        const snapshot = await desktopCommands.performance(modelId, runtimeModelId, detailModel.targetId);
         if (!disposed) {
           setPerformanceSnapshot(snapshot);
           const historyPoint: PerformanceHistoryPoint = {
@@ -366,7 +418,7 @@ function App() {
       disposed = true;
       window.clearInterval(interval);
     };
-  }, [detailModel?.modelId, detailModel?.runtimeModelId]);
+  }, [detailModel?.modelId, detailModel?.runtimeModelId, detailModel?.targetId]);
 
   useEffect(() => {
     if ((detailTab !== "api" && detailTab !== "chat") || !detailModel) return;
@@ -381,7 +433,7 @@ function App() {
     setModelEndpoint(undefined);
     setModelEndpointError(undefined);
     setModelEndpointLoading(true);
-    void desktopCommands.modelEndpoint(detailModel.modelId, detailModel.runtimeModelId)
+    void desktopCommands.modelEndpoint(detailModel.modelId, detailModel.runtimeModelId, detailModel.targetId)
       .then((details) => {
         if (!disposed) setModelEndpoint(details);
       })
@@ -394,7 +446,7 @@ function App() {
     return () => {
       disposed = true;
     };
-  }, [detailTab, detailModel?.modelId, detailModel?.runtimeModelId]);
+  }, [detailTab, detailModel?.modelId, detailModel?.runtimeModelId, detailModel?.targetId]);
 
   useEffect(() => {
     setChatDraft("");
@@ -412,12 +464,12 @@ function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [detailTab, detailModelId, detailChatMessages]);
 
-  // Detect hardware when wizard moves to hardware step
+  // Detect hardware on the selected local or connected remote target.
   useEffect(() => {
-    if (wizardStep === "hardware" && !hardwareInfo && !hardwareLoading && !hardwareError) {
+    if (wizardStep === "hardware" && wizardTargetId && !hardwareInfo && !hardwareLoading && !hardwareError) {
       setHardwareLoading(true);
       setHardwareError(undefined);
-      void detectHardware()
+      void detectHardware(wizardTargetId)
         .then((info) => {
           setHardwareInfo(info);
           setHardwareLoading(false);
@@ -427,7 +479,7 @@ function App() {
           setHardwareLoading(false);
         });
     }
-  }, [wizardStep, hardwareInfo, hardwareLoading, hardwareError]);
+  }, [wizardStep, wizardTargetId, hardwareInfo, hardwareLoading, hardwareError]);
 
   useEffect(() => {
     if (wizardStep !== "suggestion" || !selectedModelId) return;
@@ -435,7 +487,8 @@ function App() {
     setPreflight(undefined);
     setPreflightLoading(true);
     setError(undefined);
-    void desktopCommands.preflight(selectedModelId)
+    if (!wizardTargetId) return;
+    void desktopCommands.preflight(selectedModelId, wizardTargetId)
       .then((report) => {
         if (!disposed) setPreflight(report);
       })
@@ -448,7 +501,7 @@ function App() {
     return () => {
       disposed = true;
     };
-  }, [wizardStep, selectedModelId]);
+  }, [wizardStep, selectedModelId, wizardTargetId]);
 
   useEffect(() => {
     setLicenseBasis("catalog");
@@ -472,7 +525,9 @@ function App() {
   ) => {
     setRunningModels((current) => {
       const sharedRuntimeAlreadyRunning = current.some((model) => (
-        model.runtimeModelId === runtimeModelId && model.running
+        model.targetId === (wizardTargetId ?? "local")
+        && model.runtimeModelId === runtimeModelId
+        && model.running
       ));
       const effectiveRunning = running || sharedRuntimeAlreadyRunning;
       const message = running
@@ -487,7 +542,9 @@ function App() {
         modelName: selected.name,
         runtimeModelId,
         version: selected.version,
-        location: "local",
+        location: wizardLocation,
+        targetId: wizardTargetId ?? "local",
+        targetName: wizardLocation === "remote" ? remoteReport?.targetName : undefined,
         running: effectiveRunning,
         managed: true,
         digest: selected.runtimeDigest,
@@ -502,7 +559,7 @@ function App() {
         logs: [lifecycleLog(message)],
       };
       return [entry, ...current.map((model) => (
-        model.runtimeModelId === runtimeModelId
+        model.targetId === (wizardTargetId ?? "local") && model.runtimeModelId === runtimeModelId
           ? {
               ...model,
               running: effectiveRunning,
@@ -522,20 +579,22 @@ function App() {
     setError(undefined);
     try {
       if (selected.running) {
-        await desktopCommands.stop(selected.modelId);
+        await desktopCommands.stop(selected.modelId, selected.targetId);
         setRunningModels((current) => current.map((model) => (
           model.id === id || (
             selected.runtimeModelId !== undefined
+            && model.targetId === selected.targetId
             && model.runtimeModelId === selected.runtimeModelId
           )
             ? { ...model, running: false, logs: [...model.logs, lifecycleLog("Model stopped.")] }
             : model
         )));
       } else {
-        await desktopCommands.start(selected.modelId);
+        await desktopCommands.start(selected.modelId, selected.targetId);
         setRunningModels((current) => current.map((model) => (
           model.id === id || (
             selected.runtimeModelId !== undefined
+            && model.targetId === selected.targetId
             && model.runtimeModelId === selected.runtimeModelId
           )
             ? { ...model, running: true, logs: [...model.logs, lifecycleLog("Model started.")] }
@@ -636,6 +695,7 @@ function App() {
       await desktopCommands.chat(
         model.modelId,
         model.runtimeModelId,
+        model.targetId,
         requestMessages,
         (event) => {
           setChatSessions((current) => {
@@ -723,11 +783,77 @@ function App() {
     }
   };
 
+  const openRemoteTargetDialog = () => {
+    setRemoteConfig(emptyRemoteTarget());
+    setRemoteTargetDialogError(undefined);
+    setRemoteTargetDialogOpen(true);
+  };
+
+  const closeRemoteTargetDialog = () => {
+    if (remoteTargetSaveLoading) return;
+    setRemoteTargetDialogOpen(false);
+    setRemoteTargetDialogError(undefined);
+    setRemoteConfig(emptyRemoteTarget());
+  };
+
+  const saveRemoteTarget = async () => {
+    setRemoteTargetSaveLoading(true);
+    setRemoteTargetDialogError(undefined);
+    try {
+      const saved = await desktopCommands.saveRemoteTarget({
+        ...remoteConfig,
+        name: remoteConfig.name.trim(),
+        host: remoteConfig.host.trim(),
+        username: remoteConfig.username.trim(),
+        identityFile: remoteConfig.authentication === "key"
+          ? remoteConfig.identityFile?.trim() || undefined
+          : undefined,
+      });
+      setRemoteTargets((current) => [...current.filter((target) => target.targetId !== saved.targetId), saved]
+        .sort((left, right) => left.targetName.localeCompare(right.targetName)));
+      setSelectedRemoteTargetId(saved.targetId);
+      setRemoteReport(undefined);
+      setRemotePassword("");
+      setRemoteTargetDialogOpen(false);
+      setRemoteConfig(emptyRemoteTarget());
+    } catch (saveError) {
+      setRemoteTargetDialogError(messageFromError(saveError));
+    } finally {
+      setRemoteTargetSaveLoading(false);
+    }
+  };
+
+  const checkRemoteTarget = async () => {
+    if (!selectedRemoteTarget) return;
+    setRemoteCheckLoading(true);
+    setRemoteReport(undefined);
+    setError(undefined);
+    try {
+      const report = await desktopCommands.checkRemoteTarget(
+        selectedRemoteTarget.config,
+        selectedRemoteTarget.config.authentication === "password" ? remotePassword : undefined,
+      );
+      setRemoteReport(report);
+    } catch (connectionError) {
+      setError(messageFromError(connectionError));
+    } finally {
+      setRemotePassword("");
+      setRemoteCheckLoading(false);
+    }
+  };
+
   const openWizard = () => {
     setDetailModelId(undefined);
     setWizardOpen(true);
     setWizardStep("location");
     setWizardLocation("local");
+    setSelectedRemoteTargetId("");
+    setRemoteReport(undefined);
+    setRemoteCheckLoading(false);
+    setRemotePassword("");
+    setRemoteTargetDialogOpen(false);
+    setRemoteTargetDialogError(undefined);
+    setRemoteConfig(emptyRemoteTarget());
     setUseCase("chat");
     setDownloadBusy(false);
     setInstallCancellable(false);
@@ -786,6 +912,13 @@ function App() {
     setWizardOpen(false);
     setWizardStep("location");
     setWizardLocation("local");
+    setSelectedRemoteTargetId("");
+    setRemoteReport(undefined);
+    setRemoteCheckLoading(false);
+    setRemotePassword("");
+    setRemoteTargetDialogOpen(false);
+    setRemoteTargetDialogError(undefined);
+    setRemoteConfig(emptyRemoteTarget());
     setUseCase("chat");
     setDownloadBusy(false);
     setInstallCancellable(false);
@@ -826,13 +959,17 @@ function App() {
   const goToNextStep = async () => {
     setError(undefined);
     if (wizardStep === "location") {
+      if (wizardLocation === "remote" && !remoteReport?.canContinue) return;
       setWizardStep("hardware");
     } else if (wizardStep === "hardware") {
       setWizardStep("intent");
     } else if (wizardStep === "intent") {
       setBusy(true);
       try {
-        const result = await desktopCommands.recommendations(useCase);
+        const available = await desktopCommands.recommendations(useCase, wizardTargetId ?? "local");
+        const result = wizardLocation === "remote"
+          ? available.filter((recommendation) => recommendation.runtimeId === "ollama")
+          : available;
         if (!result.length) {
           throw new Error("No supported model was found in the active catalog.");
         }
@@ -887,6 +1024,7 @@ function App() {
       unlisten = await desktopCommands.onInstallProgress(setInstallProgress);
       await desktopCommands.install({
         modelId: selectedRecommendation.modelId,
+        targetId: wizardTargetId ?? "local",
         licenseBasis,
         licenseReference: licenseBasis === "separate" ? separateLicenseReference.trim() : undefined,
         licenseAcknowledged,
@@ -898,9 +1036,9 @@ function App() {
           phase: "installing",
           message: "Starting the selected model…",
         }));
-        await desktopCommands.start(selectedRecommendation.modelId);
+        await desktopCommands.start(selectedRecommendation.modelId, wizardTargetId ?? "local");
       }
-      const details = await desktopCommands.endpoint();
+      const details = await desktopCommands.endpoint(wizardTargetId ?? "local");
       setEndpoint(details);
       addInstalledModel(selectedRecommendation, details.model, startAfterInstall);
       setWizardStep("ready");
@@ -939,6 +1077,23 @@ function App() {
       }, 1_800);
     } catch (copyError: unknown) {
       setError(messageFromError(copyError));
+    }
+  };
+
+  const saveTelemetryPreference = async (enabled: boolean) => {
+    setTelemetrySaving(true);
+    try {
+      await desktopCommands.setTelemetryEnabled(enabled);
+      setTelemetryEnabled(enabled);
+      setTelemetryDialogOpen(false);
+    } catch {
+      // Telemetry preference and upload failures never enter the application's
+      // user-facing error flow. Collection stays disabled unless persistence
+      // succeeds.
+      setTelemetryEnabled(false);
+      setTelemetryDialogOpen(false);
+    } finally {
+      setTelemetrySaving(false);
     }
   };
 
@@ -987,9 +1142,9 @@ function App() {
 
                 {wizardStep === "location" ? (
                   <div className="wizard-body">
-                    <p>Choose where the runtime should live. Remote is planned for a later release.</p>
+                    <p>Run Ollama locally or connect to an existing Ollama service on a remote Linux machine.</p>
                     <div className="choice-list">
-                      <button type="button" className={`choice ${wizardLocation === "local" ? "selected" : ""}`} onClick={() => setWizardLocation("local")}>
+                      <button type="button" className={`choice ${wizardLocation === "local" ? "selected" : ""}`} onClick={() => { setWizardLocation("local"); setRemoteReport(undefined); setHardwareInfo(undefined); setHardwareError(undefined); }}>
                         <span className="choice-icon">L</span>
                         <div>
                           <strong>Local runtime</strong>
@@ -997,24 +1152,97 @@ function App() {
                         </div>
                         <i />
                       </button>
-                      <button type="button" className={`choice ${wizardLocation === "remote" ? "selected" : ""}`} disabled>
+                      <button type="button" className={`choice ${wizardLocation === "remote" ? "selected" : ""}`} onClick={() => { setWizardLocation("remote"); setHardwareInfo(undefined); setHardwareError(undefined); }}>
                         <span className="choice-icon">R</span>
                         <div>
                           <strong>Remote runtime</strong>
-                          <small>Coming soon.</small>
+                          <small>Connect Linux to Linux through your existing SSH access.</small>
                         </div>
                         <i />
                       </button>
                     </div>
+                    <p className="runtime-availability-note">
+                      <strong>Ollama:</strong> LumenSource includes Ollama for local deployments. For remote deployments, Ollama must already be installed and running on the target machine.
+                    </p>
+                    {wizardLocation === "remote" && (
+                      <div className="remote-target-panel">
+                        <div className="remote-scope-note">
+                          <strong>Linux remote preview</strong>
+                          <span>LumenSource checks SSH, target hardware and storage, and the remote Ollama service. It does not install remote services.</span>
+                        </div>
+                        <div className="remote-target-picker">
+                          <label>
+                            <span>Target machine</span>
+                            <select value={selectedRemoteTargetId} onChange={(event) => {
+                              setSelectedRemoteTargetId(event.target.value);
+                              setRemoteReport(undefined);
+                              setRemotePassword("");
+                              setHardwareInfo(undefined);
+                              setHardwareError(undefined);
+                            }}>
+                              <option value="">Select a target machine</option>
+                              {remoteTargets.map((target) => (
+                                <option value={target.targetId} key={target.targetId}>
+                                  {target.config.name.trim()
+                                    ? `${target.targetName} — ${target.config.host}`
+                                    : target.targetName}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button className="secondary-button" type="button" onClick={openRemoteTargetDialog}>
+                            Add target machine
+                          </button>
+                        </div>
+                        {!remoteTargets.length && (
+                          <p className="remote-target-empty">No target machines have been saved yet.</p>
+                        )}
+                        {selectedRemoteTarget && (
+                          <>
+                            <div className="remote-target-summary">
+                              <div>
+                                <strong>{selectedRemoteTarget.targetName}</strong>
+                                <span>{selectedRemoteTarget.config.username}@{selectedRemoteTarget.config.host}:{selectedRemoteTarget.config.port}</span>
+                              </div>
+                              <small>{selectedRemoteTarget.config.authentication === "key"
+                                ? "SSH key or agent"
+                                : "Password authentication"}</small>
+                            </div>
+                            {selectedRemoteTarget.config.authentication === "password" && (
+                              <label className="remote-password-field">
+                                <span>SSH password</span>
+                                <input type="password" value={remotePassword} onChange={(event) => { setRemotePassword(event.target.value); setRemoteReport(undefined); }} autoComplete="current-password" />
+                                <small>Used only for this connection attempt. LumenSource never saves it.</small>
+                              </label>
+                            )}
+                            <button className="secondary-button remote-check-button" type="button" onClick={() => void checkRemoteTarget()} disabled={remoteCheckLoading || (selectedRemoteTarget.config.authentication === "password" && !remotePassword)}>
+                              {remoteCheckLoading ? "Checking connection…" : "Check remote connection"}
+                            </button>
+                          </>
+                        )}
+                        {remoteReport && (
+                          <div className="remote-checks" aria-live="polite">
+                            {remoteReport.checks.map((check) => (
+                              <div className={`remote-check ${check.status}`} key={check.id}>
+                                <span>{check.status === "pass" ? "✓" : "!"}</span>
+                                <div><strong>{check.label}</strong><p>{check.detail}</p>{check.guidance && <small>{check.guidance}</small>}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="actions">
-                      <button className="primary-button" type="button" onClick={goToNextStep}>
+                      <button className="primary-button" type="button" onClick={goToNextStep} disabled={wizardLocation === "remote" && !remoteReport?.canContinue}>
                         Continue
                       </button>
                     </div>
                   </div>
                 ) : wizardStep === "hardware" ? (
                   <div className="wizard-body">
-                    <p>Here is a detailed hardware summary before the model is prepared.</p>
+                    <p>{wizardLocation === "remote"
+                      ? `Here is the hardware detected on ${remoteReport?.targetName ?? "the remote target"} before the model is prepared.`
+                      : "Here is a detailed hardware summary before the model is prepared."}</p>
                     <div className="hardware-summary">
                       <div className="scan-card">
                         <div className="scan-visual"><span>⌘</span><i /><i /></div>
@@ -1024,11 +1252,11 @@ function App() {
                               ? "Detecting hardware..."
                               : hardwareError
                                 ? "Hardware detection failed"
-                                : "Hardware detected"}
+                                : wizardLocation === "remote" ? "Remote hardware detected" : "Hardware detected"}
                           </strong>
                           <p>
                             {hardwareLoading
-                              ? "Scanning your system..."
+                              ? wizardLocation === "remote" ? "Scanning the target system..." : "Scanning your system..."
                               : hardwareError ?? hardwareInfo?.platform}
                           </p>
                         </div>
@@ -1141,7 +1369,9 @@ function App() {
                   </div>
                 ) : wizardStep === "suggestion" ? (
                   <div className="wizard-body">
-                    <p>Use the model recommended for your hardware and selected use case, or choose any model from the active catalog.</p>
+                    <p>{wizardLocation === "remote"
+                      ? "Use the Ollama model recommended for the remote target hardware and selected use case, or choose another compatible model."
+                      : "Use the model recommended for your hardware and selected use case, or choose any model from the active catalog."}</p>
                     <div className="recommendation-picker">
                       {recommendedModel && (
                         <button
@@ -1158,7 +1388,7 @@ function App() {
                             <strong>{recommendedModel.name}</strong>
                             <em>{recommendedModel.provider}</em>
                           </span>
-                          <small>Best match from the compatibility and use-case ranking</small>
+                          <small>{wizardLocation === "remote" ? "Best match for the remote target and selected use case" : "Best match from the compatibility and use-case ranking"}</small>
                           <i className="radio-dot" />
                         </button>
                       )}
@@ -1396,7 +1626,9 @@ function App() {
                   </div>
                 ) : wizardStep === "download" ? (
                   <div className="wizard-body">
-                    <p>Lumen Source will prepare the selected runtime, install the model, verify any direct downloads, and optionally start the model.</p>
+                    <p>{wizardLocation === "remote"
+                      ? `Lumen Source will ask the existing Ollama service on ${remoteReport?.targetName ?? "the remote target"} to pull the model, then optionally preload it.`
+                      : "Lumen Source will prepare the selected runtime, install the model, verify any direct downloads, and optionally start the model."}</p>
                     <label className="install-option">
                       <input
                         type="checkbox"
@@ -1448,7 +1680,9 @@ function App() {
                     <p>{selectedIsDummy
                       ? "The dummy model lifecycle completed. It simulates runtime state and does not provide inference."
                       : startAfterInstall
-                      ? "The model is installed, running locally, and ready for external tools."
+                      ? wizardLocation === "remote"
+                        ? `The model is installed on ${remoteReport?.targetName ?? "the remote target"} and available through the SSH tunnel.`
+                        : "The model is installed, running locally, and ready for external tools."
                       : "The model is installed but has not been loaded into memory."}</p>
                     <div className="success-mark">✓</div>
                     <div className={`runtime-hero ${startAfterInstall ? "" : "stopped"}`}>
@@ -1617,8 +1851,8 @@ function App() {
                         <div className="chat-transcript" ref={chatTranscriptRef} role="log" aria-live="polite" aria-label={`Conversation with ${detailModel.name}`}>
                           {detailChatMessages.length === 0 ? (
                             <div className="chat-empty">
-                              <strong>Start a local conversation</strong>
-                              <span>Messages are sent only to <code>{detailModel.runtimeModelId}</code> through the local Ollama runtime.</span>
+                              <strong>Start a private conversation</strong>
+                              <span>Messages are sent only to <code>{detailModel.runtimeModelId}</code> through {detailModel.location === "remote" ? `the encrypted tunnel to ${detailModel.targetName ?? "the remote target"}` : "the local Ollama runtime"}.</span>
                             </div>
                           ) : detailChatMessages.map((message, index) => (
                             <article className={`chat-message ${message.role}`} key={`${message.role}-${index}`}>
@@ -1655,7 +1889,7 @@ function App() {
                     <div className="detail-section-header">
                       <div>
                         <h2 id="model-api-title">OpenAI-compatible API</h2>
-                        <p>Use this model identifier with the local Ollama endpoint. The endpoint belongs to the runtime, while the <code>model</code> value selects this specific model.</p>
+                        <p>Use this model identifier with the {detailModel.location === "remote" ? "local end of the SSH tunnel" : "local Ollama endpoint"}. The endpoint belongs to the runtime, while the <code>model</code> value selects this specific model.</p>
                       </div>
                     </div>
                     {modelEndpointError && <div className="inline-error" role="alert">{modelEndpointError}</div>}
@@ -1695,7 +1929,7 @@ function App() {
                         )}
                         <div className="api-notice">
                           <strong>{detailModel.running ? "Model is preloaded" : "Model is not preloaded"}</strong>
-                          <span>{detailModel.running ? "Requests can use the currently loaded model." : "Ollama may load an installed model when the first request arrives, which can make that request slower."} Lumen Source does not need to remain open while the independent Ollama service is available.</span>
+                          <span>{detailModel.running ? "Requests can use the currently loaded model." : "Ollama may load an installed model when the first request arrives, which can make that request slower."} {detailModel.location === "remote" ? "Lumen Source must remain open to maintain this SSH tunnel." : "Lumen Source does not need to remain open while the independent Ollama service is available."}</span>
                         </div>
                       </>
                     ) : null}
@@ -1707,7 +1941,7 @@ function App() {
                 <div className="models-toolbar">
                   <div>
                     <span className="eyebrow">Models</span>
-                    <h1>Local models</h1>
+                    <h1>Models</h1>
                   </div>
                   <button className="primary-button" type="button" onClick={openWizard}>
                     Add model
@@ -1722,7 +1956,7 @@ function App() {
                           <span className={`led ${model.running ? "on" : "off"}`} aria-label={model.running ? "Running" : "Stopped"} />
                           <div>
                             <strong role="cell">{model.name}</strong>
-                            <p>{model.modelName} · {model.version}{model.managed === false ? " · Discovered" : ""}</p>
+                            <p>{model.modelName} · {model.version} · {model.location === "remote" ? model.targetName ?? "Remote Linux" : "This machine"}{model.managed === false ? " · Discovered" : ""}</p>
                             {modelAction?.id === model.id && (
                               <span className="model-transition"><i className="model-control-spinner" /> {modelAction.action === "starting" ? "Starting model…" : "Stopping model…"}</span>
                             )}
@@ -1779,12 +2013,135 @@ function App() {
       </main>
 
       <footer className="app-footer">
+        <button
+          className="telemetry-settings-button"
+          type="button"
+          onClick={() => setTelemetryDialogOpen(true)}
+        >
+          Usage statistics: {telemetryEnabled ? "on" : "off"}
+        </button>
         {catalog && (
-          <span>
-            Catalog {catalog.revision} · {catalog.modelCount} models available · {catalog.source}
-          </span>
+          <div
+            className={`catalog-status ${catalog.source}`}
+            role="status"
+            title={CATALOG_SOURCE_DETAILS[catalog.source]}
+          >
+            <i aria-hidden="true" />
+            <strong>{CATALOG_SOURCE_LABELS[catalog.source]}</strong>
+            <span>Catalog {catalog.revision} · {catalog.modelCount} models</span>
+          </div>
         )}
       </footer>
+
+      {telemetryDialogOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={() => {
+            if (telemetryEnabled !== undefined) setTelemetryDialogOpen(false);
+          }}
+        >
+          <div
+            className="modal-card telemetry-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="telemetry-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="eyebrow">Privacy choice</span>
+            <h3 id="telemetry-dialog-title">Help improve LumenSource</h3>
+            <p>
+              If you choose to share usage statistics, LumenSource sends weekly
+              aggregate counts for catalog loads, model installs, starts, and
+              built-in chat outcomes, plus coarse operating-system and hardware
+              tiers.
+            </p>
+            <p>
+              Prompts, responses, files, paths, hostnames, remote addresses,
+              account details, and raw error messages are never collected.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={telemetrySaving}
+                onClick={() => void saveTelemetryPreference(false)}
+              >
+                Do not share
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={telemetrySaving}
+                onClick={() => void saveTelemetryPreference(true)}
+              >
+                {telemetrySaving ? "Saving…" : "Share statistics"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {remoteTargetDialogOpen && (
+        <div className="modal-backdrop" onClick={closeRemoteTargetDialog}>
+          <form className="modal-card remote-target-dialog" role="dialog" aria-modal="true" aria-labelledby="remote-target-dialog-title" onClick={(event) => event.stopPropagation()} onSubmit={(event) => {
+            event.preventDefault();
+            void saveRemoteTarget();
+          }}>
+            <div className="remote-target-dialog-heading">
+              <div>
+                <span className="eyebrow">Remote deployment</span>
+                <h3 id="remote-target-dialog-title">Add target machine</h3>
+              </div>
+              <button className="icon-button" type="button" onClick={closeRemoteTargetDialog} disabled={remoteTargetSaveLoading} aria-label="Close target machine dialog">✕</button>
+            </div>
+            <p>Save the SSH connection settings for this machine. LumenSource will check the connection after you select it in the wizard.</p>
+            <div className="wizard-form remote-target-form">
+              <label>
+                <span>Target name (optional)</span>
+                <input value={remoteConfig.name} maxLength={80} onChange={(event) => setRemoteConfig((current) => ({ ...current, name: event.target.value }))} placeholder="GPU workstation" />
+                <small>The host or IP address is used when this is blank.</small>
+              </label>
+              <label>
+                <span>Host or IP address</span>
+                <input value={remoteConfig.host} maxLength={255} required onChange={(event) => setRemoteConfig((current) => ({ ...current, host: event.target.value }))} placeholder="model-host.example" autoCapitalize="none" spellCheck={false} />
+              </label>
+              <label>
+                <span>SSH username</span>
+                <input value={remoteConfig.username} maxLength={64} required onChange={(event) => setRemoteConfig((current) => ({ ...current, username: event.target.value }))} placeholder="user" autoCapitalize="none" spellCheck={false} />
+              </label>
+              <label>
+                <span>SSH port</span>
+                <input type="number" min={1} max={65535} required value={remoteConfig.port} onChange={(event) => setRemoteConfig((current) => ({ ...current, port: Number(event.target.value) }))} />
+              </label>
+              <fieldset className="remote-authentication">
+                <legend>Authentication</legend>
+                <label className={remoteConfig.authentication === "key" ? "selected" : ""}>
+                  <input type="radio" name="new-remote-authentication" value="key" checked={remoteConfig.authentication === "key"} onChange={() => setRemoteConfig((current) => ({ ...current, authentication: "key" }))} />
+                  <span><strong>SSH key or agent</strong><small>Recommended for repeat connections and automatic reconnects.</small></span>
+                </label>
+                <label className={remoteConfig.authentication === "password" ? "selected" : ""}>
+                  <input type="radio" name="new-remote-authentication" value="password" checked={remoteConfig.authentication === "password"} onChange={() => setRemoteConfig((current) => ({ ...current, authentication: "password", identityFile: undefined }))} />
+                  <span><strong>Password</strong><small>Non-preferred fallback. You will enter it when connecting; it is never saved.</small></span>
+                </label>
+              </fieldset>
+              {remoteConfig.authentication === "key" && (
+                <label className="remote-key-field">
+                  <span>Identity file (optional)</span>
+                  <input value={remoteConfig.identityFile ?? ""} onChange={(event) => setRemoteConfig((current) => ({ ...current, identityFile: event.target.value || undefined }))} placeholder="/home/user/.ssh/id_ed25519" autoCapitalize="none" spellCheck={false} />
+                  <small>Leave blank to use your SSH agent and configuration. Encrypted keys must already be unlocked in the agent.</small>
+                </label>
+              )}
+            </div>
+            {remoteTargetDialogError && <div className="inline-error" role="alert">{remoteTargetDialogError}</div>}
+            <div className="modal-actions">
+              <button className="secondary-button" type="button" onClick={closeRemoteTargetDialog} disabled={remoteTargetSaveLoading}>Cancel</button>
+              <button className="primary-button" type="submit" disabled={remoteTargetSaveLoading || !remoteConfig.host.trim() || !remoteConfig.username.trim() || !Number.isInteger(remoteConfig.port) || remoteConfig.port < 1 || remoteConfig.port > 65535}>
+                {remoteTargetSaveLoading ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {renameId && (
         <div className="modal-backdrop" onClick={() => setRenameId(undefined)}>

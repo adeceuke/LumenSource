@@ -96,8 +96,39 @@ export interface PreflightReport {
   checks: PreflightCheck[];
 }
 
+export interface RemoteTargetConfig {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  authentication: "key" | "password";
+  identityFile?: string;
+}
+
+export interface RemoteTargetProfile {
+  targetId: string;
+  targetName: string;
+  config: RemoteTargetConfig;
+}
+
+export interface RemoteConnectionCheck {
+  id: string;
+  label: string;
+  status: "pass" | "fail";
+  detail: string;
+  guidance?: string;
+}
+
+export interface RemoteConnectionReport {
+  targetId: string;
+  targetName: string;
+  canContinue: boolean;
+  checks: RemoteConnectionCheck[];
+}
+
 export interface InstallRequest {
   modelId: string;
+  targetId: string;
   licenseBasis: "catalog" | "separate";
   licenseReference?: string;
   licenseAcknowledged: boolean;
@@ -158,6 +189,8 @@ export interface RunningModelEntry {
   runtimeModelId?: string;
   version: string;
   location: "local" | "remote";
+  targetId: string;
+  targetName?: string;
   running: boolean;
   managed?: boolean;
   digest?: string;

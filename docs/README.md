@@ -8,6 +8,10 @@ The Markdown documentation describes the current implementation:
   and dummy-runtime testing
 - [`platform-support.md`](platform-support.md) — v0.1 target and cross-platform
   boundaries
+- [`remote-hosts.md`](remote-hosts.md) — implemented Linux remote preview plus
+  cross-platform architecture, security, delivery phases, and acceptance gates
+- [`telemetry.md`](telemetry.md) — optional aggregate usage data, offline retry
+  semantics, and the server ingestion contract
 
 The product and architecture source documents are stored at the repository
 root:

@@ -2049,7 +2049,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lumen-source-catalog"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-source-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "lumen-source-catalog",
@@ -2078,26 +2078,31 @@ dependencies = [
 
 [[package]]
 name = "lumen-source-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "dirs",
  "lumen-source-catalog",
  "lumen-source-hardware",
  "lumen-source-host",
  "lumen-source-recommend",
  "lumen-source-runtime",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "tempfile",
  "tokio",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]
 name = "lumen-source-hardware"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -2107,7 +2112,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-source-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "lumen-source-hardware",
@@ -2119,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-source-recommend"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "lumen-source-catalog",
  "lumen-source-hardware",
@@ -2128,7 +2133,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-source-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-util",
