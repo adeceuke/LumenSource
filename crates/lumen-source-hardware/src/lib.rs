@@ -614,7 +614,7 @@ async fn read_sysfs_vram(card_path: &Path) -> Option<u64> {
 }
 
 async fn sample_accelerators() -> Vec<AcceleratorUsage> {
-    let output = match Command::new("nvidia-smi")
+    let mut devices = match Command::new("nvidia-smi")
         .args([
             "--query-gpu=name,utilization.gpu,memory.used",
             "--format=csv,noheader,nounits",
@@ -624,24 +624,61 @@ async fn sample_accelerators() -> Vec<AcceleratorUsage> {
         .output()
         .await
     {
-        Ok(output) if output.status.success() => output,
-        _ => return Vec::new(),
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut columns = line.split(',').map(str::trim);
-            Some(AcceleratorUsage {
-                kind: AcceleratorKind::Nvidia,
-                name: columns.next()?.to_owned(),
-                utilization_percent: columns.next().and_then(|value| value.parse().ok()),
-                used_vram_bytes: columns
-                    .next()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .map(|mib| mib.saturating_mul(1024 * 1024)),
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let mut columns = line.split(',').map(str::trim);
+                Some(AcceleratorUsage {
+                    kind: AcceleratorKind::Nvidia,
+                    name: columns.next()?.to_owned(),
+                    utilization_percent: columns.next().and_then(|value| value.parse().ok()),
+                    used_vram_bytes: columns
+                        .next()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .map(|mib| mib.saturating_mul(1024 * 1024)),
+                })
             })
-        })
-        .collect()
+            .collect(),
+        _ => Vec::new(),
+    };
+    devices.extend(sample_sysfs_accelerators().await);
+    devices
+}
+
+async fn sample_sysfs_accelerators() -> Vec<AcceleratorUsage> {
+    let mut devices = Vec::new();
+    let mut entries = match fs::read_dir("/sys/class/drm").await {
+        Ok(entries) => entries,
+        Err(_) => return devices,
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("card") || name.contains('-') {
+            continue;
+        }
+        let device_path = entry.path().join("device");
+        let kind = match read_optional(device_path.join("vendor"))
+            .await
+            .as_deref()
+            .map(str::trim)
+        {
+            Some("0x1002") => AcceleratorKind::Amd,
+            Some("0x8086") => AcceleratorKind::Intel,
+            Some("0x10de") | None => continue,
+            Some(_) => AcceleratorKind::Other,
+        };
+        devices.push(AcceleratorUsage {
+            kind,
+            name,
+            utilization_percent: read_optional(device_path.join("gpu_busy_percent"))
+                .await
+                .and_then(|value| value.trim().parse().ok()),
+            used_vram_bytes: read_optional(device_path.join("mem_info_vram_used"))
+                .await
+                .and_then(|value| value.trim().parse().ok()),
+        });
+    }
+    devices
 }
 
 fn unix_time_ms() -> u64 {

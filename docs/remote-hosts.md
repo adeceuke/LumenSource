@@ -40,25 +40,28 @@ The target must already have:
 Lumen Source uses the controller's OpenSSH client. Existing SSH
 agent/configuration or an optional identity-file path is the preferred
 authentication method. Password authentication is available as a
-non-preferred, connection-only fallback. Existing host-key trust is required.
+non-preferred fallback and can use the controller operating system's credential
+store. Existing host-key trust is required.
 If it is missing, the wizard tells the user to connect once in a terminal and
 verify the fingerprint before retrying.
 
 The saved profile contains the optional target name, host, port, username,
-authentication mode, and optional identity-file path. It contains no password.
+authentication mode, and optional identity-file path. It contains no password;
+saved passwords are separate credential-store entries keyed by target identity.
 The optional target name is used as the model-list location label. When it is
 blank, the configured hostname or IP address is used. Key authentication must
 work without a terminal prompt; encrypted keys must be unlocked in an
 accessible SSH agent. For a password-authenticated profile, the wizard asks for
-a connection-only password after selection. It is supplied to OpenSSH through a
-mode-`0600`, one-time Unix socket and helper process, never placed in process
-arguments or environment values, and cleared after the connection attempt.
+a password after selection and lets the user keep it transient or save it in
+the operating system credential store. It is supplied to OpenSSH through a
+mode-`0600`, one-time Unix socket and helper process and is never placed in
+process arguments or environment values.
 
 Model pulls, lifecycle requests, Chat, performance sampling, deletion, and API
 details use the tunneled remote Ollama client. Saved models retain their target
 identity. Key-authenticated targets reconnect on demand after restart.
-Password-authenticated targets require the user to reconnect and re-enter the
-password because Lumen Source does not persist it.
+Password-authenticated targets also reconnect on demand when their credential
+is saved; otherwise the model action asks for the password.
 
 It is impossible to run a local model on a machine with no inference runtime or
 model data. If Ollama is absent, a later explicit agentless bootstrap may place
@@ -126,9 +129,9 @@ Required controls:
 - Prefer existing SSH configuration, an SSH agent, or a selected key; never
   enable SSH agent forwarding.
 - Do not store passwords, private-key contents, or passphrases in JSON state.
-- Keep connection-only passwords out of arguments, environment values, and
-  logs; clear the UI and backend value immediately after authentication.
-- Add OS credential storage before supporting stored passwords.
+- Keep passwords out of arguments, environment values, JSON state, and logs.
+- Store remembered passwords only in the operating system credential store and
+  provide an explicit forget action.
 - Do not log credentials, prompts, responses, or private-key paths.
 - Validate usernames, hosts, ports, remote paths, and model references.
 - Keep fixed remote probe commands in OS-specific adapters and never
@@ -204,8 +207,8 @@ Missing optional facts remain unavailable rather than failing connection.
    machine**.
 3. In the dialog, enter connection metadata, choose authentication, and select
    **Save**. The new target is selected automatically.
-4. Enter the transient password when required, then verify host identity and
-   test the connection.
+4. Enter the password when required, choose whether to save it securely, then
+   verify host identity and test the connection.
 5. Detect target OS, architecture, hardware, storage, and Ollama status.
 6. Continue without installation when Ollama is already available.
 7. Recommend using target hardware.
@@ -307,9 +310,9 @@ target, installs no Lumen Source software remotely, keeps Ollama on target
 loopback, and performs model operations through the tunnel. It starts a stopped
 Ollama server as the SSH user when necessary. It stores non-secret target
 metadata and an optional identity-file path, but no passwords, passphrases, or
-key contents. A password may exist transiently in application memory only while
-establishing the requested connection. Closing Lumen Source closes the tunnel
-without stopping target Ollama.
+key contents. Passwords can be transient or separate operating-system
+credential-store entries. Closing Lumen Source closes the tunnel without
+stopping target Ollama.
 
 Remote model ranking and preflight use the target's detected RAM, available
 storage, operating system, and supported GPU/VRAM facts. Missing optional memory

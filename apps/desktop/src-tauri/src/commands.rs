@@ -1,6 +1,7 @@
 use crate::bridge::{
-    CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, PerformanceSnapshot,
-    PersistedModelEntry, PreflightReport, Recommendation, RuntimeStatus, SharedCoreAdapter,
+    CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, MachineUsageSnapshot,
+    PerformanceSnapshot, PersistedModelEntry, PreflightReport, Recommendation,
+    RemoteCredentialStatus, RuntimeStatus, SharedCoreAdapter,
 };
 use lumen_source_runtime::ChatMessage;
 use serde::Deserialize;
@@ -68,11 +69,55 @@ pub async fn check_remote_target(
 }
 
 #[tauri::command]
+pub async fn remote_credential_status(
+    core: State<'_, SharedCoreAdapter>,
+    target_id: String,
+) -> Result<RemoteCredentialStatus, String> {
+    core.remote_credential_status(&target_id).await
+}
+
+#[tauri::command]
+pub async fn save_remote_password(
+    core: State<'_, SharedCoreAdapter>,
+    target_id: String,
+    password: String,
+) -> Result<(), String> {
+    core.save_remote_password(&target_id, Zeroizing::new(password))
+        .await
+}
+
+#[tauri::command]
+pub async fn delete_remote_password(
+    core: State<'_, SharedCoreAdapter>,
+    target_id: String,
+) -> Result<(), String> {
+    core.delete_remote_password(&target_id).await
+}
+
+#[tauri::command]
 pub async fn detect_hardware(
     core: State<'_, SharedCoreAdapter>,
     target_id: Option<String>,
+    password: Option<String>,
 ) -> Result<HardwareProfile, String> {
-    core.detect_hardware(&normalize_target_id(target_id)).await
+    core.detect_hardware(
+        &normalize_target_id(target_id),
+        password.map(Zeroizing::new),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn machine_usage(
+    core: State<'_, SharedCoreAdapter>,
+    target_id: Option<String>,
+    password: Option<String>,
+) -> Result<MachineUsageSnapshot, String> {
+    core.machine_usage(
+        &normalize_target_id(target_id),
+        password.map(Zeroizing::new),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -132,8 +177,14 @@ pub async fn start_runtime(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
     target_id: Option<String>,
+    password: Option<String>,
 ) -> Result<RuntimeStatus, String> {
-    core.start(model_id, normalize_target_id(target_id)).await
+    core.start(
+        model_id,
+        normalize_target_id(target_id),
+        password.map(Zeroizing::new),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -141,8 +192,14 @@ pub async fn stop_runtime(
     core: State<'_, SharedCoreAdapter>,
     model_id: String,
     target_id: Option<String>,
+    password: Option<String>,
 ) -> Result<RuntimeStatus, String> {
-    core.stop(model_id, normalize_target_id(target_id)).await
+    core.stop(
+        model_id,
+        normalize_target_id(target_id),
+        password.map(Zeroizing::new),
+    )
+    .await
 }
 
 #[tauri::command]

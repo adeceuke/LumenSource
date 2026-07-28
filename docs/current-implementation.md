@@ -150,6 +150,28 @@ reconnects through the loopback API. Lumen Source does not currently install a
 login or boot service, so surviving a machine reboot depends on the system's
 Ollama service configuration.
 
+## Machines page and live usage
+
+The application sidebar separates installed models from configured machines.
+The local device is always present. Remote Linux machines use the same saved
+SSH target configuration as the model-install wizard, including host, port,
+username, SSH-agent or identity-file authentication, and optional password
+authentication.
+
+Selecting a machine opens its details view on the **Hardware** tab. Static
+hardware detection covers CPU, memory, supported accelerators, storage, and
+platform information. The adjacent **Live usage** tab graphs CPU, memory, and
+supported GPU utilization. One snapshot is requested every two seconds while
+the machine details view is open, with the latest 60 snapshots forming a
+rolling two-minute window.
+
+Local samples use Linux `/proc`, `/sys`, and optional GPU tools. Remote samples
+run a fixed, non-user-generated probe through OpenSSH and return the normalized
+data to the local desktop client. Remote hardware inspection does not require
+Ollama to be installed. Passwords are never written to LumenSource state files.
+They can remain in memory for the current session or be saved in the operating
+system credential store and reused for later SSH reconnections.
+
 ## Models page and discovery
 
 At application startup, the desktop reconciles persisted UI metadata with
@@ -262,8 +284,8 @@ errors remain visible through the application error banner.
   storage, and supported GPU facts for recommendation and preflight. The
   deployment step uses an initially empty selector backed by saved non-secret
   target profiles; adding a target happens in a dialog and selects the saved
-  target. SSH keys/agents are preferred; a password may be supplied for the
-  current connection but is never persisted and cannot reconnect automatically.
+  target. SSH keys/agents are preferred; a password can remain session-only or
+  be saved in the operating system credential store for automatic reconnects.
   Remote runtime installation is not implemented. See
   [`remote-hosts.md`](remote-hosts.md).
 - Linux hardware probing is implemented; macOS and Windows probes remain

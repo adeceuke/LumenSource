@@ -8,10 +8,12 @@ import type {
   HardwareProfile,
   InstallProgress,
   InstallRequest,
+  MachineUsageSnapshot,
   PerformanceSnapshot,
   PreflightReport,
   Recommendation,
   RemoteConnectionReport,
+  RemoteCredentialStatus,
   RemoteTargetConfig,
   RemoteTargetProfile,
   RunningModelEntry,
@@ -23,13 +25,21 @@ export const desktopCommands = {
   telemetryPreference: () => invoke<boolean | null>("telemetry_preference"),
   setTelemetryEnabled: (enabled: boolean) =>
     invoke<void>("set_telemetry_enabled", { enabled }),
-  detectHardware: (targetId: string) =>
-    invoke<HardwareProfile>("detect_hardware", { targetId }),
+  detectHardware: (targetId: string, password?: string) =>
+    invoke<HardwareProfile>("detect_hardware", { targetId, password }),
+  machineUsage: (targetId: string, password?: string) =>
+    invoke<MachineUsageSnapshot>("machine_usage", { targetId, password }),
   loadRemoteTargets: () => invoke<RemoteTargetProfile[]>("load_remote_targets"),
   saveRemoteTarget: (config: RemoteTargetConfig) =>
     invoke<RemoteTargetProfile>("save_remote_target", { config }),
   checkRemoteTarget: (config: RemoteTargetConfig, password?: string) =>
     invoke<RemoteConnectionReport>("check_remote_target", { config, password }),
+  remoteCredentialStatus: (targetId: string) =>
+    invoke<RemoteCredentialStatus>("remote_credential_status", { targetId }),
+  saveRemotePassword: (targetId: string, password: string) =>
+    invoke<void>("save_remote_password", { targetId, password }),
+  deleteRemotePassword: (targetId: string) =>
+    invoke<void>("delete_remote_password", { targetId }),
   loadCatalog: () => invoke<CatalogSummary>("load_catalog"),
   refreshCatalog: () => invoke<CatalogSummary>("refresh_catalog"),
   recommendations: (intent: UseIntent, targetId: string) =>
@@ -43,9 +53,10 @@ export const desktopCommands = {
     handler: (progress: InstallProgress) => void,
   ): Promise<UnlistenFn> =>
     listen<InstallProgress>("install-progress", ({ payload }) => handler(payload)),
-  start: (modelId: string, targetId: string) =>
-    invoke<RuntimeStatus>("start_runtime", { modelId, targetId }),
-  stop: (modelId: string, targetId: string) => invoke<RuntimeStatus>("stop_runtime", { modelId, targetId }),
+  start: (modelId: string, targetId: string, password?: string) =>
+    invoke<RuntimeStatus>("start_runtime", { modelId, targetId, password }),
+  stop: (modelId: string, targetId: string, password?: string) =>
+    invoke<RuntimeStatus>("stop_runtime", { modelId, targetId, password }),
   status: () => invoke<RuntimeStatus>("runtime_status"),
   performance: (modelId: string, runtimeModelId: string, targetId: string) =>
     invoke<PerformanceSnapshot>("model_performance", { modelId, runtimeModelId, targetId }),
@@ -69,8 +80,23 @@ export const desktopCommands = {
   removeModel: (modelId: string) => invoke<RunningModelEntry[]>("remove_model", { modelId }),
 };
 
-export function messageFromError(error: unknown): string {
+export function messageFromError(error: unknown, fallback: string): string {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
-  return "Something unexpected happened. Please try again.";
+  return fallback;
+}
+
+export function isChatCancellationMessage(message: string): boolean {
+  return message.toLowerCase().includes("chat cancelled");
+}
+
+export function isInstallCancellationMessage(message: string): boolean {
+  return message.toLowerCase() === "installation cancelled";
+}
+
+export function isRemotePasswordRequiredMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes("ssh_password_required")
+    || normalized.includes("password authentication was rejected")
+    || normalized.includes("enter the ssh password");
 }

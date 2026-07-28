@@ -13,10 +13,23 @@ npm run tauri dev
 
 The Vite UI is intentionally a presentation layer. Typed calls live in
 `src/commands.ts`; the corresponding Tauri command handlers live in
-`src-tauri/src/commands.rs`.
+`src-tauri/src/commands.rs`. Page-sized views live in `src/components`, while
+model lifecycle, chat, and performance state live in `src/hooks`. Shared
+presentation helpers are kept in `src/modelUi.ts`.
 
 `src-tauri/src/bridge.rs` is the adaptation seam for shared Rust APIs. The
-guided wizard uses the shared hardware, catalog, recommendation, host, and
+serialized desktop types are defined in `src-tauri/src/bridge_types.rs`, and
+installed-model normalization and reconciliation live in
+`src-tauri/src/model_reconciliation.rs`. The small binary entry point delegates
+application construction to the library crate.
+
+User-facing copy is defined in `src/locales/en.ts` and accessed through
+`src/i18n.ts`. Tauri progress, preflight, and remote-check responses use stable
+message keys so the frontend—not the backend—chooses their localized wording.
+Machine-specific diagnostics and catalog-authored metadata remain data rather
+than translated interface copy.
+
+The guided wizard uses the shared hardware, catalog, recommendation, host, and
 runtime crates for the local flow: it detects hardware (including CPU frequency
 and best-effort RAM generation/speed), ranks compatible catalog variants, lets
 the user choose the recommendation or any supported catalog variant, shows
@@ -63,6 +76,7 @@ contract.
 ## Command surface
 
 - Hardware detection
+- Local and SSH-remote machine usage sampling
 - Cached catalog load and network refresh
 - Intent-based recommendations
 - Installation preflight
@@ -80,6 +94,17 @@ rate). Firmware information is not exposed on every machine; unavailable
 optional fields do not make hardware detection fail.
 
 ## Runtime lifecycle and discovery
+
+The left navigation separates installed **Models** from configured
+**Machines**. The Machines list always includes the local device and includes
+each saved SSH target. Selecting a machine opens a details view with static
+hardware information and a separate **Live usage** tab. While machine details
+are open, LumenSource samples CPU, memory, and supported GPU usage every two
+seconds and keeps a rolling two-minute graph. Remote samples are collected
+through the configured SSH connection and rendered by the local desktop
+client. SSH passwords can remain session-only or be saved in the operating
+system credential store. They are never written to persisted target
+configuration.
 
 When Ollama is reachable, the local adapter discovers downloaded Ollama models
 through `/api/tags` and loaded models through `/api/ps`. Catalog-matched models
@@ -138,8 +163,8 @@ recommendation and preflight, but does not install remote services.
 The wizard selects from saved non-secret target
 profiles; **Add target machine** opens the connection-settings dialog and
 selects the new target after saving. SSH keys and agents are preferred; a
-password can be supplied for one connection but is never saved, so reconnecting
-requires it again. Remove stops the selected model when necessary,
+password can remain session-only or be saved securely for automatic reconnects.
+Remove stops the selected model when necessary,
 deletes it from the selected Ollama model store, and clears its Lumen Source entries. See
 [current implementation](../../docs/current-implementation.md) for the complete
 behavior and limitations.

@@ -4,10 +4,11 @@ use std::process::Stdio;
 #[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lumen_source_hardware::{
-    AcceleratorFacts, AcceleratorKind, CpuFacts, HardwareFacts, MemoryFacts, OsFacts, StorageFacts,
+    AcceleratorFacts, AcceleratorKind, AcceleratorUsage, CpuFacts, HardwareFacts, MemoryFacts,
+    OsFacts, StorageFacts, UsageSnapshot,
 };
 use lumen_source_runtime::{OllamaRuntime, Runtime};
 use serde::{Deserialize, Serialize};
@@ -88,6 +89,37 @@ if command -v rocminfo >/dev/null 2>&1 && rocminfo >/dev/null 2>&1; then
         printf '%s|%s\n' "${lumen_card##*/}" "$lumen_vram"
     done
 fi
+"#;
+const REMOTE_USAGE_COMMAND: &str = r#"LC_ALL=C; export LC_ALL
+lumen_section() {
+    printf '\n[LUMEN_SOURCE:%s]\n' "$1"
+}
+lumen_section CPU_BEFORE
+head -n 1 /proc/stat
+sleep 0.1
+lumen_section CPU_AFTER
+head -n 1 /proc/stat
+lumen_section MEMINFO
+cat /proc/meminfo
+lumen_section NVIDIA
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi --query-gpu=name,utilization.gpu,memory.used --format=csv,noheader,nounits 2>/dev/null || true
+fi
+lumen_section AMD
+for lumen_card in /sys/class/drm/card[0-9]*; do
+    [ -r "$lumen_card/device/vendor" ] || continue
+    lumen_vendor=$(cat "$lumen_card/device/vendor" 2>/dev/null)
+    [ "$lumen_vendor" = "0x1002" ] || continue
+    lumen_busy=
+    lumen_vram=
+    if [ -r "$lumen_card/device/gpu_busy_percent" ]; then
+        lumen_busy=$(cat "$lumen_card/device/gpu_busy_percent" 2>/dev/null)
+    fi
+    if [ -r "$lumen_card/device/mem_info_vram_used" ]; then
+        lumen_vram=$(cat "$lumen_card/device/mem_info_vram_used" 2>/dev/null)
+    fi
+    printf '%s|%s|%s\n' "${lumen_card##*/}" "$lumen_busy" "$lumen_vram"
+done
 "#;
 #[cfg(unix)]
 const ASKPASS_SOCKET_ENV: &str = "LUMEN_SOURCE_ASKPASS_SOCKET";
@@ -336,8 +368,8 @@ fn validate_component(label: &str, value: &str, max: usize, extra: &str) -> Resu
 #[serde(rename_all = "camelCase")]
 pub struct RemoteCheck {
     pub id: String,
-    pub label: String,
     pub status: String,
+    pub message_key: String,
     pub detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guidance: Option<String>,
@@ -374,6 +406,26 @@ pub struct RemoteConnectionAttempt {
     pub session: Option<Arc<RemoteSession>>,
 }
 
+pub async fn probe_hardware(
+    config: &RemoteTargetConfig,
+    password: Option<Zeroizing<String>>,
+) -> Result<HardwareFacts, String> {
+    config.validate()?;
+    let password = password.filter(|value| !value.is_empty()).map(Arc::new);
+    let output = ssh_probe(config, REMOTE_HARDWARE_COMMAND, password.as_ref()).await?;
+    parse_remote_hardware(&output)
+}
+
+pub async fn probe_usage(
+    config: &RemoteTargetConfig,
+    password: Option<Zeroizing<String>>,
+) -> Result<UsageSnapshot, String> {
+    config.validate()?;
+    let password = password.filter(|value| !value.is_empty()).map(Arc::new);
+    let output = ssh_probe(config, REMOTE_USAGE_COMMAND, password.as_ref()).await?;
+    parse_remote_usage(&output)
+}
+
 pub async fn connect(
     config: RemoteTargetConfig,
     password: Option<Zeroizing<String>>,
@@ -396,8 +448,8 @@ pub async fn connect(
         Ok(output) if output.trim() == "Linux" => {
             checks.push(check(
                 "connection",
-                "SSH connection",
                 "pass",
+                "connection.connected",
                 "Connected securely and confirmed a Linux target.",
                 None,
             ));
@@ -406,8 +458,8 @@ pub async fn connect(
         Ok(output) => {
             checks.push(check(
                 "connection",
-                "SSH connection",
                 "fail",
+                "connection.unsupportedOs",
                 &format!("The target reported `{}` instead of Linux.", output.trim()),
                 Some("This release supports Linux-to-Linux remote targets only."),
             ));
@@ -417,8 +469,8 @@ pub async fn connect(
             let guidance = ssh_connection_guidance(&detail, &config);
             checks.push(check(
                 "connection",
-                "SSH connection",
                 "fail",
+                "connection.failed",
                 &detail,
                 Some(&guidance),
             ));
@@ -433,8 +485,8 @@ pub async fn connect(
             Err(detail) => {
                 checks.push(check(
                     "hardware",
-                    "Remote hardware",
                     "fail",
+                    "hardware.invalidResponse",
                     &format!("Could not interpret the target's Linux hardware data. {detail}"),
                     Some(
                         "Confirm `/proc/cpuinfo`, `/proc/meminfo`, `uname`, and `df` are available to the SSH user, then retry.",
@@ -446,8 +498,8 @@ pub async fn connect(
         Err(detail) => {
             checks.push(check(
                 "hardware",
-                "Remote hardware",
                 "fail",
+                "hardware.probeFailed",
                 &format!("Could not inspect the target hardware. {detail}"),
                 Some(
                     "Confirm `/proc/cpuinfo`, `/proc/meminfo`, `uname`, and `df` are available to the SSH user, then retry.",
@@ -458,8 +510,8 @@ pub async fn connect(
     };
     checks.push(check(
         "hardware",
-        "Remote hardware",
         "pass",
+        "hardware.detected",
         &hardware_summary(&hardware),
         None,
     ));
@@ -469,8 +521,8 @@ pub async fn connect(
     {
         checks.push(check(
             "ollama",
-            "Remote Ollama",
             "fail",
+            "ollama.notFound",
             &format!("Ollama was not found for the remote SSH user. {detail}"),
             Some(
                 "Install Ollama on the target using the publisher's Linux instructions at https://docs.ollama.com/linux, then confirm `ssh <target> ollama --version` works. LumenSource checks the login shell and common system and per-user install locations.",
@@ -528,8 +580,8 @@ pub async fn connect(
                 let _ = child.kill().await;
                 checks.push(check(
                     "ollama",
-                    "Remote Ollama",
                     "fail",
+                    "ollama.startFailed",
                     &format!(
                         "Ollama is installed, but LumenSource could not start `ollama serve`. {detail}"
                     ),
@@ -546,8 +598,12 @@ pub async fn connect(
         let _ = child.kill().await;
         checks.push(check(
             "ollama",
-            "Remote Ollama",
             "fail",
+            if started_ollama {
+                "ollama.startedUnreachable"
+            } else {
+                "ollama.tunnelClosed"
+            },
             if started_ollama {
                 "LumenSource started `ollama serve`, but its loopback API did not become reachable on the target."
             } else {
@@ -562,8 +618,12 @@ pub async fn connect(
 
     checks.push(check(
         "ollama",
-        "Remote Ollama",
         "pass",
+        if started_ollama {
+            "ollama.started"
+        } else {
+            "ollama.reachable"
+        },
         if started_ollama {
             "Ollama was installed but stopped. LumenSource started `ollama serve`, and its loopback API is reachable through the encrypted SSH tunnel."
         } else {
@@ -717,6 +777,125 @@ fn parse_remote_hardware(output: &str) -> Result<HardwareFacts, String> {
         storage,
         accelerators,
     })
+}
+
+fn parse_remote_usage(output: &str) -> Result<UsageSnapshot, String> {
+    const KIB: u64 = 1024;
+    let sections = parse_sections(output);
+    let section = |name: &str| {
+        sections
+            .get(name)
+            .map(String::as_str)
+            .ok_or_else(|| format!("The `{name}` section is missing."))
+    };
+    let meminfo = section("MEMINFO")?;
+    let memory_value = |key: &str| {
+        meminfo.lines().find_map(|line| {
+            let (name, rest) = line.split_once(':')?;
+            (name == key)
+                .then(|| rest.split_whitespace().next()?.parse::<u64>().ok())
+                .flatten()
+        })
+    };
+    let total_ram_bytes = memory_value("MemTotal")
+        .ok_or_else(|| "The target did not report MemTotal.".to_owned())?
+        .saturating_mul(KIB);
+    let available_ram_bytes = memory_value("MemAvailable")
+        .or_else(|| memory_value("MemFree"))
+        .ok_or_else(|| "The target did not report available memory.".to_owned())?
+        .saturating_mul(KIB);
+    let mut accelerators = sections
+        .get("NVIDIA")
+        .map(|value| parse_nvidia_usage(value))
+        .unwrap_or_default();
+    if let Some(amd) = sections.get("AMD") {
+        accelerators.extend(parse_amd_usage(amd));
+    }
+
+    Ok(UsageSnapshot {
+        sampled_at_unix_ms: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX),
+        cpu_utilization_percent: parse_remote_cpu_utilization(
+            section("CPU_BEFORE")?,
+            section("CPU_AFTER")?,
+        )?,
+        used_ram_bytes: total_ram_bytes.saturating_sub(available_ram_bytes),
+        available_ram_bytes,
+        accelerators,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct RemoteCpuTicks {
+    idle: u64,
+    total: u64,
+}
+
+fn parse_remote_cpu_ticks(input: &str) -> Option<RemoteCpuTicks> {
+    let line = input.lines().find(|line| line.starts_with("cpu "))?;
+    let ticks = line
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|value| value.parse::<u64>().ok())
+        .collect::<Vec<_>>();
+    let total = ticks.iter().copied().fold(0_u64, u64::saturating_add);
+    let idle = ticks
+        .get(3)
+        .copied()
+        .unwrap_or_default()
+        .saturating_add(ticks.get(4).copied().unwrap_or_default());
+    Some(RemoteCpuTicks { idle, total })
+}
+
+fn parse_remote_cpu_utilization(first: &str, second: &str) -> Result<f32, String> {
+    let before = parse_remote_cpu_ticks(first)
+        .ok_or_else(|| "The target CPU sample is invalid.".to_owned())?;
+    let after = parse_remote_cpu_ticks(second)
+        .ok_or_else(|| "The target CPU sample is invalid.".to_owned())?;
+    let total = after.total.saturating_sub(before.total);
+    let idle = after.idle.saturating_sub(before.idle);
+    Ok(if total == 0 {
+        0.0
+    } else {
+        100.0 * (total.saturating_sub(idle) as f32 / total as f32)
+    })
+}
+
+fn parse_nvidia_usage(input: &str) -> Vec<AcceleratorUsage> {
+    input
+        .lines()
+        .filter_map(|line| {
+            let mut columns = line.split(',').map(str::trim);
+            Some(AcceleratorUsage {
+                kind: AcceleratorKind::Nvidia,
+                name: columns.next()?.to_owned(),
+                utilization_percent: columns.next().and_then(|value| value.parse().ok()),
+                used_vram_bytes: columns
+                    .next()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .map(|mib| mib.saturating_mul(1024 * 1024)),
+            })
+        })
+        .collect()
+}
+
+fn parse_amd_usage(input: &str) -> Vec<AcceleratorUsage> {
+    input
+        .lines()
+        .filter_map(|line| {
+            let mut columns = line.split('|').map(str::trim);
+            Some(AcceleratorUsage {
+                kind: AcceleratorKind::Amd,
+                name: columns.next()?.to_owned(),
+                utilization_percent: columns.next().and_then(|value| value.parse().ok()),
+                used_vram_bytes: columns.next().and_then(|value| value.parse().ok()),
+            })
+        })
+        .collect()
 }
 
 fn parse_sections(output: &str) -> BTreeMap<String, String> {
@@ -993,11 +1172,17 @@ fn ssh_connection_guidance(detail: &str, config: &RemoteTargetConfig) -> String 
     )
 }
 
-fn check(id: &str, label: &str, status: &str, detail: &str, guidance: Option<&str>) -> RemoteCheck {
+fn check(
+    id: &str,
+    status: &str,
+    message_key: &str,
+    detail: &str,
+    guidance: Option<&str>,
+) -> RemoteCheck {
     RemoteCheck {
         id: id.to_owned(),
-        label: label.to_owned(),
         status: status.to_owned(),
+        message_key: message_key.to_owned(),
         detail: detail.to_owned(),
         guidance: guidance.map(str::to_owned),
     }
@@ -1202,6 +1387,47 @@ NVIDIA Test GPU, 12288, 555.42
             Ok(())
         } else {
             Err(format!("The remote hardware probe exited with {status}"))
+        }
+    }
+
+    #[test]
+    fn parses_remote_hardware_usage() -> Result<(), String> {
+        let usage = parse_remote_usage(
+            r#"
+[LUMEN_SOURCE:CPU_BEFORE]
+cpu  100 0 50 850 0 0 0 0
+[LUMEN_SOURCE:CPU_AFTER]
+cpu  140 0 60 900 0 0 0 0
+[LUMEN_SOURCE:MEMINFO]
+MemTotal:       16000000 kB
+MemAvailable:   6000000 kB
+[LUMEN_SOURCE:NVIDIA]
+NVIDIA Test GPU, 42, 2048
+[LUMEN_SOURCE:AMD]
+"#,
+        )?;
+        assert!((usage.cpu_utilization_percent - 50.0).abs() < f32::EPSILON);
+        assert_eq!(usage.used_ram_bytes, 10_000_000 * 1024);
+        assert_eq!(usage.available_ram_bytes, 6_000_000 * 1024);
+        assert_eq!(usage.accelerators.len(), 1);
+        assert_eq!(usage.accelerators[0].utilization_percent, Some(42.0));
+        assert_eq!(
+            usage.accelerators[0].used_vram_bytes,
+            Some(2_048 * 1024 * 1024)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn remote_usage_probe_is_valid_posix_shell_syntax() -> Result<(), String> {
+        let status = std::process::Command::new("sh")
+            .args(["-n", "-c", REMOTE_USAGE_COMMAND])
+            .status()
+            .map_err(|error| error.to_string())?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("The remote usage probe exited with {status}"))
         }
     }
 

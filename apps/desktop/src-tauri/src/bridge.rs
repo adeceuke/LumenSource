@@ -2,28 +2,34 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use lumen_source_catalog::{
     Catalog, CatalogCache, CatalogLocation, CatalogService, CatalogSource, Ed25519Verifier,
-    License, ModelEntry, ModelVariant, Platform, ReqwestCatalogFetcher,
+    ModelEntry, ModelVariant, Platform, ReqwestCatalogFetcher,
 };
-use lumen_source_hardware::{AcceleratorKind, HardwareFacts, HardwareProbe, PlatformHardwareProbe};
+use lumen_source_hardware::{HardwareFacts, HardwareProbe, PlatformHardwareProbe};
 use lumen_source_host::{Host, LocalHost};
 use lumen_source_recommend::{recommend, RecommendationRequest};
 use lumen_source_runtime::{
     Artifact as RuntimeArtifact, ArtifactInstaller, CancellationToken, ChatMessage, ChatProgress,
-    DummyRuntime, InstalledModel, OllamaRuntime, Runtime, RuntimeEndpoint, RuntimeError,
-    RuntimeProgress, RuntimeStatus as CoreRuntimeStatus, Url,
+    DummyRuntime, OllamaRuntime, Runtime, RuntimeEndpoint, RuntimeError, RuntimeProgress,
+    RuntimeStatus as CoreRuntimeStatus, Url,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock};
 use zeroize::Zeroizing;
 
+pub use crate::bridge_types::*;
+use crate::credential_store;
+use crate::model_reconciliation::{
+    reconcile_models, reconcile_unavailable_models, same_ollama_reference, with_remote_models,
+    DUMMY_RUNTIME,
+};
 use crate::remote::{
-    connect as connect_remote, RemoteAuthentication, RemoteConnectionReport, RemoteSession,
+    connect as connect_remote, probe_hardware as probe_remote_hardware,
+    probe_usage as probe_remote_usage, RemoteAuthentication, RemoteConnectionReport, RemoteSession,
     RemoteTargetConfig, RemoteTargetProfile,
 };
 use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
@@ -39,7 +45,6 @@ const DEVELOPMENT_CATALOG: &[u8] =
     include_bytes!("../../../../catalog/fixtures/catalog.v1.valid.json");
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 const OLLAMA_RUNTIME: &str = "ollama";
-const DUMMY_RUNTIME: &str = "dummy-runtime";
 
 struct LoadedCatalog {
     catalog: Catalog,
@@ -80,55 +85,6 @@ impl PullItemTracker {
         self.digests.push(digest.to_owned());
         self.digests.len() as u32
     }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PersistedModelEntry {
-    pub id: String,
-    pub name: String,
-    pub model_id: String,
-    pub model_name: String,
-    #[serde(default)]
-    pub runtime_model_id: Option<String>,
-    pub version: String,
-    pub location: String,
-    #[serde(default = "local_target_id")]
-    pub target_id: String,
-    #[serde(default)]
-    pub target_name: Option<String>,
-    pub running: bool,
-    #[serde(default = "default_managed")]
-    pub managed: bool,
-    #[serde(default)]
-    pub digest: Option<String>,
-    #[serde(default)]
-    pub size_bytes: Option<u64>,
-    #[serde(default)]
-    pub license_basis: Option<String>,
-    #[serde(default)]
-    pub license_reference: Option<String>,
-    #[serde(default)]
-    pub license_acknowledged_at: Option<String>,
-    #[serde(default)]
-    pub license_profile_id: Option<String>,
-    #[serde(default)]
-    pub license_name: Option<String>,
-    #[serde(default)]
-    pub license_url: Option<String>,
-    #[serde(default)]
-    pub license_reviewed_at: Option<String>,
-    #[serde(default)]
-    pub license_catalog_version: Option<String>,
-    pub logs: Vec<String>,
-}
-
-fn default_managed() -> bool {
-    true
-}
-
-fn local_target_id() -> String {
-    "local".to_owned()
 }
 
 pub struct SharedCoreAdapter {
@@ -246,6 +202,7 @@ impl SharedCoreAdapter {
         password: Option<Zeroizing<String>>,
     ) -> Result<RemoteConnectionReport, String> {
         let config = config.normalized();
+        let password = self.password_for_config(&config, password).await?;
         let attempt = connect_remote(config.clone(), password).await?;
         if let Some(session) = attempt.session {
             let target_id = config.target_id();
@@ -263,6 +220,14 @@ impl SharedCoreAdapter {
     }
 
     async fn runtime_for_target(&self, target_id: &str) -> Result<Arc<OllamaRuntime>, String> {
+        self.runtime_for_target_with_password(target_id, None).await
+    }
+
+    async fn runtime_for_target_with_password(
+        &self,
+        target_id: &str,
+        password: Option<Zeroizing<String>>,
+    ) -> Result<Arc<OllamaRuntime>, String> {
         if target_id == "local" {
             return Ok(Arc::clone(&self.runtime));
         }
@@ -271,22 +236,9 @@ impl SharedCoreAdapter {
                 return Ok(Arc::clone(&session.runtime));
             }
         }
-        let config = self
-            .state
-            .read()
-            .await
-            .remote_targets
-            .iter()
-            .find(|target| target.target_id() == target_id)
-            .cloned()
-            .ok_or_else(|| format!("Remote target `{target_id}` is not configured"))?;
-        if config.authentication == RemoteAuthentication::Password {
-            return Err(
-                "The password-authenticated SSH session is disconnected. Reconnect this target from Add model and enter its password again; LumenSource does not save SSH passwords."
-                    .to_owned(),
-            );
-        }
-        let attempt = connect_remote(config, None).await?;
+        let config = self.remote_config(target_id).await?;
+        let password = self.password_for_config(&config, password).await?;
+        let attempt = connect_remote(config, password).await?;
         let Some(session) = attempt.session else {
             let detail = attempt
                 .report
@@ -320,18 +272,104 @@ impl SharedCoreAdapter {
                 .await
                 .map_err(|error| error.to_string());
         }
-        self.runtime_for_target(target_id).await?;
-        self.remote_session
+        if let Some(hardware) = self
+            .remote_session
             .read()
             .await
             .as_ref()
             .filter(|session| session.target_id() == target_id)
             .map(|session| session.hardware.clone())
-            .ok_or_else(|| "The remote target hardware profile is unavailable".to_owned())
+        {
+            return Ok(hardware);
+        }
+        let config = self.remote_config(target_id).await?;
+        let password = self.password_for_config(&config, None).await?;
+        probe_remote_hardware(&config, password).await
     }
 
-    pub async fn detect_hardware(&self, target_id: &str) -> Result<HardwareProfile, String> {
-        let facts = self.hardware_for_target(target_id).await?;
+    async fn remote_config(&self, target_id: &str) -> Result<RemoteTargetConfig, String> {
+        self.state
+            .read()
+            .await
+            .remote_targets
+            .iter()
+            .find(|target| target.target_id() == target_id)
+            .cloned()
+            .ok_or_else(|| format!("Remote target `{target_id}` is not configured"))
+    }
+
+    async fn password_for_config(
+        &self,
+        config: &RemoteTargetConfig,
+        provided: Option<Zeroizing<String>>,
+    ) -> Result<Option<Zeroizing<String>>, String> {
+        if config.authentication != RemoteAuthentication::Password {
+            return Ok(None);
+        }
+        if let Some(password) = provided.filter(|password| !password.is_empty()) {
+            return Ok(Some(password));
+        }
+        match credential_store::load_password(config.target_id()).await {
+            Ok(Some(password)) => Ok(Some(password)),
+            Ok(None) => Err(
+                "SSH_PASSWORD_REQUIRED: Enter the SSH password for this remote machine."
+                    .to_owned(),
+            ),
+            Err(error) => Err(format!(
+                "SSH_PASSWORD_REQUIRED: The saved SSH password is unavailable. Enter it to reconnect. {error}"
+            )),
+        }
+    }
+
+    pub async fn remote_credential_status(
+        &self,
+        target_id: &str,
+    ) -> Result<RemoteCredentialStatus, String> {
+        let config = self.remote_config(target_id).await?;
+        let password_required = config.authentication == RemoteAuthentication::Password;
+        let password_saved = if password_required {
+            credential_store::password_is_saved(target_id.to_owned()).await?
+        } else {
+            false
+        };
+        Ok(RemoteCredentialStatus {
+            password_required,
+            password_saved,
+        })
+    }
+
+    pub async fn save_remote_password(
+        &self,
+        target_id: &str,
+        password: Zeroizing<String>,
+    ) -> Result<(), String> {
+        let config = self.remote_config(target_id).await?;
+        if config.authentication != RemoteAuthentication::Password {
+            return Err("This remote machine does not use password authentication.".to_owned());
+        }
+        if password.is_empty() {
+            return Err("Enter an SSH password before saving it.".to_owned());
+        }
+        credential_store::save_password(target_id.to_owned(), password).await
+    }
+
+    pub async fn delete_remote_password(&self, target_id: &str) -> Result<(), String> {
+        self.remote_config(target_id).await?;
+        credential_store::delete_password(target_id.to_owned()).await
+    }
+
+    pub async fn detect_hardware(
+        &self,
+        target_id: &str,
+        password: Option<Zeroizing<String>>,
+    ) -> Result<HardwareProfile, String> {
+        let facts = if target_id == "local" || password.is_none() {
+            self.hardware_for_target(target_id).await?
+        } else {
+            let config = self.remote_config(target_id).await?;
+            let password = self.password_for_config(&config, password).await?;
+            probe_remote_hardware(&config, password).await?
+        };
         let profile = HardwareProfile::from(&facts);
         if target_id == "local" {
             let vram_tier = facts
@@ -352,6 +390,24 @@ impl SharedCoreAdapter {
             });
         }
         Ok(profile)
+    }
+
+    pub async fn machine_usage(
+        &self,
+        target_id: &str,
+        password: Option<Zeroizing<String>>,
+    ) -> Result<MachineUsageSnapshot, String> {
+        let usage = if target_id == "local" {
+            self.probe
+                .usage_snapshot()
+                .await
+                .map_err(|error| error.to_string())?
+        } else {
+            let config = self.remote_config(target_id).await?;
+            let password = self.password_for_config(&config, password).await?;
+            probe_remote_usage(&config, password).await?
+        };
+        Ok(MachineUsageSnapshot::from_usage(target_id, usage))
     }
 
     pub async fn load_catalog(&self, refresh: bool) -> Result<CatalogSummary, String> {
@@ -553,42 +609,33 @@ impl SharedCoreAdapter {
                 required_bytes: required,
                 available_bytes: available,
                 checks: vec![
-                    check(
-                        "connection",
-                        "Remote Linux connection",
-                        "pass",
-                        "The SSH tunnel to the remote Linux target is available.",
-                    ),
+                    check("connection", "pass", "remote.remoteConnection", None),
                     check(
                         "hardware",
-                        "Remote hardware compatibility",
                         if hardware_ok { "pass" } else { "fail" },
-                        &hardware_detail,
+                        if hardware_ok {
+                            "remote.remoteHardwareCompatible"
+                        } else {
+                            "remote.hardwareIncompatible"
+                        },
+                        (!hardware_ok).then_some(hardware_detail.as_str()),
                     ),
                     check(
                         "storage",
-                        "Remote available storage",
                         if storage_ok { "pass" } else { "fail" },
                         if storage_ok {
-                            "Enough free space is available on the target filesystem."
+                            "remote.remoteStorageEnough"
                         } else {
-                            "The model requires more free storage on the target filesystem."
+                            "remote.remoteStorageInsufficient"
                         },
+                        None,
                     ),
-                    check(
-                        "runtime",
-                        "Remote Ollama service",
-                        "pass",
-                        "Ollama is installed and its loopback API is reachable on the target.",
-                    ),
+                    check("runtime", "pass", "remote.remoteRuntime", None),
                     check(
                         "source",
-                        "Model source",
                         "pass",
-                        &format!(
-                            "The remote Ollama service will pull the catalog-pinned model reference `{}`.",
-                            variant.runtime_ref
-                        ),
+                        "remote.source",
+                        Some(variant.runtime_ref.as_str()),
                     ),
                 ],
             });
@@ -621,30 +668,17 @@ impl SharedCoreAdapter {
             || self.runtime.executable_available().await;
         let runtime_artifact = (!is_dummy).then(|| runtime_artifact(&catalog, &variant.runtime));
         let runtime_installable = runtime_artifact.as_ref().is_some_and(Result::is_ok);
-        let (runtime_label, runtime_detail) = if is_dummy {
-            (
-                "Dummy test runtime",
-                "The in-memory test runtime performs no downloads and launches no server."
-                    .to_owned(),
-            )
+        let (runtime_key, runtime_detail) = if is_dummy {
+            ("local.runtimeDummy", None)
         } else if runtime_available {
-            (
-                "Ollama runtime",
-                "Ollama is installed or already running.".to_owned(),
-            )
+            ("local.runtimeAvailable", None)
         } else if let Some(Ok((artifact, _))) = &runtime_artifact {
             (
-                "Ollama runtime",
-                format!(
-                    "Download {} and verify SHA-256 {}.",
-                    artifact.url, artifact.sha256
-                ),
+                "local.runtimeInstallable",
+                Some(format!("{}\t{}", artifact.url, artifact.sha256)),
             )
         } else {
-            (
-                "Ollama runtime",
-                "No compatible verified runtime artifact is available.".to_owned(),
-            )
+            ("local.runtimeUnavailable", None)
         };
         let storage_ok = available >= required;
         Ok(PreflightReport {
@@ -654,23 +688,26 @@ impl SharedCoreAdapter {
             checks: vec![
                 check(
                     "hardware",
-                    "Hardware compatibility",
                     if hardware_ok { "pass" } else { "fail" },
-                    &hardware_detail,
+                    if hardware_ok {
+                        "local.hardwareCompatible"
+                    } else {
+                        "local.hardwareIncompatible"
+                    },
+                    (!hardware_ok).then_some(hardware_detail.as_str()),
                 ),
                 check(
                     "storage",
-                    "Available storage",
                     if storage_ok { "pass" } else { "fail" },
                     if storage_ok {
-                        "Enough free space is available."
+                        "local.storageEnough"
                     } else {
-                        "The model requires more free storage."
+                        "local.storageInsufficient"
                     },
+                    None,
                 ),
                 check(
                     "runtime",
-                    runtime_label,
                     if runtime_available {
                         "pass"
                     } else if runtime_installable {
@@ -678,23 +715,18 @@ impl SharedCoreAdapter {
                     } else {
                         "fail"
                     },
-                    &runtime_detail,
+                    runtime_key,
+                    runtime_detail.as_deref(),
                 ),
                 check(
                     "source",
-                    "Model source",
                     "pass",
-                    &if is_dummy {
-                        format!(
-                            "The catalog test model `{}` will be registered in memory.",
-                            variant.runtime_ref
-                        )
+                    if is_dummy {
+                        "local.sourceDummy"
                     } else {
-                        format!(
-                            "Ollama will pull the catalog-pinned model reference `{}`.",
-                            variant.runtime_ref
-                        )
+                        "local.sourceOllama"
                     },
+                    Some(variant.runtime_ref.as_str()),
                 ),
             ],
         })
@@ -813,11 +845,11 @@ impl SharedCoreAdapter {
                 None,
                 None,
                 if variant.runtime == DUMMY_RUNTIME {
-                    "Preparing dummy test runtime…"
+                    "prepareDummy"
                 } else if target_id != "local" {
-                    "Preparing the remote Ollama pull…"
+                    "prepareRemote"
                 } else {
-                    "Starting Ollama…"
+                    "startOllama"
                 },
             ),
         )
@@ -904,7 +936,7 @@ impl SharedCoreAdapter {
                 total,
                 None,
                 None,
-                "Installation complete",
+                "complete",
             ),
         )
         .map_err(|error| error.to_string())?;
@@ -915,6 +947,7 @@ impl SharedCoreAdapter {
         &self,
         variant_id: String,
         target_id: String,
+        password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, &variant_id)?;
@@ -931,7 +964,9 @@ impl SharedCoreAdapter {
                     .await
                     .map_err(|error| error.to_string())?;
             } else {
-                let runtime = self.runtime_for_target(&target_id).await?;
+                let runtime = self
+                    .runtime_for_target_with_password(&target_id, password)
+                    .await?;
                 if target_id == "local" {
                     runtime
                         .ensure_running()
@@ -978,6 +1013,7 @@ impl SharedCoreAdapter {
         &self,
         variant_id: String,
         target_id: String,
+        password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, &variant_id)?;
@@ -1001,7 +1037,9 @@ impl SharedCoreAdapter {
                 .await
                 .map_err(|error| error.to_string())?;
         } else {
-            let runtime = self.runtime_for_target(&target_id).await?;
+            let runtime = self
+                .runtime_for_target_with_password(&target_id, password)
+                .await?;
             if model_is_embedding_only(model) {
                 runtime
                     .stop_embedding(&variant.runtime_ref)
@@ -1500,259 +1538,6 @@ impl SharedCoreAdapter {
     }
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HardwareProfile {
-    pub cpu: String,
-    pub cpu_cores: usize,
-    pub cpu_frequency_mhz: Option<u64>,
-    pub memory_bytes: u64,
-    pub memory_kind: Option<String>,
-    pub memory_speed_mts: Option<u64>,
-    pub gpu: Option<GpuProfile>,
-    pub platform: String,
-    pub storage: StorageProfile,
-}
-
-impl From<&HardwareFacts> for HardwareProfile {
-    fn from(facts: &HardwareFacts) -> Self {
-        let gpu = facts.accelerators.first().map(|device| GpuProfile {
-            name: device.name.clone(),
-            memory_bytes: device.total_vram_bytes,
-            backend: accelerator_backend(device.kind).to_owned(),
-        });
-        Self {
-            cpu: facts
-                .cpu
-                .model
-                .clone()
-                .unwrap_or_else(|| facts.cpu.architecture.clone()),
-            cpu_cores: facts.cpu.logical_cores,
-            cpu_frequency_mhz: facts.cpu.frequency_mhz,
-            memory_bytes: facts.total_ram_bytes,
-            memory_kind: facts.memory.kind.clone(),
-            memory_speed_mts: facts.memory.speed_mts,
-            gpu,
-            platform: format!("{} {}", facts.os.family, facts.os.architecture),
-            storage: StorageProfile {
-                mount_point: facts.storage.mount_point.display().to_string(),
-                total_bytes: facts.storage.total_bytes,
-                available_bytes: facts.storage.available_bytes,
-            },
-        }
-    }
-}
-
-fn accelerator_backend(kind: AcceleratorKind) -> &'static str {
-    match kind {
-        AcceleratorKind::Nvidia => "cuda",
-        AcceleratorKind::Amd => "rocm",
-        AcceleratorKind::Intel => "intel",
-        AcceleratorKind::Other => "other",
-    }
-}
-
-fn deployment_kind(target_id: &str) -> String {
-    if target_id == "local" {
-        "local"
-    } else {
-        "remote"
-    }
-    .to_owned()
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GpuProfile {
-    pub name: String,
-    pub memory_bytes: Option<u64>,
-    pub backend: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StorageProfile {
-    pub mount_point: String,
-    pub total_bytes: u64,
-    pub available_bytes: u64,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PerformanceSnapshot {
-    pub model_id: String,
-    pub state: String,
-    pub sampled_at_unix_ms: u64,
-    pub allocated_memory_bytes: u64,
-    pub allocated_vram_bytes: u64,
-    pub allocated_system_memory_bytes: u64,
-    pub context_length: Option<u64>,
-}
-
-fn current_unix_time_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or_default()
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogModelSummary {
-    pub id: String,
-    pub display_name: String,
-    pub version: String,
-    pub description: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CatalogSummary {
-    pub revision: String,
-    pub updated_at: String,
-    pub model_count: usize,
-    pub source: String,
-    pub models: Vec<CatalogModelSummary>,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Recommendation {
-    pub model_id: String,
-    pub runtime_id: String,
-    pub name: String,
-    pub provider: String,
-    pub description: String,
-    pub version: String,
-    pub size_bytes: u64,
-    pub context_window: u32,
-    pub runtime_digest: Option<String>,
-    pub fit: String,
-    pub reasons: Vec<String>,
-    pub recommended: bool,
-    pub compatible: bool,
-    pub license: LicenseSummary,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LicenseSummary {
-    pub profile_id: Option<String>,
-    pub name: String,
-    pub url: Option<String>,
-    pub classification: String,
-    pub commercial_use: String,
-    pub redistribution: String,
-    pub derivatives: String,
-    pub requires_user_acceptance: bool,
-    pub attribution: String,
-    pub license_text: String,
-    pub notice: String,
-    pub ui_notice: String,
-    pub summary: String,
-    pub obligations: Vec<String>,
-    pub restrictions: Vec<String>,
-    pub geographic_restrictions: Vec<String>,
-    pub usage_policy_url: Option<String>,
-    pub reviewed_at: Option<String>,
-}
-
-impl From<&License> for LicenseSummary {
-    fn from(license: &License) -> Self {
-        Self {
-            profile_id: license.profile_id.clone(),
-            name: license.name.clone(),
-            url: license.url.clone(),
-            classification: license.classification.clone(),
-            commercial_use: license.commercial_use.clone(),
-            redistribution: license.redistribution.clone(),
-            derivatives: license.derivatives.clone(),
-            requires_user_acceptance: license.requires_user_acceptance,
-            attribution: license.attribution.clone(),
-            license_text: license.license_text.clone(),
-            notice: license.notice.clone(),
-            ui_notice: license.ui_notice.clone(),
-            summary: license.summary.clone(),
-            obligations: license.obligations.clone(),
-            restrictions: license.restrictions.clone(),
-            geographic_restrictions: license.geographic_restrictions.clone(),
-            usage_policy_url: license.usage_policy_url.clone(),
-            reviewed_at: license.reviewed_at.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreflightCheck {
-    pub id: String,
-    pub label: String,
-    pub status: String,
-    pub detail: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreflightReport {
-    pub can_install: bool,
-    pub required_bytes: u64,
-    pub available_bytes: u64,
-    pub checks: Vec<PreflightCheck>,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstallProgress {
-    pub model_id: String,
-    pub phase: String,
-    pub completed_bytes: u64,
-    pub total_bytes: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_item: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_items: Option<u32>,
-    pub message: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(tag = "event", rename_all = "camelCase")]
-pub enum ChatEvent {
-    Delta { content: String },
-    Done,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeStatus {
-    pub state: String,
-    pub model_id: Option<String>,
-    pub message: Option<String>,
-}
-
-impl RuntimeStatus {
-    fn stopped() -> Self {
-        Self {
-            state: "stopped".to_owned(),
-            model_id: None,
-            message: None,
-        }
-    }
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EndpointDetails {
-    pub base_url: String,
-    pub chat_completions_url: String,
-    pub completions_url: String,
-    pub embeddings_url: String,
-    pub model: String,
-    pub api_key_required: bool,
-    pub api_available: bool,
-    pub chat_available: bool,
-    pub embeddings_available: bool,
-}
-
 fn bundled_catalog() -> Result<LoadedCatalog, String> {
     Ok(LoadedCatalog {
         catalog: Catalog::from_slice(BUNDLED_CATALOG).map_err(|error| error.to_string())?,
@@ -1946,12 +1731,12 @@ fn variant_size_bytes(variant: &ModelVariant) -> u64 {
         .unwrap_or((variant.requirements.min_storage_gb * GIB) as u64)
 }
 
-fn check(id: &str, label: &str, status: &str, detail: &str) -> PreflightCheck {
+fn check(id: &str, status: &str, message_key: &str, detail: Option<&str>) -> PreflightCheck {
     PreflightCheck {
         id: id.to_owned(),
-        label: label.to_owned(),
         status: status.to_owned(),
-        detail: detail.to_owned(),
+        message_key: message_key.to_owned(),
+        detail: detail.map(str::to_owned),
     }
 }
 
@@ -1962,7 +1747,7 @@ fn progress(
     total: u64,
     current_item: Option<u32>,
     total_items: Option<u32>,
-    message: &str,
+    message_key: &str,
 ) -> InstallProgress {
     InstallProgress {
         model_id: model_id.to_owned(),
@@ -1971,7 +1756,8 @@ fn progress(
         total_bytes: total,
         current_item,
         total_items,
-        message: message.to_owned(),
+        message_key: message_key.to_owned(),
+        detail: None,
     }
 }
 
@@ -1990,7 +1776,7 @@ fn runtime_progress(
             total.unwrap_or(fallback_total),
             None,
             None,
-            "Downloading runtime…",
+            "downloadRuntime",
         ),
         RuntimeProgress::Verifying => progress(
             model_id,
@@ -1999,7 +1785,7 @@ fn runtime_progress(
             fallback_total,
             None,
             None,
-            "Verifying download…",
+            "verifyDownload",
         ),
         RuntimeProgress::Installing => progress(
             model_id,
@@ -2008,7 +1794,7 @@ fn runtime_progress(
             fallback_total,
             None,
             None,
-            "Installing runtime…",
+            "installRuntime",
         ),
         RuntimeProgress::PullingModel {
             status,
@@ -2024,15 +1810,17 @@ fn runtime_progress(
             });
             let total_items =
                 current_item.map(|current| expected_items.unwrap_or(current).max(current));
-            progress(
+            let mut payload = progress(
                 model_id,
                 "downloading",
                 completed.unwrap_or_default(),
                 total.unwrap_or(fallback_total),
                 current_item,
                 total_items,
-                &status,
-            )
+                "pullModel",
+            );
+            payload.detail = Some(status);
+            payload
         }
         RuntimeProgress::Ready => progress(
             model_id,
@@ -2041,7 +1829,7 @@ fn runtime_progress(
             fallback_total,
             None,
             None,
-            "Registering model…",
+            "registerModel",
         ),
     }
 }
@@ -2085,306 +1873,10 @@ fn model_supports_chat(model: &ModelEntry) -> bool {
         .any(|capability| capability == "chat" || capability == "text-generation")
 }
 
-fn reconcile_unavailable_models(
-    catalog: &Catalog,
-    mut persisted: Vec<PersistedModelEntry>,
-    dummy_installed: &[InstalledModel],
-    dummy_running: &[String],
-) -> Vec<PersistedModelEntry> {
-    for entry in &mut persisted {
-        let dummy_reference = catalog.models.iter().find_map(|model| {
-            model
-                .variants
-                .iter()
-                .find(|variant| variant.id == entry.model_id && variant.runtime == DUMMY_RUNTIME)
-                .map(|variant| variant.runtime_ref.as_str())
-        });
-        entry.running = dummy_reference
-            .is_some_and(|reference| dummy_running.iter().any(|running| running == reference));
-    }
-    upsert_dummy_models(catalog, &mut persisted, dummy_installed, dummy_running);
-    sort_models(&mut persisted);
-    persisted
-}
-
-fn reconcile_models(
-    catalog: Catalog,
-    mut persisted: Vec<PersistedModelEntry>,
-    installed: Vec<InstalledModel>,
-    dummy_installed: &[InstalledModel],
-    running: &[String],
-) -> Vec<PersistedModelEntry> {
-    let mut result = Vec::with_capacity(installed.len());
-    for installed_model in installed {
-        let catalog_match = catalog.models.iter().find_map(|model| {
-            model
-                .variants
-                .iter()
-                .find(|variant| {
-                    variant.runtime == "ollama"
-                        && same_ollama_reference(&variant.runtime_ref, &installed_model.name)
-                })
-                .map(|variant| (model, variant))
-        });
-        let mut previous_entries = Vec::new();
-        let mut remaining = Vec::with_capacity(persisted.len());
-        for entry in persisted {
-            let matches_installed = entry
-                .runtime_model_id
-                .as_deref()
-                .is_some_and(|name| same_ollama_reference(name, &installed_model.name))
-                || catalog_match.is_some_and(|(_, variant)| entry.model_id == variant.id);
-            if matches_installed {
-                previous_entries.push(entry);
-            } else {
-                remaining.push(entry);
-            }
-        }
-        persisted = remaining;
-        let previous_entries = if previous_entries.is_empty() {
-            vec![None]
-        } else {
-            previous_entries.into_iter().map(Some).collect()
-        };
-        let is_running = running
-            .iter()
-            .any(|name| same_ollama_reference(name, &installed_model.name));
-
-        for previous in previous_entries {
-            let entry = if let Some((model, variant)) = catalog_match {
-                let runtime_version = catalog
-                    .runtimes
-                    .iter()
-                    .find(|runtime| runtime.id == variant.runtime)
-                    .map(|runtime| runtime.install.version.clone())
-                    .unwrap_or_else(|| "unknown".to_owned());
-                PersistedModelEntry {
-                    id: previous
-                        .as_ref()
-                        .map(|entry| entry.id.clone())
-                        .unwrap_or_else(|| discovered_id(&installed_model)),
-                    name: previous
-                        .as_ref()
-                        .map(|entry| entry.name.clone())
-                        .unwrap_or_else(|| model.display_name.clone()),
-                    model_id: variant.id.clone(),
-                    model_name: model.display_name.clone(),
-                    runtime_model_id: Some(installed_model.name.clone()),
-                    version: runtime_version,
-                    location: "local".to_owned(),
-                    target_id: local_target_id(),
-                    target_name: None,
-                    running: is_running,
-                    managed: true,
-                    digest: installed_model.digest.clone(),
-                    size_bytes: installed_model.size_bytes,
-                    license_basis: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_basis.clone()),
-                    license_reference: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_reference.clone()),
-                    license_acknowledged_at: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_acknowledged_at.clone()),
-                    license_profile_id: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_profile_id.clone()),
-                    license_name: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_name.clone()),
-                    license_url: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_url.clone()),
-                    license_reviewed_at: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_reviewed_at.clone()),
-                    license_catalog_version: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_catalog_version.clone()),
-                    logs: previous.as_ref().map_or_else(
-                        || vec!["Discovered in the local Ollama model store.".to_owned()],
-                        |entry| entry.logs.clone(),
-                    ),
-                }
-            } else {
-                PersistedModelEntry {
-                    id: previous
-                        .as_ref()
-                        .map(|entry| entry.id.clone())
-                        .unwrap_or_else(|| discovered_id(&installed_model)),
-                    name: previous
-                        .as_ref()
-                        .map(|entry| entry.name.clone())
-                        .unwrap_or_else(|| installed_model.name.clone()),
-                    model_id: format!("external:{}", installed_model.name),
-                    model_name: installed_model.name.clone(),
-                    runtime_model_id: Some(installed_model.name.clone()),
-                    version: "External Ollama model".to_owned(),
-                    location: "local".to_owned(),
-                    target_id: local_target_id(),
-                    target_name: None,
-                    running: is_running,
-                    managed: false,
-                    digest: installed_model.digest.clone(),
-                    size_bytes: installed_model.size_bytes,
-                    license_basis: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_basis.clone()),
-                    license_reference: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_reference.clone()),
-                    license_acknowledged_at: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_acknowledged_at.clone()),
-                    license_profile_id: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_profile_id.clone()),
-                    license_name: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_name.clone()),
-                    license_url: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_url.clone()),
-                    license_reviewed_at: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_reviewed_at.clone()),
-                    license_catalog_version: previous
-                        .as_ref()
-                        .and_then(|entry| entry.license_catalog_version.clone()),
-                    logs: previous.as_ref().map_or_else(
-                        || vec!["Discovered outside the active Lumen Source catalog.".to_owned()],
-                        |entry| entry.logs.clone(),
-                    ),
-                }
-            };
-            result.push(entry);
-        }
-    }
-    for mut entry in persisted {
-        let dummy_variant = catalog.models.iter().find_map(|model| {
-            model
-                .variants
-                .iter()
-                .find(|variant| variant.id == entry.model_id && variant.runtime == DUMMY_RUNTIME)
-        });
-        if let Some(variant) = dummy_variant {
-            entry.running = running.iter().any(|model| model == &variant.runtime_ref);
-            result.push(entry);
-        }
-    }
-    upsert_dummy_models(&catalog, &mut result, dummy_installed, running);
-    sort_models(&mut result);
-    result
-}
-
-fn upsert_dummy_models(
-    catalog: &Catalog,
-    models: &mut Vec<PersistedModelEntry>,
-    installed: &[InstalledModel],
-    running: &[String],
-) {
-    for installed_model in installed {
-        let Some((model, variant)) = catalog.models.iter().find_map(|model| {
-            model
-                .variants
-                .iter()
-                .find(|variant| {
-                    variant.runtime == DUMMY_RUNTIME && variant.runtime_ref == installed_model.name
-                })
-                .map(|variant| (model, variant))
-        }) else {
-            continue;
-        };
-        let is_running = running.iter().any(|name| name == &installed_model.name);
-        let mut found = false;
-        for entry in models.iter_mut().filter(|entry| {
-            entry.model_id == variant.id
-                || entry.runtime_model_id.as_deref() == Some(installed_model.name.as_str())
-        }) {
-            found = true;
-            entry.running = is_running;
-            entry.digest = installed_model.digest.clone();
-            entry.size_bytes = installed_model.size_bytes;
-        }
-        if found {
-            continue;
-        }
-        let version = catalog
-            .runtimes
-            .iter()
-            .find(|runtime| runtime.id == variant.runtime)
-            .map(|runtime| runtime.install.version.clone())
-            .unwrap_or_else(|| "unknown".to_owned());
-        models.push(PersistedModelEntry {
-            id: format!("dummy:{}", installed_model.name),
-            name: model.display_name.clone(),
-            model_id: variant.id.clone(),
-            model_name: model.display_name.clone(),
-            runtime_model_id: Some(installed_model.name.clone()),
-            version,
-            location: "local".to_owned(),
-            target_id: local_target_id(),
-            target_name: None,
-            running: is_running,
-            managed: true,
-            digest: installed_model.digest.clone(),
-            size_bytes: installed_model.size_bytes,
-            license_basis: None,
-            license_reference: None,
-            license_acknowledged_at: None,
-            license_profile_id: None,
-            license_name: None,
-            license_url: None,
-            license_reviewed_at: None,
-            license_catalog_version: None,
-            logs: vec!["Discovered in the dummy test runtime.".to_owned()],
-        });
-    }
-}
-
-fn with_remote_models(
-    mut local_models: Vec<PersistedModelEntry>,
-    remote_models: Vec<PersistedModelEntry>,
-) -> Vec<PersistedModelEntry> {
-    local_models.extend(remote_models);
-    sort_models(&mut local_models);
-    local_models
-}
-
-fn sort_models(models: &mut [PersistedModelEntry]) {
-    models.sort_by(|left, right| {
-        right
-            .running
-            .cmp(&left.running)
-            .then_with(|| left.name.cmp(&right.name))
-    });
-}
-
-fn same_ollama_reference(left: &str, right: &str) -> bool {
-    normalize_ollama_reference(left) == normalize_ollama_reference(right)
-}
-
-fn normalize_ollama_reference(reference: &str) -> String {
-    let reference = reference.trim();
-    let last_slash = reference.rfind('/').map_or(0, |index| index + 1);
-    if reference[last_slash..].contains(':') {
-        reference.to_owned()
-    } else {
-        format!("{reference}:latest")
-    }
-}
-
-fn discovered_id(model: &InstalledModel) -> String {
-    format!(
-        "ollama:{}",
-        model.digest.as_deref().unwrap_or(model.name.as_str())
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lumen_source_runtime::InstalledModel;
 
     #[test]
     fn production_catalog_defaults_use_https_and_a_32_byte_ed25519_key() {

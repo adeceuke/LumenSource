@@ -27,6 +27,20 @@ export interface HardwareProfile {
   };
 }
 
+export interface MachineUsageSnapshot {
+  targetId: string;
+  sampledAtUnixMs: number;
+  cpuUtilizationPercent: number;
+  usedMemoryBytes: number;
+  availableMemoryBytes: number;
+  accelerators: Array<{
+    name: string;
+    backend: string;
+    utilizationPercent: number | null;
+    usedVramBytes: number | null;
+  }>;
+}
+
 export interface CatalogModelSummary {
   id: string;
   displayName: string;
@@ -84,9 +98,9 @@ export interface ModelLicense {
 
 export interface PreflightCheck {
   id: string;
-  label: string;
   status: "pass" | "warning" | "fail";
-  detail: string;
+  messageKey: string;
+  detail?: string;
 }
 
 export interface PreflightReport {
@@ -113,8 +127,8 @@ export interface RemoteTargetProfile {
 
 export interface RemoteConnectionCheck {
   id: string;
-  label: string;
   status: "pass" | "fail";
+  messageKey: string;
   detail: string;
   guidance?: string;
 }
@@ -124,6 +138,11 @@ export interface RemoteConnectionReport {
   targetName: string;
   canContinue: boolean;
   checks: RemoteConnectionCheck[];
+}
+
+export interface RemoteCredentialStatus {
+  passwordRequired: boolean;
+  passwordSaved: boolean;
 }
 
 export interface InstallRequest {
@@ -141,7 +160,8 @@ export interface InstallProgress {
   totalBytes: number;
   currentItem?: number;
   totalItems?: number;
-  message: string;
+  messageKey: string;
+  detail?: string;
 }
 
 export interface RuntimeStatus {
