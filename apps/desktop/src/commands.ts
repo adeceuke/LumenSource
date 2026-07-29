@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  ApplicationSettings,
   CatalogSummary,
   ChatEvent,
   ChatMessage,
@@ -9,6 +10,7 @@ import type {
   InstallProgress,
   InstallRequest,
   MachineUsageSnapshot,
+  OllamaConnectionReport,
   PerformanceSnapshot,
   PreflightReport,
   Recommendation,
@@ -17,7 +19,10 @@ import type {
   RemoteTargetConfig,
   RemoteTargetProfile,
   RunningModelEntry,
+  RuntimeSecretKind,
   RuntimeStatus,
+  SettingsSaveReport,
+  SettingsValidationError,
   UseIntent,
 } from "./types";
 
@@ -25,6 +30,22 @@ export const desktopCommands = {
   telemetryPreference: () => invoke<boolean | null>("telemetry_preference"),
   setTelemetryEnabled: (enabled: boolean) =>
     invoke<void>("set_telemetry_enabled", { enabled }),
+  loadSettings: () => invoke<ApplicationSettings>("load_settings"),
+  validateSettings: (settings: ApplicationSettings) =>
+    invoke<SettingsValidationError[]>("validate_settings", { settings }),
+  saveSettings: (settings: ApplicationSettings, confirmNetworkExposure: boolean) =>
+    invoke<SettingsSaveReport>("save_settings", { settings, confirmNetworkExposure }),
+  resetSettings: () => invoke<SettingsSaveReport>("reset_settings"),
+  testOllamaConnection: (settings: ApplicationSettings) =>
+    invoke<OllamaConnectionReport>("test_ollama_connection", { settings }),
+  restartManagedOllama: () =>
+    invoke<OllamaConnectionReport>("restart_managed_ollama"),
+  runtimeSecretStatus: (kind: RuntimeSecretKind) =>
+    invoke<boolean>("runtime_secret_status", { kind }),
+  saveRuntimeSecret: (kind: RuntimeSecretKind, secret: string) =>
+    invoke<void>("save_runtime_secret", { kind, secret }),
+  deleteRuntimeSecret: (kind: RuntimeSecretKind) =>
+    invoke<void>("delete_runtime_secret", { kind }),
   detectHardware: (targetId: string, password?: string) =>
     invoke<HardwareProfile>("detect_hardware", { targetId, password }),
   machineUsage: (targetId: string, password?: string) =>

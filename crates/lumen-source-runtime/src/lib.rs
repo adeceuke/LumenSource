@@ -1,10 +1,10 @@
 //! Runtime abstraction, Ollama and dummy adapters, and verified binary installation.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -176,6 +176,8 @@ pub enum RuntimeError {
     ExecutableNotFound,
     #[error("Ollama did not become healthy within the startup timeout")]
     StartupTimeout,
+    #[error("Ollama is running outside Lumen Source and cannot be restarted by the app")]
+    ExternallyManaged,
     #[error("installation cancelled")]
     Cancelled,
 }
@@ -314,9 +316,10 @@ impl DummyRuntime {
 #[derive(Clone)]
 pub struct OllamaRuntime {
     client: Client,
-    endpoint: RuntimeEndpoint,
+    endpoint: Arc<StdRwLock<RuntimeEndpoint>>,
     launched_process: Arc<Mutex<Option<Child>>>,
     executable: Arc<Mutex<PathBuf>>,
+    server_environment: Arc<Mutex<BTreeMap<String, String>>>,
 }
 
 impl OllamaRuntime {
@@ -325,6 +328,14 @@ impl OllamaRuntime {
     }
 
     pub fn new_with_executable(base_url: &str, executable: PathBuf) -> Result<Self, RuntimeError> {
+        Self::new_configured(base_url, executable, BTreeMap::new())
+    }
+
+    pub fn new_configured(
+        base_url: &str,
+        executable: PathBuf,
+        server_environment: BTreeMap<String, String>,
+    ) -> Result<Self, RuntimeError> {
         let mut url =
             Url::parse(base_url).map_err(|error| RuntimeError::InvalidUrl(error.to_string()))?;
         if !url.path().ends_with('/') {
@@ -332,23 +343,27 @@ impl OllamaRuntime {
         }
         Ok(Self {
             client: Client::new(),
-            endpoint: RuntimeEndpoint { base_url: url },
+            endpoint: Arc::new(StdRwLock::new(RuntimeEndpoint { base_url: url })),
             launched_process: Arc::new(Mutex::new(None)),
             executable: Arc::new(Mutex::new(executable)),
+            server_environment: Arc::new(Mutex::new(server_environment)),
         })
     }
 
     pub fn with_client(base_url: Url, client: Client) -> Self {
         Self {
             client,
-            endpoint: RuntimeEndpoint { base_url },
+            endpoint: Arc::new(StdRwLock::new(RuntimeEndpoint { base_url })),
             launched_process: Arc::new(Mutex::new(None)),
             executable: Arc::new(Mutex::new(PathBuf::from("ollama"))),
+            server_environment: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
     fn api_url(&self, path: &str) -> Result<Url, RuntimeError> {
         self.endpoint
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .base_url
             .join(path)
             .map_err(|error| RuntimeError::InvalidUrl(error.to_string()))
@@ -395,10 +410,12 @@ impl OllamaRuntime {
         }
         if process.is_none() {
             let executable = self.executable.lock().await.clone();
+            let environment = self.server_environment.lock().await.clone();
             let mut command = Command::new(executable);
             hide_console_window(&mut command);
             let child = command
                 .arg("serve")
+                .envs(environment)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -451,6 +468,55 @@ impl OllamaRuntime {
 
     pub async fn executable_path(&self) -> PathBuf {
         self.executable.lock().await.clone()
+    }
+
+    pub fn set_endpoint(&self, base_url: &str) -> Result<(), RuntimeError> {
+        let mut url =
+            Url::parse(base_url).map_err(|error| RuntimeError::InvalidUrl(error.to_string()))?;
+        if !url.path().ends_with('/') {
+            url.set_path(&format!("{}/", url.path()));
+        }
+        *self
+            .endpoint
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = RuntimeEndpoint { base_url: url };
+        Ok(())
+    }
+
+    pub async fn set_server_environment(&self, environment: BTreeMap<String, String>) {
+        *self.server_environment.lock().await = environment;
+    }
+
+    pub async fn managed_process_running(&self) -> bool {
+        self.launched_process.lock().await.is_some()
+    }
+
+    /// Restarts only an Ollama process launched by this runtime adapter.
+    /// A separately launched service is deliberately never terminated.
+    pub async fn restart_managed_server(&self) -> Result<(), RuntimeError> {
+        let had_managed_process = {
+            let mut process = self.launched_process.lock().await;
+            if process.is_some() {
+                if let Some(child) = process.as_mut() {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                }
+                *process = None;
+                true
+            } else {
+                false
+            }
+        };
+        if !had_managed_process && self.health().await.is_ok() {
+            return Err(RuntimeError::ExternallyManaged);
+        }
+        self.ensure_running().await
+    }
+
+    pub async fn version(&self) -> Result<String, RuntimeError> {
+        let response = self.client.get(self.api_url("api/version")?).send().await?;
+        let version: VersionResponse = Self::checked(response).await?.json().await?;
+        Ok(version.version)
     }
 
     pub async fn pull_model_cancellable(
@@ -676,6 +742,11 @@ struct InstalledModelList {
 }
 
 #[derive(Deserialize)]
+struct VersionResponse {
+    version: String,
+}
+
+#[derive(Deserialize)]
 struct OllamaInstalledModel {
     name: String,
     #[serde(default)]
@@ -779,7 +850,10 @@ impl Runtime for OllamaRuntime {
     }
 
     fn endpoint(&self) -> RuntimeEndpoint {
-        self.endpoint.clone()
+        self.endpoint
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 

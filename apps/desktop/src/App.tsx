@@ -6,17 +6,17 @@ import {
   RemoteTargetDialog,
   RemoveDialog,
   RenameDialog,
-  TelemetryDialog,
 } from "./components/AppDialogs";
 import { ModelDetails, type DetailTab } from "./components/ModelDetails";
 import { ModelSetupWizard } from "./components/ModelSetupWizard";
 import { MachinesPage } from "./components/MachinesPage";
 import { ModelsList } from "./components/ModelsList";
+import { SettingsPage } from "./components/SettingsPage";
 import { desktopCommands, messageFromError } from "./commands";
 import { useModels } from "./hooks/useModels";
 import { useModelWizard } from "./hooks/useModelWizard";
 import { browserMessages } from "./i18n";
-import type { CatalogSummary, RunningModelEntry } from "./types";
+import type { ApplicationSettings, CatalogSummary, RunningModelEntry } from "./types";
 
 const text = browserMessages();
 
@@ -25,7 +25,9 @@ function localizedError(error: unknown): string {
 }
 
 function App() {
-  const [section, setSection] = useState<"models" | "machines">("models");
+  const [section, setSection] = useState<"models" | "machines" | "settings">("models");
+  const [settings, setSettings] = useState<ApplicationSettings>();
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [catalog, setCatalog] = useState<CatalogSummary>();
   const [error, setError] = useState<string>();
   const reportError = useCallback(
@@ -54,9 +56,6 @@ function App() {
   const [pendingRemovalId, setPendingRemovalId] = useState<string>();
   const [removalBusy, setRemovalBusy] = useState(false);
   const [copiedField, setCopiedField] = useState<string>();
-  const [telemetryEnabled, setTelemetryEnabled] = useState<boolean>();
-  const [telemetryDialogOpen, setTelemetryDialogOpen] = useState(false);
-  const [telemetrySaving, setTelemetrySaving] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const contentPanelRef = useRef<HTMLDivElement>(null);
   const copyFeedbackTimerRef = useRef<number | undefined>(undefined);
@@ -85,20 +84,16 @@ function App() {
     onOpen: () => setDetailModelId(undefined),
     copiedField,
     copyText,
+    defaultStartAfterInstall: settings?.startAfterInstall ?? true,
+    defaultTargetId: settings?.defaultTargetId ?? "local",
   });
 
   useEffect(() => {
-    void desktopCommands.refreshCatalog().then(setCatalog).catch((catalogError: unknown) => {
-      setError(localizedError(catalogError));
-    });
-
-    void desktopCommands.telemetryPreference().then((preference) => {
-      setTelemetryEnabled(preference ?? false);
-      if (preference === null) setTelemetryDialogOpen(true);
-    }).catch(() => {
-      // Telemetry is optional. A local preference read failure must not affect
-      // the application or enable collection.
-      setTelemetryEnabled(false);
+    void desktopCommands.loadSettings().then(async (loadedSettings) => {
+      setSettings(loadedSettings);
+      setCatalog(await desktopCommands.refreshCatalog());
+    }).catch((loadError: unknown) => {
+      setError(localizedError(loadError));
     });
   }, []);
 
@@ -167,9 +162,13 @@ function App() {
   };
 
   const requestRemoval = (id: string) => {
-    setPendingRemovalId(id);
     setMenuOpenId(undefined);
     setMenuPosition(null);
+    if (settings?.privacy.confirmModelDeletion ?? true) {
+      setPendingRemovalId(id);
+    } else {
+      void performRemoval(id);
+    }
   };
 
   const openDetail = (model: RunningModelEntry, tab: DetailTab) => {
@@ -202,9 +201,7 @@ function App() {
     });
   };
 
-  const confirmRemoval = async () => {
-    if (!pendingRemovalId) return;
-    const modelId = pendingRemovalId;
+  const performRemoval = async (modelId: string) => {
     setRemovalBusy(true);
     try {
       await removeModel(modelId);
@@ -216,19 +213,15 @@ function App() {
     }
   };
 
-  const saveTelemetryPreference = async (enabled: boolean) => {
-    setTelemetrySaving(true);
-    try {
-      await desktopCommands.setTelemetryEnabled(enabled);
-      setTelemetryEnabled(enabled);
-      setTelemetryDialogOpen(false);
-    } catch {
-      // Collection stays disabled unless the preference was persisted.
-      setTelemetryEnabled(false);
-      setTelemetryDialogOpen(false);
-    } finally {
-      setTelemetrySaving(false);
-    }
+  const confirmRemoval = async () => {
+    if (pendingRemovalId) await performRemoval(pendingRemovalId);
+  };
+
+  const navigate = (next: "models" | "machines" | "settings") => {
+    if (section === "settings" && settingsDirty && next !== "settings"
+      && !window.confirm(text.settings.unsavedConfirmation)) return;
+    setSection(next);
+    setDetailModelId(undefined);
   };
 
   return (
@@ -256,20 +249,43 @@ function App() {
               <button
                 type="button"
                 className={section === "models" ? "active" : ""}
-                onClick={() => setSection("models")}
+                onClick={() => navigate("models")}
                 disabled={wizard.open}
               >
-                <span aria-hidden="true">◫</span>
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <rect x="4" y="5" width="16" height="14" rx="2" />
+                    <path d="M8 9h8M8 13h8M8 17h5" />
+                  </svg>
+                </span>
                 {text.navigation.models}
               </button>
               <button
                 type="button"
                 className={section === "machines" ? "active" : ""}
-                onClick={() => setSection("machines")}
+                onClick={() => navigate("machines")}
                 disabled={wizard.open}
               >
-                <span aria-hidden="true">⌁</span>
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <rect x="3" y="4" width="18" height="13" rx="2" />
+                    <path d="M8 21h8M12 17v4" />
+                  </svg>
+                </span>
                 {text.navigation.machines}
+              </button>
+              <button
+                type="button"
+                className={section === "settings" ? "active" : ""}
+                onClick={() => navigate("settings")}
+                disabled={wizard.open}
+              >
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" />
+                  </svg>
+                </span>
+                {text.navigation.settings}
               </button>
             </nav>
           </aside>
@@ -277,6 +293,13 @@ function App() {
           <div ref={contentPanelRef} className={`content-panel ${detailModel ? "detail-open" : ""}`}>
             {wizard.open ? (
               <ModelSetupWizard {...wizard.props} />
+            ) : section === "settings" && settings ? (
+              <SettingsPage
+                settings={settings}
+                onSaved={setSettings}
+                onDirtyChange={setSettingsDirty}
+                onError={setError}
+              />
             ) : section === "machines" ? (
               <MachinesPage />
             ) : detailModel ? (
@@ -316,9 +339,9 @@ function App() {
         <button
           className="telemetry-settings-button"
           type="button"
-          onClick={() => setTelemetryDialogOpen(true)}
+          onClick={() => navigate("settings")}
         >
-          {text.footer.usageStatistics(Boolean(telemetryEnabled))}
+          {text.footer.usageStatistics(Boolean(settings?.privacy.telemetryEnabled))}
         </button>
         {catalog && (
           <div
@@ -332,15 +355,6 @@ function App() {
           </div>
         )}
       </footer>
-
-      {telemetryDialogOpen && (
-        <TelemetryDialog
-          enabled={telemetryEnabled}
-          saving={telemetrySaving}
-          onClose={() => setTelemetryDialogOpen(false)}
-          onSave={(enabled) => void saveTelemetryPreference(enabled)}
-        />
-      )}
 
       {wizard.remoteTargetDialog.open && (
         <RemoteTargetDialog

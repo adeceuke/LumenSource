@@ -226,3 +226,55 @@ export interface RunningModelEntry {
   licenseCatalogVersion?: string;
   logs: string[];
 }
+
+export type RuntimeId = "ollama" | "vllm";
+export type RuntimeSecretKind = "vllmApiKey" | "huggingFaceToken";
+
+export interface ApplicationSettings {
+  schemaVersion: number;
+  defaultRuntime: RuntimeId;
+  defaultTargetId: string;
+  startAfterInstall: boolean;
+  autoStartManagedRuntimes: boolean;
+  storage: {
+    modelDirectory?: string;
+    cacheDirectory?: string;
+  };
+  privacy: {
+    telemetryEnabled: boolean;
+    lifecycleLogRetention: number;
+    confirmModelDeletion: boolean;
+  };
+  ollama: {
+    endpoint: string;
+    executablePath?: string;
+    contextLength?: number;
+    keepAlive: string;
+    maxLoadedModels: number;
+    parallelRequests: number;
+    maxQueuedRequests: number;
+    gpuSelection?: string;
+    experimentalVulkan: boolean;
+    bindAddress: string;
+    allowedOrigins: string[];
+    debugLogging: boolean;
+  };
+  vllm: Record<string, never>;
+}
+
+export interface SettingsValidationError {
+  field: string;
+  message: string;
+}
+
+export interface SettingsSaveReport {
+  settings: ApplicationSettings;
+  runtimeRestartRequired: boolean;
+}
+
+export interface OllamaConnectionReport {
+  healthy: boolean;
+  endpoint: string;
+  version?: string;
+  message: string;
+}

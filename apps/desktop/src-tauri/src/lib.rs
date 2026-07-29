@@ -4,6 +4,7 @@ pub mod commands;
 mod credential_store;
 mod model_reconciliation;
 pub mod remote;
+pub mod settings;
 pub mod telemetry;
 
 use bridge::SharedCoreAdapter;
@@ -35,6 +36,15 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::telemetry_preference,
             commands::set_telemetry_enabled,
+            commands::load_settings,
+            commands::validate_settings,
+            commands::save_settings,
+            commands::reset_settings,
+            commands::test_ollama_connection,
+            commands::restart_managed_ollama,
+            commands::runtime_secret_status,
+            commands::save_runtime_secret,
+            commands::delete_runtime_secret,
             commands::detect_hardware,
             commands::machine_usage,
             commands::load_remote_targets,

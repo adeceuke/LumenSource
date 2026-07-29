@@ -9,6 +9,10 @@ use tauri::{ipc::Channel, AppHandle, State};
 use zeroize::Zeroizing;
 
 use crate::remote::{RemoteConnectionReport, RemoteTargetConfig, RemoteTargetProfile};
+use crate::settings::{
+    validate_settings as validate_application_settings, ApplicationSettings,
+    OllamaConnectionReport, RuntimeSecretKind, SettingsSaveReport, SettingsValidationError,
+};
 
 #[tauri::command]
 pub async fn telemetry_preference(
@@ -23,6 +27,64 @@ pub async fn set_telemetry_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     core.set_telemetry_enabled(enabled).await
+}
+
+#[tauri::command]
+pub async fn load_settings(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<ApplicationSettings, String> {
+    core.settings().await
+}
+
+#[tauri::command]
+pub fn validate_settings(settings: ApplicationSettings) -> Vec<SettingsValidationError> {
+    validate_application_settings(&settings)
+}
+
+#[tauri::command]
+pub async fn save_settings(
+    core: State<'_, SharedCoreAdapter>,
+    settings: ApplicationSettings,
+    confirm_network_exposure: bool,
+) -> Result<SettingsSaveReport, String> {
+    core.save_settings(settings, confirm_network_exposure).await
+}
+
+#[tauri::command]
+pub async fn reset_settings(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<SettingsSaveReport, String> {
+    core.reset_settings().await
+}
+
+#[tauri::command]
+pub async fn test_ollama_connection(
+    core: State<'_, SharedCoreAdapter>,
+    settings: ApplicationSettings,
+) -> Result<OllamaConnectionReport, String> {
+    Ok(core.test_ollama_connection(settings).await)
+}
+
+#[tauri::command]
+pub async fn restart_managed_ollama(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<OllamaConnectionReport, String> {
+    core.restart_managed_ollama().await
+}
+
+#[tauri::command]
+pub async fn runtime_secret_status(kind: RuntimeSecretKind) -> Result<bool, String> {
+    crate::credential_store::runtime_secret_is_saved(kind).await
+}
+
+#[tauri::command]
+pub async fn save_runtime_secret(kind: RuntimeSecretKind, secret: String) -> Result<(), String> {
+    crate::credential_store::save_runtime_secret(kind, Zeroizing::new(secret)).await
+}
+
+#[tauri::command]
+pub async fn delete_runtime_secret(kind: RuntimeSecretKind) -> Result<(), String> {
+    crate::credential_store::delete_runtime_secret(kind).await
 }
 
 #[derive(Deserialize)]

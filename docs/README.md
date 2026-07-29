@@ -12,6 +12,8 @@ The Markdown documentation describes the current implementation:
   cross-platform architecture, security, delivery phases, and acceptance gates
 - [`telemetry.md`](telemetry.md) — optional aggregate usage data, offline retry
   semantics, and the server ingestion contract
+- [`runtime-settings-plan.md`](runtime-settings-plan.md) — three-step tracked
+  delivery plan for settings, configurable Ollama, vLLM, and model overrides
 
 The product and architecture source documents are stored at the repository
 root:

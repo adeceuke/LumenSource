@@ -32,6 +32,8 @@ interface UseModelWizardOptions {
   onOpen: () => void;
   copiedField?: string;
   copyText: (value: string, key: string) => void | Promise<void>;
+  defaultStartAfterInstall: boolean;
+  defaultTargetId: string;
 }
 
 interface RemoteTargetDialogState {
@@ -66,6 +68,8 @@ export function useModelWizard({
   onOpen,
   copiedField,
   copyText,
+  defaultStartAfterInstall,
+  defaultTargetId,
 }: UseModelWizardOptions): ModelWizardState {
   const [open, setOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<WizardStep>("location");
@@ -83,7 +87,7 @@ export function useModelWizard({
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [installCancellable, setInstallCancellable] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
-  const [startAfterInstall, setStartAfterInstall] = useState(true);
+  const [startAfterInstall, setStartAfterInstall] = useState(defaultStartAfterInstall);
   const [installRuntime, setInstallRuntime] = useState(false);
   const [useCase, setUseCase] = useState<UseIntent>("chat");
   const [selectedModelId, setSelectedModelId] = useState("");
@@ -221,8 +225,8 @@ export function useModelWizard({
 
   const reset = () => {
     setWizardStep("location");
-    setWizardLocation("local");
-    setSelectedRemoteTargetId("");
+    setWizardLocation(defaultTargetId === "local" ? "local" : "remote");
+    setSelectedRemoteTargetId(defaultTargetId === "local" ? "" : defaultTargetId);
     setRemoteReport(undefined);
     setRemoteCheckLoading(false);
     setRemotePassword("");
@@ -234,7 +238,7 @@ export function useModelWizard({
     setDownloadBusy(false);
     setInstallCancellable(false);
     setCancelBusy(false);
-    setStartAfterInstall(true);
+    setStartAfterInstall(defaultStartAfterInstall);
     setInstallRuntime(false);
     setSelectedModelId("");
     setRecommendations([]);

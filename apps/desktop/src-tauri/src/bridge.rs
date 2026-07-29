@@ -32,6 +32,10 @@ use crate::remote::{
     probe_usage as probe_remote_usage, RemoteAuthentication, RemoteConnectionReport, RemoteSession,
     RemoteTargetConfig, RemoteTargetProfile,
 };
+use crate::settings::{
+    migrate_settings, validate_settings, ApplicationSettings, OllamaConnectionReport,
+    SettingsSaveReport,
+};
 use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
 
 const BUNDLED_CATALOG: &[u8] = include_bytes!("../../../../catalog/model-list.json");
@@ -58,7 +62,10 @@ struct PersistedState {
     selected_runtime: Option<String>,
     runtime_executable: Option<PathBuf>,
     #[serde(default)]
+    settings: ApplicationSettings,
+    #[serde(default)]
     remote_targets: Vec<RemoteTargetConfig>,
+    #[serde(default)]
     models: Vec<PersistedModelEntry>,
 }
 
@@ -117,19 +124,29 @@ impl SharedCoreAdapter {
             .ok_or_else(|| "No local application data directory is available".to_owned())?;
         let state_path = data_root.join("lumen-source/state.json");
         let telemetry = Telemetry::new(&data_root);
-        let persisted = std::fs::read(&state_path)
+        let mut persisted = std::fs::read(&state_path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<PersistedState>(&bytes).ok())
             .unwrap_or_default();
+        persisted.settings = migrate_settings(persisted.settings);
+        if persisted.settings.ollama.executable_path.is_none() {
+            persisted.settings.ollama.executable_path = persisted.runtime_executable.clone();
+        }
         let probe = Arc::new(PlatformHardwareProbe::default());
         let runtime = Arc::new(
-            OllamaRuntime::new_with_executable(
-                "http://127.0.0.1:11434",
+            OllamaRuntime::new_configured(
+                &persisted.settings.ollama.endpoint,
                 persisted
-                    .runtime_executable
+                    .settings
+                    .ollama
+                    .executable_path
                     .as_deref()
                     .map(resolve_ollama_executable)
                     .unwrap_or_else(default_ollama_executable),
+                persisted
+                    .settings
+                    .ollama
+                    .server_environment(persisted.settings.storage.model_directory.as_deref()),
             )
             .map_err(|error| format!("Invalid Ollama endpoint: {error}"))?,
         );
@@ -158,6 +175,127 @@ impl SharedCoreAdapter {
 
     pub async fn telemetry_preference(&self) -> Result<Option<bool>, String> {
         self.telemetry.preference().await
+    }
+
+    pub async fn settings(&self) -> Result<ApplicationSettings, String> {
+        let mut settings = self.state.read().await.settings.clone();
+        if settings.ollama.executable_path.is_none() {
+            settings.ollama.executable_path = Some(self.runtime.executable_path().await);
+        }
+        if let Some(enabled) = self.telemetry.preference().await? {
+            settings.privacy.telemetry_enabled = enabled;
+        }
+        Ok(settings)
+    }
+
+    pub async fn save_settings(
+        &self,
+        settings: ApplicationSettings,
+        confirm_network_exposure: bool,
+    ) -> Result<SettingsSaveReport, String> {
+        let settings = migrate_settings(settings);
+        let validation_errors = validate_settings(&settings);
+        if !validation_errors.is_empty() {
+            return Err(validation_errors
+                .into_iter()
+                .map(|error| format!("{}: {}", error.field, error.message))
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+        if settings.ollama.exposes_network() && !confirm_network_exposure {
+            return Err(
+                "Network exposure confirmation is required before Ollama can bind beyond loopback."
+                    .to_owned(),
+            );
+        }
+        let previous = self.state.read().await.settings.clone();
+        let runtime_restart_required = previous.ollama != settings.ollama;
+        self.telemetry
+            .set_enabled(settings.privacy.telemetry_enabled)
+            .await?;
+        if settings.privacy.telemetry_enabled {
+            self.telemetry.retry_upload();
+        }
+        {
+            let mut state = self.state.write().await;
+            state.settings = settings.clone();
+            state.runtime_executable = settings.ollama.executable_path.clone();
+        }
+        self.runtime
+            .set_endpoint(&settings.ollama.endpoint)
+            .map_err(|error| error.to_string())?;
+        self.runtime
+            .set_executable(
+                settings
+                    .ollama
+                    .executable_path
+                    .as_deref()
+                    .map(resolve_ollama_executable)
+                    .unwrap_or_else(default_ollama_executable),
+            )
+            .await;
+        self.runtime
+            .set_server_environment(
+                settings
+                    .ollama
+                    .server_environment(settings.storage.model_directory.as_deref()),
+            )
+            .await;
+        self.flush_state().await?;
+        let mut returned_settings = settings;
+        if returned_settings.ollama.executable_path.is_none() {
+            returned_settings.ollama.executable_path = Some(self.runtime.executable_path().await);
+        }
+        Ok(SettingsSaveReport {
+            settings: returned_settings,
+            runtime_restart_required,
+        })
+    }
+
+    pub async fn reset_settings(&self) -> Result<SettingsSaveReport, String> {
+        self.save_settings(ApplicationSettings::default(), false)
+            .await
+    }
+
+    pub async fn test_ollama_connection(
+        &self,
+        settings: ApplicationSettings,
+    ) -> OllamaConnectionReport {
+        let endpoint = settings.ollama.endpoint.clone();
+        let runtime = match OllamaRuntime::new(&endpoint) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                return OllamaConnectionReport {
+                    healthy: false,
+                    endpoint,
+                    version: None,
+                    message: error.to_string(),
+                };
+            }
+        };
+        match runtime.version().await {
+            Ok(version) => OllamaConnectionReport {
+                healthy: true,
+                endpoint,
+                version: Some(version.clone()),
+                message: format!("Connected to Ollama {version}."),
+            },
+            Err(error) => OllamaConnectionReport {
+                healthy: false,
+                endpoint,
+                version: None,
+                message: error.to_string(),
+            },
+        }
+    }
+
+    pub async fn restart_managed_ollama(&self) -> Result<OllamaConnectionReport, String> {
+        let settings = self.settings().await?;
+        self.runtime
+            .restart_managed_server()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(self.test_ollama_connection(settings).await)
     }
 
     pub async fn set_telemetry_enabled(&self, enabled: bool) -> Result<(), String> {
@@ -1356,7 +1494,8 @@ impl SharedCoreAdapter {
             CoreRuntimeStatus::Unavailable | CoreRuntimeStatus::Idle => Vec::new(),
         };
         if self.runtime.health().await.is_err() {
-            if !self.runtime.executable_available().await {
+            let settings = self.state.read().await.settings.clone();
+            if !settings.auto_start_managed_runtimes || !self.runtime.executable_available().await {
                 let models = reconcile_unavailable_models(
                     &catalog,
                     local_persisted,
@@ -1545,6 +1684,22 @@ impl SharedCoreAdapter {
     }
 
     async fn replace_models(&self, models: Vec<PersistedModelEntry>) -> Result<(), String> {
+        let retention = self
+            .state
+            .read()
+            .await
+            .settings
+            .privacy
+            .lifecycle_log_retention as usize;
+        let models = models
+            .into_iter()
+            .map(|mut model| {
+                if model.logs.len() > retention {
+                    model.logs.drain(..model.logs.len() - retention);
+                }
+                model
+            })
+            .collect();
         self.state.write().await.models = models;
         self.flush_state().await
     }
@@ -1950,6 +2105,40 @@ mod tests {
         };
 
         assert_eq!(public_key.len(), 32);
+    }
+
+    #[test]
+    fn v04_state_without_settings_keeps_models_and_uses_ollama_defaults() {
+        let Ok(state): Result<PersistedState, _> = serde_json::from_str(
+            r#"{
+                "installed_model": "qwen3:8b",
+                "selected_runtime": "ollama",
+                "runtime_executable": "ollama.exe",
+                "remote_targets": [],
+                "models": [{
+                    "id": "legacy-qwen",
+                    "name": "My Qwen",
+                    "modelId": "qwen3-8b-q4_k_m",
+                    "modelName": "Qwen 3",
+                    "version": "3",
+                    "location": "local",
+                    "running": false,
+                    "logs": ["Installed before settings existed."]
+                }]
+            }"#,
+        ) else {
+            panic!("v0.4 state should deserialize");
+        };
+
+        assert_eq!(state.installed_model.as_deref(), Some("qwen3:8b"));
+        assert_eq!(
+            state.settings.default_runtime,
+            crate::settings::RuntimeId::Ollama
+        );
+        assert_eq!(state.settings.ollama.endpoint, "http://127.0.0.1:11434");
+        assert_eq!(state.models.len(), 1);
+        assert_eq!(state.models[0].name, "My Qwen");
+        assert_eq!(state.models[0].logs, ["Installed before settings existed."]);
     }
 
     #[test]
