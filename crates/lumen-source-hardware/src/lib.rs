@@ -1,4 +1,4 @@
-//! Linux hardware capacity detection and lightweight usage sampling.
+//! Platform hardware capacity detection and lightweight usage sampling.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -117,11 +117,18 @@ pub trait HardwareProbe: Send + Sync {
 #[cfg(target_os = "linux")]
 pub type PlatformHardwareProbe = LinuxHardwareProbe;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+pub use windows::WindowsHardwareProbe;
+#[cfg(target_os = "windows")]
+pub type PlatformHardwareProbe = WindowsHardwareProbe;
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 #[derive(Clone, Debug, Default)]
 pub struct PlatformHardwareProbe;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 #[async_trait]
 impl HardwareProbe for PlatformHardwareProbe {
     async fn hardware_facts(&self) -> Result<HardwareFacts, ProbeError> {

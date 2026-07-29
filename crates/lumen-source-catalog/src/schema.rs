@@ -394,14 +394,46 @@ fn ollama_runtime() -> RuntimeEntry {
             Platform::WindowsX86_64,
         ],
         install: Install {
-            strategy: InstallStrategy("external".to_owned()),
-            urls_by_platform: BTreeMap::new(),
-            sha256_by_platform: BTreeMap::new(),
-            version: "Ollama".to_owned(),
+            strategy: InstallStrategy("archive".to_owned()),
+            urls_by_platform: BTreeMap::from([
+                (
+                    Platform::LinuxX86_64,
+                    "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-linux-amd64.tar.zst"
+                        .to_owned(),
+                ),
+                (
+                    Platform::LinuxAarch64,
+                    "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-linux-arm64.tar.zst"
+                        .to_owned(),
+                ),
+                (
+                    Platform::WindowsX86_64,
+                    "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-windows-amd64.zip"
+                        .to_owned(),
+                ),
+            ]),
+            sha256_by_platform: BTreeMap::from([
+                (
+                    Platform::LinuxX86_64,
+                    "83b1f22841eb7f6c4900c6797f960ebaa09466874442ea5b8ae3da6980d3914c"
+                        .to_owned(),
+                ),
+                (
+                    Platform::LinuxAarch64,
+                    "20fb8d14694f73b97dc41519e27ef06166236207e7efe793f1698a43722215f2"
+                        .to_owned(),
+                ),
+                (
+                    Platform::WindowsX86_64,
+                    "d5abdc21b64ee928d3c92880ac22da5e5b0a46b8b07179791dd8c711b35f8397"
+                        .to_owned(),
+                ),
+            ]),
+            version: "0.32.1".to_owned(),
         },
         default_endpoint: "http://127.0.0.1:11434".to_owned(),
         notes: Some(
-            "Model-list entries are installed through a locally available Ollama runtime."
+            "Ollama can be downloaded as a verified standalone runtime after explicit user consent."
                 .to_owned(),
         ),
     }
@@ -521,6 +553,27 @@ mod tests {
         );
         assert_eq!(catalog.models[0].license.profile_id.as_deref(), Some("mit"));
         assert_eq!(catalog.models[0].license.commercial_use, "permitted");
+        let ollama = &catalog.runtimes[0];
+        assert_eq!(ollama.install.strategy.0, "archive");
+        assert_eq!(ollama.install.version, "0.32.1");
+        assert_eq!(
+            ollama
+                .install
+                .urls_by_platform
+                .get(&Platform::WindowsX86_64)
+                .map(String::as_str),
+            Some(
+                "https://github.com/ollama/ollama/releases/download/v0.32.1/ollama-windows-amd64.zip"
+            )
+        );
+        assert_eq!(
+            ollama
+                .install
+                .sha256_by_platform
+                .get(&Platform::WindowsX86_64)
+                .map(String::as_str),
+            Some("d5abdc21b64ee928d3c92880ac22da5e5b0a46b8b07179791dd8c711b35f8397")
+        );
     }
 
     #[test]

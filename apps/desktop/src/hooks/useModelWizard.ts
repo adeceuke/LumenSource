@@ -84,6 +84,7 @@ export function useModelWizard({
   const [installCancellable, setInstallCancellable] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [startAfterInstall, setStartAfterInstall] = useState(true);
+  const [installRuntime, setInstallRuntime] = useState(false);
   const [useCase, setUseCase] = useState<UseIntent>("chat");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -115,6 +116,11 @@ export function useModelWizard({
   );
   const recommendedModel = recommendations.find((recommendation) => recommendation.recommended);
   const selectedIsDummy = selectedRecommendation?.runtimeId === "dummy-runtime";
+  const runtimeInstallRequired = wizardLocation === "local"
+    && !selectedIsDummy
+    && preflight?.checks.some((check) => (
+      check.id === "runtime" && check.messageKey === "local.runtimeInstallable"
+    )) === true;
   const licenseReviewComplete = Boolean(selectedRecommendation) && (licenseBasis === "catalog"
     ? !selectedRecommendation?.license.requiresUserAcceptance || licenseAcknowledged
     : licenseAcknowledged && separateLicenseReference.trim().length > 0);
@@ -210,6 +216,7 @@ export function useModelWizard({
     setLicenseBasis("catalog");
     setLicenseAcknowledged(false);
     setSeparateLicenseReference("");
+    setInstallRuntime(false);
   }, [selectedModelId]);
 
   const reset = () => {
@@ -228,6 +235,7 @@ export function useModelWizard({
     setInstallCancellable(false);
     setCancelBusy(false);
     setStartAfterInstall(true);
+    setInstallRuntime(false);
     setSelectedModelId("");
     setRecommendations([]);
     setModelPickerOpen(false);
@@ -485,7 +493,12 @@ export function useModelWizard({
   };
 
   const startInstall = async () => {
-    if (!selectedRecommendation || !preflight?.canInstall || downloadBusy) return;
+    if (
+      !selectedRecommendation
+      || !preflight?.canInstall
+      || downloadBusy
+      || (runtimeInstallRequired && !installRuntime)
+    ) return;
     setDownloadBusy(true);
     setInstallCancellable(true);
     setCancelBusy(false);
@@ -510,6 +523,7 @@ export function useModelWizard({
           ? separateLicenseReference.trim()
           : undefined,
         licenseAcknowledged,
+        installRuntime: runtimeInstallRequired && installRuntime,
       });
       setInstallCancellable(false);
       if (startAfterInstall) {
@@ -596,6 +610,8 @@ export function useModelWizard({
       installCancellable,
       cancelBusy,
       startAfterInstall,
+      installRuntime,
+      runtimeInstallRequired,
       installProgress,
       selectedIsDummy,
       endpoint,
@@ -615,6 +631,7 @@ export function useModelWizard({
       setLicenseAcknowledged,
       setSeparateLicenseReference,
       setStartAfterInstall,
+      setInstallRuntime,
       cancelWizard,
       openRemoteTargetDialog,
       checkRemoteTarget,

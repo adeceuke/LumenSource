@@ -1,7 +1,7 @@
 use crate::bridge::{
-    CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, MachineUsageSnapshot,
-    PerformanceSnapshot, PersistedModelEntry, PreflightReport, Recommendation,
-    RemoteCredentialStatus, RuntimeStatus, SharedCoreAdapter,
+    CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, InstallOptions,
+    MachineUsageSnapshot, PerformanceSnapshot, PersistedModelEntry, PreflightReport,
+    Recommendation, RemoteCredentialStatus, RuntimeStatus, SharedCoreAdapter,
 };
 use lumen_source_runtime::ChatMessage;
 use serde::Deserialize;
@@ -35,6 +35,8 @@ pub struct InstallRequest {
     #[serde(default)]
     license_reference: Option<String>,
     license_acknowledged: bool,
+    #[serde(default)]
+    install_runtime: bool,
 }
 
 fn normalize_target_id(value: Option<String>) -> String {
@@ -160,9 +162,12 @@ pub async fn install_model(
         app,
         request.model_id,
         normalize_target_id(request.target_id),
-        request.license_basis,
-        request.license_reference,
-        request.license_acknowledged,
+        InstallOptions {
+            license_basis: request.license_basis,
+            license_reference: request.license_reference,
+            license_acknowledged: request.license_acknowledged,
+            install_runtime: request.install_runtime,
+        },
     )
     .await
 }

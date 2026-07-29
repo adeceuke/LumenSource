@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use lumen_source_hardware::{
     AcceleratorFacts, AcceleratorKind, AcceleratorUsage, CpuFacts, HardwareFacts, MemoryFacts,
     OsFacts, StorageFacts, UsageSnapshot,
@@ -120,6 +121,128 @@ for lumen_card in /sys/class/drm/card[0-9]*; do
     fi
     printf '%s|%s|%s\n' "${lumen_card##*/}" "$lumen_busy" "$lumen_vram"
 done
+"#;
+const REMOTE_WINDOWS_DETECTION_SCRIPT: &str =
+    "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); Write-Output Windows";
+const REMOTE_WINDOWS_HARDWARE_SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+$registryCpu = Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0'
+$windows = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+Add-Type -AssemblyName Microsoft.VisualBasic
+$computer = [Microsoft.VisualBasic.Devices.ComputerInfo]::new()
+$memory = Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue | Select-Object -First 1
+$drive = [IO.DriveInfo]::new($env:SystemDrive)
+$architecture = switch ($env:PROCESSOR_ARCHITECTURE) {
+  'AMD64' { 'x86_64' }
+  'ARM64' { 'aarch64' }
+  default { $env:PROCESSOR_ARCHITECTURE.ToLowerInvariant() }
+}
+$gpus = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object {
+  $name = [string]$_.Name
+  $kind = if ($name -match 'NVIDIA') { 'nvidia' } elseif ($name -match 'AMD|Radeon') { 'amd' } elseif ($name -match 'Intel') { 'intel' } else { 'other' }
+  [pscustomobject]@{
+    kind = $kind
+    name = $name
+    total_vram_bytes = $_.AdapterRAM
+    driver_version = $_.DriverVersion
+  }
+})
+$nvidiaSmi = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
+if ($nvidiaSmi) {
+  $nvidiaGpus = @(& $nvidiaSmi.Source --query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits | ForEach-Object {
+    $fields = $_ -split ','
+    [pscustomobject]@{
+      kind = 'nvidia'
+      name = $fields[0].Trim()
+      total_vram_bytes = [uint64]$fields[1].Trim() * 1MB
+      driver_version = $fields[2].Trim()
+    }
+  })
+  $gpus = @($gpus | Where-Object kind -ne 'nvidia') + $nvidiaGpus
+}
+$memoryKind = switch ([int]$memory.SMBIOSMemoryType) {
+  20 { 'DDR' }; 21 { 'DDR2' }; 24 { 'DDR3' }; 26 { 'DDR4' }
+  27 { 'LPDDR' }; 28 { 'LPDDR2' }; 29 { 'LPDDR3' }; 30 { 'LPDDR4' }
+  34 { 'DDR5' }; 35 { 'LPDDR5' }; default { $null }
+}
+[pscustomobject]@{
+  os = [pscustomobject]@{
+    family = 'windows'
+    distribution = if ($os.Caption) { $os.Caption } else { $windows.ProductName }
+    version = if ($os.Version) { $os.Version } else { "$($windows.DisplayVersion) ($($windows.CurrentBuild))" }
+    architecture = $architecture
+  }
+  cpu = [pscustomobject]@{
+    model = if ($cpu.Name) { $cpu.Name } else { $registryCpu.ProcessorNameString }
+    architecture = $architecture
+    logical_cores = if ($cpu.NumberOfLogicalProcessors) { $cpu.NumberOfLogicalProcessors } else { [Environment]::ProcessorCount }
+    physical_cores = $cpu.NumberOfCores
+    frequency_mhz = if ($cpu.MaxClockSpeed) { $cpu.MaxClockSpeed } else { $registryCpu.'~MHz' }
+  }
+  memory = [pscustomobject]@{
+    kind = $memoryKind
+    speed_mts = if ($memory.ConfiguredClockSpeed) { $memory.ConfiguredClockSpeed } else { $memory.Speed }
+  }
+  total_ram_bytes = if ($os.TotalVisibleMemorySize) { [uint64]$os.TotalVisibleMemorySize * 1KB } else { $computer.TotalPhysicalMemory }
+  available_ram_bytes = if ($os.FreePhysicalMemory) { [uint64]$os.FreePhysicalMemory * 1KB } else { $computer.AvailablePhysicalMemory }
+  storage = [pscustomobject]@{
+    mount_point = "$($env:SystemDrive)\"
+    total_bytes = $drive.TotalSize
+    available_bytes = $drive.AvailableFreeSpace
+  }
+  accelerators = $gpus
+} | ConvertTo-Json -Compress -Depth 5
+"#;
+const REMOTE_WINDOWS_USAGE_SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue
+$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+Add-Type -AssemblyName Microsoft.VisualBasic
+$computer = [Microsoft.VisualBasic.Devices.ComputerInfo]::new()
+$load = ($cpu | Measure-Object -Property LoadPercentage -Average).Average
+$accelerators = @()
+$nvidiaSmi = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
+if ($nvidiaSmi) {
+  $accelerators = @(& $nvidiaSmi.Source --query-gpu=name,utilization.gpu,memory.used --format=csv,noheader,nounits | ForEach-Object {
+    $fields = $_ -split ','
+    [pscustomobject]@{
+      kind = 'nvidia'
+      name = $fields[0].Trim()
+      utilization_percent = [float]$fields[1].Trim()
+      used_vram_bytes = [uint64]$fields[2].Trim() * 1MB
+    }
+  })
+}
+[pscustomobject]@{
+  sampled_at_unix_ms = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  cpu_utilization_percent = if ($null -ne $load) { $load } else { 0 }
+  used_ram_bytes = if ($os.TotalVisibleMemorySize) { [uint64]($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) * 1KB } else { $computer.TotalPhysicalMemory - $computer.AvailablePhysicalMemory }
+  available_ram_bytes = if ($os.FreePhysicalMemory) { [uint64]$os.FreePhysicalMemory * 1KB } else { $computer.AvailablePhysicalMemory }
+  accelerators = $accelerators
+} | ConvertTo-Json -Compress
+"#;
+const REMOTE_WINDOWS_OLLAMA_DISCOVERY_SCRIPT: &str = r#"
+$ollama = Get-Command ollama.exe -ErrorAction SilentlyContinue
+if (-not $ollama) {
+  $candidate = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
+  if (Test-Path -LiteralPath $candidate -PathType Leaf) { $ollama = Get-Item $candidate }
+}
+if (-not $ollama) { exit 127 }
+if ($ollama.Source) { $ollama.Source } else { $ollama.FullName }
+"#;
+const REMOTE_WINDOWS_OLLAMA_START_SCRIPT: &str = r#"
+$ollama = Get-Command ollama.exe -ErrorAction SilentlyContinue
+if (-not $ollama) {
+  $candidate = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe'
+  if (Test-Path -LiteralPath $candidate -PathType Leaf) { $ollama = Get-Item $candidate }
+}
+if (-not $ollama) { exit 127 }
+$path = if ($ollama.Source) { $ollama.Source } else { $ollama.FullName }
+Start-Process -FilePath $path -ArgumentList 'serve' -WindowStyle Hidden
 "#;
 #[cfg(unix)]
 const ASKPASS_SOCKET_ENV: &str = "LUMEN_SOURCE_ASKPASS_SOCKET";
@@ -391,6 +514,12 @@ pub struct RemoteSession {
     _tunnel: Mutex<Child>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteOperatingSystem {
+    Linux,
+    Windows,
+}
+
 impl RemoteSession {
     pub fn target_id(&self) -> String {
         self.config.target_id()
@@ -412,8 +541,18 @@ pub async fn probe_hardware(
 ) -> Result<HardwareFacts, String> {
     config.validate()?;
     let password = password.filter(|value| !value.is_empty()).map(Arc::new);
-    let output = ssh_probe(config, REMOTE_HARDWARE_COMMAND, password.as_ref()).await?;
-    parse_remote_hardware(&output)
+    match detect_remote_os(config, password.as_ref()).await? {
+        RemoteOperatingSystem::Linux => {
+            let output = ssh_probe(config, REMOTE_HARDWARE_COMMAND, password.as_ref()).await?;
+            parse_remote_hardware(&output)
+        }
+        RemoteOperatingSystem::Windows => {
+            let command = windows_remote_command(REMOTE_WINDOWS_HARDWARE_SCRIPT);
+            let output = ssh_probe(config, &command, password.as_ref()).await?;
+            serde_json::from_str(&output)
+                .map_err(|error| format!("Could not interpret Windows hardware data: {error}"))
+        }
+    }
 }
 
 pub async fn probe_usage(
@@ -422,8 +561,18 @@ pub async fn probe_usage(
 ) -> Result<UsageSnapshot, String> {
     config.validate()?;
     let password = password.filter(|value| !value.is_empty()).map(Arc::new);
-    let output = ssh_probe(config, REMOTE_USAGE_COMMAND, password.as_ref()).await?;
-    parse_remote_usage(&output)
+    match detect_remote_os(config, password.as_ref()).await? {
+        RemoteOperatingSystem::Linux => {
+            let output = ssh_probe(config, REMOTE_USAGE_COMMAND, password.as_ref()).await?;
+            parse_remote_usage(&output)
+        }
+        RemoteOperatingSystem::Windows => {
+            let command = windows_remote_command(REMOTE_WINDOWS_USAGE_SCRIPT);
+            let output = ssh_probe(config, &command, password.as_ref()).await?;
+            serde_json::from_str(&output)
+                .map_err(|error| format!("Could not interpret Windows usage data: {error}"))
+        }
+    }
 }
 
 pub async fn connect(
@@ -444,26 +593,20 @@ pub async fn connect(
     let target_name = config.display_name();
     let mut checks = Vec::new();
 
-    let os = match ssh_probe(&config, "uname -s", password.as_ref()).await {
-        Ok(output) if output.trim() == "Linux" => {
+    let remote_os = match detect_remote_os(&config, password.as_ref()).await {
+        Ok(remote_os) => {
+            let name = match remote_os {
+                RemoteOperatingSystem::Linux => "Linux",
+                RemoteOperatingSystem::Windows => "Windows",
+            };
             checks.push(check(
                 "connection",
                 "pass",
                 "connection.connected",
-                "Connected securely and confirmed a Linux target.",
+                &format!("Connected securely and confirmed a {name} target."),
                 None,
             ));
-            output
-        }
-        Ok(output) => {
-            checks.push(check(
-                "connection",
-                "fail",
-                "connection.unsupportedOs",
-                &format!("The target reported `{}` instead of Linux.", output.trim()),
-                Some("This release supports Linux-to-Linux remote targets only."),
-            ));
-            return Ok(attempt(target_id, target_name, checks, None));
+            remote_os
         }
         Err(detail) => {
             let guidance = ssh_connection_guidance(&detail, &config);
@@ -477,20 +620,21 @@ pub async fn connect(
             return Ok(attempt(target_id, target_name, checks, None));
         }
     };
-    drop(os);
 
-    let hardware = match ssh_probe(&config, REMOTE_HARDWARE_COMMAND, password.as_ref()).await {
-        Ok(output) => match parse_remote_hardware(&output) {
+    let hardware_command = match remote_os {
+        RemoteOperatingSystem::Linux => REMOTE_HARDWARE_COMMAND.to_owned(),
+        RemoteOperatingSystem::Windows => windows_remote_command(REMOTE_WINDOWS_HARDWARE_SCRIPT),
+    };
+    let hardware = match ssh_probe(&config, &hardware_command, password.as_ref()).await {
+        Ok(output) => match parse_hardware_for_os(remote_os, &output) {
             Ok(hardware) => hardware,
             Err(detail) => {
                 checks.push(check(
                     "hardware",
                     "fail",
                     "hardware.invalidResponse",
-                    &format!("Could not interpret the target's Linux hardware data. {detail}"),
-                    Some(
-                        "Confirm `/proc/cpuinfo`, `/proc/meminfo`, `uname`, and `df` are available to the SSH user, then retry.",
-                    ),
+                    &format!("Could not interpret the target's hardware data. {detail}"),
+                    Some(remote_hardware_guidance(remote_os)),
                 ));
                 return Ok(attempt(target_id, target_name, checks, None));
             }
@@ -501,9 +645,7 @@ pub async fn connect(
                 "fail",
                 "hardware.probeFailed",
                 &format!("Could not inspect the target hardware. {detail}"),
-                Some(
-                    "Confirm `/proc/cpuinfo`, `/proc/meminfo`, `uname`, and `df` are available to the SSH user, then retry.",
-                ),
+                Some(remote_hardware_guidance(remote_os)),
             ));
             return Ok(attempt(target_id, target_name, checks, None));
         }
@@ -516,17 +658,19 @@ pub async fn connect(
         None,
     ));
 
-    if let Err(detail) =
-        ssh_probe(&config, REMOTE_OLLAMA_DISCOVERY_COMMAND, password.as_ref()).await
-    {
+    let discovery_command = match remote_os {
+        RemoteOperatingSystem::Linux => REMOTE_OLLAMA_DISCOVERY_COMMAND.to_owned(),
+        RemoteOperatingSystem::Windows => {
+            windows_remote_command(REMOTE_WINDOWS_OLLAMA_DISCOVERY_SCRIPT)
+        }
+    };
+    if let Err(detail) = ssh_probe(&config, &discovery_command, password.as_ref()).await {
         checks.push(check(
             "ollama",
             "fail",
             "ollama.notFound",
             &format!("Ollama was not found for the remote SSH user. {detail}"),
-            Some(
-                "Install Ollama on the target using the publisher's Linux instructions at https://docs.ollama.com/linux, then confirm `ssh <target> ollama --version` works. LumenSource checks the login shell and common system and per-user install locations.",
-            ),
+            Some(remote_ollama_guidance(remote_os)),
         ));
         return Ok(attempt(target_id, target_name, checks, None));
     }
@@ -570,7 +714,13 @@ pub async fn connect(
         .map_err(|error| format!("Could not inspect the SSH tunnel: {error}"))?
         .is_none();
     if !healthy && tunnel_running {
-        match ssh_probe(&config, REMOTE_OLLAMA_START_COMMAND, password.as_ref()).await {
+        let start_command = match remote_os {
+            RemoteOperatingSystem::Linux => REMOTE_OLLAMA_START_COMMAND.to_owned(),
+            RemoteOperatingSystem::Windows => {
+                windows_remote_command(REMOTE_WINDOWS_OLLAMA_START_SCRIPT)
+            }
+        };
+        match ssh_probe(&config, &start_command, password.as_ref()).await {
             Ok(_) => {
                 started_ollama = true;
                 healthy = wait_for_remote_runtime(&mut child, runtime.as_ref(), 100).await?;
@@ -585,9 +735,7 @@ pub async fn connect(
                     &format!(
                         "Ollama is installed, but LumenSource could not start `ollama serve`. {detail}"
                     ),
-                    Some(
-                        "Start Ollama on the target and confirm `curl http://127.0.0.1:11434/api/tags` succeeds, then retry. A system-managed installation can be started with `sudo systemctl enable --now ollama`.",
-                    ),
+                    Some(remote_ollama_start_guidance(remote_os)),
                 ));
                 return Ok(attempt(target_id, target_name, checks, None));
             }
@@ -609,9 +757,7 @@ pub async fn connect(
             } else {
                 "Ollama is installed, but the SSH tunnel closed before its loopback API became reachable."
             },
-            Some(
-                "Check the target's Ollama output and confirm `curl http://127.0.0.1:11434/api/tags` succeeds. For a system service, try `sudo systemctl enable --now ollama`.",
-            ),
+            Some(remote_ollama_start_guidance(remote_os)),
         ));
         return Ok(attempt(target_id, target_name, checks, None));
     }
@@ -1032,11 +1178,84 @@ fn hardware_summary(hardware: &HardwareFacts) -> String {
     )
 }
 
+async fn detect_remote_os(
+    config: &RemoteTargetConfig,
+    password: Option<&Arc<Zeroizing<String>>>,
+) -> Result<RemoteOperatingSystem, String> {
+    if ssh_probe(config, "uname -s", password)
+        .await
+        .is_ok_and(|output| output.trim() == "Linux")
+    {
+        return Ok(RemoteOperatingSystem::Linux);
+    }
+    let command = windows_remote_command(REMOTE_WINDOWS_DETECTION_SCRIPT);
+    if ssh_probe(config, &command, password)
+        .await
+        .is_ok_and(|output| output.trim() == "Windows")
+    {
+        return Ok(RemoteOperatingSystem::Windows);
+    }
+    Err("The SSH target is not a supported Linux or Windows machine.".to_owned())
+}
+
+fn windows_remote_command(script: &str) -> String {
+    let utf16 = script
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    format!(
+        "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
+        STANDARD.encode(utf16)
+    )
+}
+
+fn parse_hardware_for_os(os: RemoteOperatingSystem, output: &str) -> Result<HardwareFacts, String> {
+    match os {
+        RemoteOperatingSystem::Linux => parse_remote_hardware(output),
+        RemoteOperatingSystem::Windows => serde_json::from_str(output)
+            .map_err(|error| format!("Could not interpret Windows hardware data: {error}")),
+    }
+}
+
+fn remote_hardware_guidance(os: RemoteOperatingSystem) -> &'static str {
+    match os {
+        RemoteOperatingSystem::Linux => {
+            "Confirm `/proc/cpuinfo`, `/proc/meminfo`, `uname`, and `df` are available to the SSH user, then retry."
+        }
+        RemoteOperatingSystem::Windows => {
+            "Confirm Windows PowerShell, registry access, and the system drive are available to the OpenSSH user, then retry."
+        }
+    }
+}
+
+fn remote_ollama_guidance(os: RemoteOperatingSystem) -> &'static str {
+    match os {
+        RemoteOperatingSystem::Linux => {
+            "Install Ollama using the publisher's Linux instructions, then confirm `ssh <target> ollama --version` works."
+        }
+        RemoteOperatingSystem::Windows => {
+            "Install Ollama for the Windows SSH user, then confirm `ollama.exe --version` works in that user's PowerShell session."
+        }
+    }
+}
+
+fn remote_ollama_start_guidance(os: RemoteOperatingSystem) -> &'static str {
+    match os {
+        RemoteOperatingSystem::Linux => {
+            "Start Ollama on the target and confirm `curl http://127.0.0.1:11434/api/tags` succeeds. A system-managed installation can be started with `sudo systemctl enable --now ollama`."
+        }
+        RemoteOperatingSystem::Windows => {
+            "Start Ollama for the SSH user and confirm `Invoke-WebRequest http://127.0.0.1:11434/api/tags` succeeds in PowerShell."
+        }
+    }
+}
+
 async fn ssh_command(
     config: &RemoteTargetConfig,
     password: Option<&Arc<Zeroizing<String>>>,
 ) -> Result<(Command, Option<AskpassBroker>), String> {
     let mut command = Command::new("ssh");
+    hide_console_window(&mut command);
     command
         .arg("-p")
         .arg(config.port.to_string())
@@ -1081,9 +1300,18 @@ async fn ssh_command(
     Ok((command, askpass))
 }
 
+#[cfg(target_os = "windows")]
+fn hide_console_window(command: &mut Command) {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hide_console_window(_command: &mut Command) {}
+
 async fn ssh_probe(
     config: &RemoteTargetConfig,
-    probe: &'static str,
+    probe: &str,
     password: Option<&Arc<Zeroizing<String>>>,
 ) -> Result<String, String> {
     let (mut command, askpass) = ssh_command(config, password).await?;
@@ -1218,6 +1446,34 @@ mod tests {
             authentication: RemoteAuthentication::Key,
             identity_file: None,
         }
+    }
+
+    #[test]
+    fn windows_remote_commands_are_encoded_for_the_target_shell() {
+        let command = windows_remote_command("Write-Output Windows");
+        assert!(command.starts_with("powershell.exe "));
+        assert!(command.contains("-EncodedCommand "));
+        assert!(!command.contains("Write-Output"));
+    }
+
+    #[test]
+    fn parses_normalized_windows_remote_hardware() -> Result<(), String> {
+        let facts = parse_hardware_for_os(
+            RemoteOperatingSystem::Windows,
+            r#"{
+              "os":{"family":"windows","distribution":"Windows 11","version":"24H2","architecture":"x86_64"},
+              "cpu":{"model":"Test CPU","architecture":"x86_64","logical_cores":8,"physical_cores":4,"frequency_mhz":3200},
+              "memory":{"kind":"DDR5","speed_mts":5600},
+              "total_ram_bytes":17179869184,
+              "available_ram_bytes":8589934592,
+              "storage":{"mount_point":"C:\\","total_bytes":1000,"available_bytes":500},
+              "accelerators":[]
+            }"#,
+        )?;
+        assert_eq!(facts.os.family, "windows");
+        assert_eq!(facts.cpu.logical_cores, 8);
+        assert_eq!(facts.storage.mount_point, PathBuf::from("C:\\"));
+        Ok(())
     }
 
     #[test]
@@ -1377,6 +1633,7 @@ NVIDIA Test GPU, 12288, 555.42
         assert!(error.is_err());
     }
 
+    #[cfg(unix)]
     #[test]
     fn remote_hardware_probe_is_valid_posix_shell_syntax() -> Result<(), String> {
         let status = std::process::Command::new("sh")
@@ -1418,6 +1675,7 @@ NVIDIA Test GPU, 42, 2048
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn remote_usage_probe_is_valid_posix_shell_syntax() -> Result<(), String> {
         let status = std::process::Command::new("sh")

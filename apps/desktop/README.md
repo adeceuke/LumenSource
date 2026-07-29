@@ -43,6 +43,12 @@ The installation step includes a **Start model after installation** checkbox,
 enabled by default. Clearing it installs the model without loading it; the
 models page can start it later.
 
+When no local Ollama installation is detected, the step also offers an
+unchecked **Download and install Ollama** option. Consent is carried in the
+installation request and enforced by the Rust backend. The verified standalone
+runtime is installed under local application data and is not bundled into the
+desktop package.
+
 License and usage-policy actions open the HTTPS publisher URL from the signed
 catalog in the operating system's default browser through Tauri's opener
 plugin. LumenSource does not host a second copy of the license text.
@@ -156,14 +162,15 @@ chat-completions URL, exact runtime model identifier, authentication requirement
 loaded state, and a copyable cURL example. The endpoint is runtime-wide and the
 model identifier selects the model for each request. Dummy endpoint values are
 clearly marked as non-functional placeholders.
-Current UI boundaries: the remote preview supports Linux-to-Linux SSH targets
-with an existing Ollama installation. It starts `ollama serve` as the SSH user
-when needed and detects the target's CPU, RAM, storage, and supported GPUs for
-recommendation and preflight, but does not install remote services.
+Current UI boundaries: the remote preview supports Linux and Windows OpenSSH
+targets with an existing Ollama installation. It starts `ollama serve` as the
+SSH user when needed and detects the target's CPU, RAM, storage, and supported
+GPUs for recommendation and preflight, but does not install remote services.
 The wizard selects from saved non-secret target
 profiles; **Add target machine** opens the connection-settings dialog and
 selects the new target after saving. SSH keys and agents are preferred; a
-password can remain session-only or be saved securely for automatic reconnects.
+password can remain session-only or be saved securely for automatic reconnects
+on Unix controllers; Windows controllers currently require key authentication.
 Remove stops the selected model when necessary,
 deletes it from the selected Ollama model store, and clears its Lumen Source entries. See
 [current implementation](../../docs/current-implementation.md) for the complete

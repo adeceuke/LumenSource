@@ -18,16 +18,17 @@ Use `lumen-source` wherever the product name must be represented as one technica
 - `catalog/` — catalog schema notes and test fixtures
 - `docs/` — documentation index
 
-Remote deployment has a Linux-to-Linux preview that connects agentlessly to an
-existing target Ollama service through SSH. A managed Lumen Source Agent,
-remote macOS/Windows hardware adapters and remote runtime installation remain deferred. See the
+Remote deployment has an agentless SSH preview for Linux and Windows targets
+with an existing Ollama installation. A managed Lumen Source Agent, remote
+macOS adapters, and remote runtime installation remain deferred. See the
 [remote host plan](docs/remote-hosts.md).
 
-## v0.1 platform
+## Platforms
 
-Ubuntu 24.04 LTS x86_64 is the first release and acceptance-test target.
-Domain and orchestration code remains platform-neutral so macOS and Windows
-adapters can be added without changing product logic.
+Ubuntu 24.04 LTS x86_64 remains the reference release target. Windows x86_64
+has a native Tauri build, hardware detection, and local Ollama model
+installation workflow. See [platform support](docs/platform-support.md) for
+the acceptance status and remaining limitations.
 
 ## Development setup
 
@@ -44,6 +45,18 @@ For a native Ubuntu 24.04 toolchain:
 scripts/setup-ubuntu-24.04.sh
 scripts/check-prerequisites.sh
 ```
+
+On Windows, use a Visual Studio Developer PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check-prerequisites.ps1
+powershell -ExecutionPolicy Bypass -File scripts\container.ps1 check
+powershell -ExecutionPolicy Bypass -File scripts\container.ps1 package
+```
+
+Docker is not required for a Windows package. The native MSVC toolchain is
+required because the Ubuntu container cannot produce a Windows Tauri
+MSI/NSIS installer.
 
 See [development setup](docs/development.md), [platform support](docs/platform-support.md),
 [remote host planning](docs/remote-hosts.md), and

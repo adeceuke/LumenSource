@@ -23,8 +23,9 @@ the external inference acceptance step.
 
 ## Cross-platform architecture constraints
 
-Windows and macOS are planned platforms even though they are not v0.1 release
-targets. Code added for Ubuntu must preserve these boundaries:
+Windows is implemented as an additional x86_64 platform but has not replaced
+Ubuntu as the v0.1 reference acceptance target. macOS remains planned. Code
+added for any platform must preserve these boundaries:
 
 - Domain types, catalog parsing, compatibility rules, and recommendation logic
   must not depend on Linux APIs.
@@ -42,21 +43,36 @@ targets. Code added for Ubuntu must preserve these boundaries:
 - UI text must not promise Linux-specific acceleration or installation steps
   when running on another platform.
 
-## Planned adapters
+## Platform adapters
 
-| Capability | Ubuntu 24.04 v0.1 | macOS future | Windows future |
+| Capability | Ubuntu 24.04 v0.1 | macOS future | Windows x86_64 |
 | --- | --- | --- | --- |
 | Desktop shell | Tauri/WebKitGTK | Tauri/WKWebView | Tauri/WebView2 |
-| Hardware facts | `/proc`, CPU/EDAC sysfs, DMI, fixed vendor tools | system APIs, `system_profiler`/Metal | Windows APIs, WMI/DXGI |
-| Initial runtime | Ollama | Ollama, later MLX | Ollama |
-| Packaging | deb/AppImage | app bundle/dmg, notarized | MSI/NSIS, code-signed |
+| Hardware facts | `/proc`, CPU/EDAC sysfs, DMI, fixed vendor tools | system APIs, `system_profiler`/Metal | CIM/WMI plus optional `nvidia-smi` usage |
+| Initial runtime | Ollama | Ollama, later MLX | Local Ollama |
+| Packaging | deb/AppImage | app bundle/dmg, notarized | MSI/NSIS; signing is release infrastructure |
 | Service/agent | deferred | launchd | Windows Service |
 
-The current desktop exposes local deployment plus a Linux-to-Linux remote
-preview backed by the controller's OpenSSH client. macOS and Windows catalog
-metadata exists to preserve schema portability; it does not imply that their
-remote targets, hardware probes, runtime installers, or packages are
-release-ready.
+The Windows probe reports OS version, CPU topology and maximum frequency,
+installed and available RAM, physical-memory generation/speed when firmware
+exposes it, system-drive capacity, and display adapters. NVIDIA utilization
+and used VRAM are sampled when `nvidia-smi` is installed; other GPU usage
+counters remain best-effort.
+
+Local Windows model installation uses the same authenticated catalog and
+Ollama API as Linux. Lumen Source recognizes the standard per-user Windows
+installation even when it is not yet visible in the application's inherited
+PATH. If Ollama is absent, the user can explicitly choose to download a
+catalog-pinned standalone ZIP whose SHA-256 checksum is verified before it is
+extracted to local application data. Ollama remains a separate runtime and is
+not bundled into the Lumen Source package. Lumen Source can then start
+`ollama serve` and pull, list, start, stop, and remove models on the Windows
+machine.
+
+The current desktop exposes local deployment plus Linux and Windows remote
+targets backed by the controller's OpenSSH client. A Windows controller can
+use that preview with Windows OpenSSH and key authentication. Windows SSH
+password brokering and remote runtime installation remain deferred.
 
 Platform-specific implementations should be added as sibling modules, not as
 conditionals spread through recommendation or orchestration code.

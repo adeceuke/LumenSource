@@ -2,16 +2,15 @@
 
 ## Status and objective
 
-The first Linux-to-Linux remote host slice is implemented. The installation
+The Linux/Windows remote host slice is implemented. The installation
 wizard loads saved SSH target profiles. Its target selector is empty when a new
 wizard starts; **Add target machine** opens a dialog for the non-secret
 connection settings, and saving returns to the deployment step with that target
-selected. Lumen Source then verifies that the target is Linux, finds Ollama
-through the SSH user's login or interactive shell and common install locations,
-starts `ollama serve` when its loopback API is not already running, and
-collects normalized CPU, memory, storage, and supported GPU facts before
-maintaining an SSH tunnel for model operations. Remote runtime installation
-remains deferred.
+selected. Lumen Source identifies a Linux or Windows target, finds Ollama in
+platform-specific command and installation paths, starts `ollama serve` when
+its loopback API is not already running, and collects normalized CPU, memory,
+storage, and supported GPU facts before maintaining an SSH tunnel for model
+operations. Remote runtime installation remains deferred.
 
 The objective is to let Lumen Source discover, recommend, deploy, start, stop,
 remove, monitor, and use models on another machine without requiring a Lumen
@@ -303,7 +302,7 @@ Controller packaging also validates connection and credential behavior from
 Linux, macOS, and Windows. A combination is not advertised merely because its
 domain types compile.
 
-## Current Linux preview boundary
+## Current Linux/Windows preview boundary
 
 The preview requires an existing Ollama installation and SSH service on the
 target, installs no Lumen Source software remotely, keeps Ollama on target
@@ -313,6 +312,10 @@ metadata and an optional identity-file path, but no passwords, passphrases, or
 key contents. Passwords can be transient or separate operating-system
 credential-store entries. Closing Lumen Source closes the tunnel without
 stopping target Ollama.
+
+Windows targets require OpenSSH Server and Windows PowerShell. Windows
+controllers currently support key/agent authentication; the private
+password-broker transport is Unix-only.
 
 Remote model ranking and preflight use the target's detected RAM, available
 storage, operating system, and supported GPU/VRAM facts. Missing optional memory

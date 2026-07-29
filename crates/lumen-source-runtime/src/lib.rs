@@ -166,6 +166,8 @@ pub enum RuntimeError {
     InvalidArtifactName(String),
     #[error("I/O operation failed: {0}")]
     Io(#[from] std::io::Error),
+    #[error("ZIP archive operation failed: {0}")]
+    Zip(#[from] zip::result::ZipError),
     #[error("runtime executable is already running")]
     AlreadyRunning,
     #[error("runtime executable is not running")]
@@ -393,7 +395,9 @@ impl OllamaRuntime {
         }
         if process.is_none() {
             let executable = self.executable.lock().await.clone();
-            let child = Command::new(executable)
+            let mut command = Command::new(executable);
+            hide_console_window(&mut command);
+            let child = command
                 .arg("serve")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -429,7 +433,9 @@ impl OllamaRuntime {
 
     pub async fn executable_available(&self) -> bool {
         let executable = self.executable.lock().await.clone();
-        Command::new(executable)
+        let mut command = Command::new(executable);
+        hide_console_window(&mut command);
+        command
             .arg("--version")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -1017,6 +1023,129 @@ impl ArtifactInstaller {
         result
     }
 
+    /// Installs a verified ZIP runtime distribution without executing a
+    /// downloaded installer.
+    pub async fn install_zip(
+        &self,
+        artifact: &Artifact,
+        install_dir: &Path,
+        executable_relative_path: &Path,
+        progress: &dyn ProgressReporter,
+    ) -> Result<PathBuf, RuntimeError> {
+        self.install_zip_cancellable(
+            artifact,
+            install_dir,
+            executable_relative_path,
+            progress,
+            &CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub async fn install_zip_cancellable(
+        &self,
+        artifact: &Artifact,
+        install_dir: &Path,
+        executable_relative_path: &Path,
+        progress: &dyn ProgressReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<PathBuf, RuntimeError> {
+        validate_artifact_name(&artifact.executable_name)?;
+        let parent = install_dir
+            .parent()
+            .ok_or_else(|| RuntimeError::InvalidArtifactName(install_dir.display().to_string()))?;
+        tokio::fs::create_dir_all(parent).await?;
+        let archive_path = parent.join(format!("{}.download", artifact.executable_name));
+        let staging_dir = install_dir.with_extension("staging");
+        if tokio::fs::try_exists(&staging_dir).await? {
+            tokio::fs::remove_dir_all(&staging_dir).await?;
+        }
+        tokio::fs::create_dir_all(&staging_dir).await?;
+
+        let result = async {
+            let actual = Self::download_to_file(
+                &self.client,
+                artifact,
+                &archive_path,
+                progress,
+                cancellation,
+            )
+            .await?;
+            cancellation.check()?;
+            progress.report(RuntimeProgress::Verifying);
+            if !actual.eq_ignore_ascii_case(&artifact.sha256) {
+                return Err(RuntimeError::ChecksumMismatch {
+                    expected: artifact.sha256.clone(),
+                    actual,
+                });
+            }
+
+            cancellation.check()?;
+            progress.report(RuntimeProgress::Installing);
+            let archive = archive_path.clone();
+            let destination = staging_dir.clone();
+            let extraction_cancellation = cancellation.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), RuntimeError> {
+                let file = std::fs::File::open(archive)?;
+                let mut archive = zip::ZipArchive::new(file)?;
+                for index in 0..archive.len() {
+                    extraction_cancellation.check()?;
+                    let mut entry = archive.by_index(index)?;
+                    let relative_path = entry.enclosed_name().ok_or_else(|| {
+                        RuntimeError::InvalidArtifactName(
+                            "archive entry escapes the installation directory".to_owned(),
+                        )
+                    })?;
+                    if entry
+                        .unix_mode()
+                        .is_some_and(|mode| mode & 0o170000 == 0o120000)
+                    {
+                        return Err(RuntimeError::InvalidArtifactName(
+                            "ZIP archive contains a symbolic link".to_owned(),
+                        ));
+                    }
+                    let output_path = destination.join(relative_path);
+                    if entry.is_dir() {
+                        std::fs::create_dir_all(&output_path)?;
+                    } else {
+                        if let Some(parent) = output_path.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        let mut output = std::fs::File::create(output_path)?;
+                        std::io::copy(&mut entry, &mut output)?;
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|error| RuntimeError::Io(std::io::Error::other(error)))??;
+
+            cancellation.check()?;
+            let executable = staging_dir.join(executable_relative_path);
+            if !tokio::fs::try_exists(&executable).await? {
+                return Err(RuntimeError::InvalidArtifactName(format!(
+                    "archive does not contain {}",
+                    executable_relative_path.display()
+                )));
+            }
+            set_executable(&executable).await?;
+            cancellation.check()?;
+            if tokio::fs::try_exists(install_dir).await? {
+                tokio::fs::remove_dir_all(install_dir).await?;
+            }
+            tokio::fs::rename(&staging_dir, install_dir).await?;
+            tokio::fs::remove_file(&archive_path).await?;
+            progress.report(RuntimeProgress::Ready);
+            Ok(install_dir.join(executable_relative_path))
+        }
+        .await;
+        if result.is_err() {
+            let _ = tokio::fs::remove_file(&archive_path).await;
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+        }
+        result
+    }
+
     async fn download_to_file(
         client: &Client,
         artifact: &Artifact,
@@ -1116,7 +1245,9 @@ impl FixedExecutable {
         if self.is_running()? {
             return Err(RuntimeError::AlreadyRunning);
         }
-        let child = Command::new(&self.executable)
+        let mut command = Command::new(&self.executable);
+        hide_console_window(&mut command);
+        let child = command
             .args(self.arguments.iter())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -1133,6 +1264,15 @@ impl FixedExecutable {
         Ok(())
     }
 }
+
+#[cfg(target_os = "windows")]
+fn hide_console_window(command: &mut Command) {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hide_console_window(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {

@@ -104,6 +104,13 @@ pub struct SharedCoreAdapter {
     telemetry: Telemetry,
 }
 
+pub struct InstallOptions {
+    pub license_basis: String,
+    pub license_reference: Option<String>,
+    pub license_acknowledged: bool,
+    pub install_runtime: bool,
+}
+
 impl SharedCoreAdapter {
     pub fn new() -> Result<Self, String> {
         let data_root = dirs::data_local_dir()
@@ -120,8 +127,9 @@ impl SharedCoreAdapter {
                 "http://127.0.0.1:11434",
                 persisted
                     .runtime_executable
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from("ollama")),
+                    .as_deref()
+                    .map(resolve_ollama_executable)
+                    .unwrap_or_else(default_ollama_executable),
             )
             .map_err(|error| format!("Invalid Ollama endpoint: {error}"))?,
         );
@@ -737,15 +745,13 @@ impl SharedCoreAdapter {
         app: AppHandle,
         variant_id: String,
         target_id: String,
-        license_basis: String,
-        license_reference: Option<String>,
-        license_acknowledged: bool,
+        options: InstallOptions,
     ) -> Result<(), String> {
         self.validate_license_authorization(
             &variant_id,
-            &license_basis,
-            license_reference.as_deref(),
-            license_acknowledged,
+            &options.license_basis,
+            options.license_reference.as_deref(),
+            options.license_acknowledged,
         )
         .await?;
         let telemetry_model_id = {
@@ -770,7 +776,13 @@ impl SharedCoreAdapter {
 
         let telemetry_variant_id = variant_id.clone();
         let result = self
-            .install_inner(app, variant_id, &target_id, &cancellation)
+            .install_inner(
+                app,
+                variant_id,
+                &target_id,
+                options.install_runtime,
+                &cancellation,
+            )
             .await;
         self.active_install.lock().await.take();
         self.telemetry.record(TelemetryEvent::ModelInstall {
@@ -826,6 +838,7 @@ impl SharedCoreAdapter {
         app: AppHandle,
         variant_id: String,
         target_id: &str,
+        install_runtime: bool,
         cancellation: &CancellationToken,
     ) -> Result<(), String> {
         let catalog = self.catalog_clone().await?;
@@ -886,6 +899,12 @@ impl SharedCoreAdapter {
                 }
             };
             if !runtime_healthy && !executable_available {
+                if !install_runtime {
+                    return Err(
+                        "Ollama is not installed. Select the option to install Ollama, or install it separately and retry."
+                            .to_owned(),
+                    );
+                }
                 let (artifact, version) = runtime_artifact(&catalog, &variant.runtime)?;
                 let data_root = dirs::data_local_dir()
                     .ok_or_else(|| "No local application data directory is available".to_owned())?;
@@ -893,16 +912,29 @@ impl SharedCoreAdapter {
                     .join("lumen-source/runtimes")
                     .join(&variant.runtime)
                     .join(version);
-                let executable = ArtifactInstaller::default()
-                    .install_tar_zst_cancellable(
-                        &artifact,
-                        &install_dir,
-                        std::path::Path::new("bin/ollama"),
-                        &reporter,
-                        cancellation,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
+                let installer = ArtifactInstaller::default();
+                let executable = if artifact.executable_name.ends_with(".zip") {
+                    installer
+                        .install_zip_cancellable(
+                            &artifact,
+                            &install_dir,
+                            std::path::Path::new("ollama.exe"),
+                            &reporter,
+                            cancellation,
+                        )
+                        .await
+                } else {
+                    installer
+                        .install_tar_zst_cancellable(
+                            &artifact,
+                            &install_dir,
+                            std::path::Path::new("bin/ollama"),
+                            &reporter,
+                            cancellation,
+                        )
+                        .await
+                }
+                .map_err(|error| error.to_string())?;
                 self.runtime.set_executable(executable).await;
             }
             cancellation.check().map_err(|error| error.to_string())?;
@@ -1538,6 +1570,37 @@ impl SharedCoreAdapter {
     }
 }
 
+fn default_ollama_executable() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            let installed = PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("Ollama")
+                .join("ollama.exe");
+            if installed.is_file() {
+                return installed;
+            }
+        }
+        PathBuf::from("ollama.exe")
+    }
+    #[cfg(not(target_os = "windows"))]
+    PathBuf::from("ollama")
+}
+
+fn resolve_ollama_executable(persisted: &std::path::Path) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if persisted == std::path::Path::new("ollama")
+            || persisted == std::path::Path::new("ollama.exe")
+            || !persisted.is_file()
+        {
+            return default_ollama_executable();
+        }
+    }
+    persisted.to_path_buf()
+}
+
 fn bundled_catalog() -> Result<LoadedCatalog, String> {
     Ok(LoadedCatalog {
         catalog: Catalog::from_slice(BUNDLED_CATALOG).map_err(|error| error.to_string())?,
@@ -1698,7 +1761,7 @@ fn runtime_artifact(
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "Runtime artifact URL has no filename".to_owned())?
         .to_owned();
-    if !executable_name.ends_with(".tar.zst") {
+    if !executable_name.ends_with(".tar.zst") && !executable_name.ends_with(".zip") {
         return Err(format!(
             "Runtime archive `{executable_name}` is not supported by this v0.1 platform adapter"
         ));

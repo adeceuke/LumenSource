@@ -65,6 +65,8 @@ export interface ModelSetupWizardProps {
   installCancellable: boolean;
   cancelBusy: boolean;
   startAfterInstall: boolean;
+  installRuntime: boolean;
+  runtimeInstallRequired: boolean;
   installProgress?: InstallProgress;
   selectedIsDummy: boolean;
   endpoint?: EndpointDetails;
@@ -84,6 +86,7 @@ export interface ModelSetupWizardProps {
   setLicenseAcknowledged: Dispatch<SetStateAction<boolean>>;
   setSeparateLicenseReference: Dispatch<SetStateAction<string>>;
   setStartAfterInstall: Dispatch<SetStateAction<boolean>>;
+  setInstallRuntime: Dispatch<SetStateAction<boolean>>;
   cancelWizard: () => void;
   openRemoteTargetDialog: () => void;
   checkRemoteTarget: () => void | Promise<void>;
@@ -128,6 +131,8 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     installCancellable,
     cancelBusy,
     startAfterInstall,
+    installRuntime,
+    runtimeInstallRequired,
     installProgress,
     selectedIsDummy,
     endpoint,
@@ -147,6 +152,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     setLicenseAcknowledged,
     setSeparateLicenseReference,
     setStartAfterInstall,
+    setInstallRuntime,
     cancelWizard,
     openRemoteTargetDialog,
     checkRemoteTarget,
@@ -681,6 +687,20 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                     <p>{wizardLocation === "remote"
                       ? text.wizard.install.remoteIntro(remoteReport?.targetName ?? text.wizard.hardware.remoteTargetFallback)
                       : text.wizard.install.localIntro}</p>
+                    {runtimeInstallRequired && (
+                      <label className="install-option">
+                        <input
+                          type="checkbox"
+                          checked={installRuntime}
+                          onChange={(event) => setInstallRuntime(event.target.checked)}
+                          disabled={downloadBusy}
+                        />
+                        <span>
+                          <strong>{text.wizard.install.installOllama}</strong>
+                          <small>{text.wizard.install.installOllamaHint}</small>
+                        </span>
+                      </label>
+                    )}
                     <label className="install-option">
                       <input
                         type="checkbox"
@@ -722,7 +742,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                           {text.common.back}
                         </button>
                       )}
-                      <button className="primary-button" type="button" onClick={startInstall} disabled={downloadBusy || !preflight?.canInstall}>
+                      <button className="primary-button" type="button" onClick={startInstall} disabled={downloadBusy || !preflight?.canInstall || (runtimeInstallRequired && !installRuntime)}>
                         {downloadBusy ? text.wizard.install.installing : startAfterInstall ? text.wizard.install.installAndStart : text.wizard.install.install}
                       </button>
                     </div>

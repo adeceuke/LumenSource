@@ -50,6 +50,42 @@ scripts/check-prerequisites.sh
 The installer adds the native Tauri packages, stable Rust with `rustfmt` and
 `clippy`, and the Node.js version pinned in `.node-version`.
 
+## Windows build
+
+Windows packages must be built natively on 64-bit Windows. Docker is not
+required: the existing Dockerfile contains Linux libraries and cannot provide
+the MSVC linker, WebView2 integration, or Windows installer toolchain needed by
+Tauri.
+
+Install these prerequisites:
+
+- Visual Studio 2022 Build Tools with **Desktop development with C++**
+- the stable `x86_64-pc-windows-msvc` Rust toolchain, including `rustfmt` and
+  `clippy`
+- the Node.js version pinned in `.node-version`
+- Microsoft Edge WebView2 Runtime (normally already present on current Windows)
+
+Then open a Visual Studio Developer PowerShell at the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\check-prerequisites.ps1
+powershell -ExecutionPolicy Bypass -File scripts\container.ps1 check
+powershell -ExecutionPolicy Bypass -File scripts\container.ps1 package
+```
+
+The package command builds both MSI and NSIS installers under
+`target\release\bundle\`. To run a narrower command in the same workflow:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\container.ps1 run cargo test -p lumen-source-hardware
+```
+
+Install Ollama for Windows before testing a real catalog model. Lumen Source
+uses a running Ollama service when available, otherwise it locates
+`ollama.exe` on PATH or in the standard per-user Ollama installation
+directory, starts `ollama serve`, and pulls the selected model through
+Ollama's local API.
+
 ## Toolchains
 
 The Rust release in `rust-toolchain.toml` and the Node.js release in

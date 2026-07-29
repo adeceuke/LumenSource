@@ -151,6 +151,7 @@ export interface InstallRequest {
   licenseBasis: "catalog" | "separate";
   licenseReference?: string;
   licenseAcknowledged: boolean;
+  installRuntime: boolean;
 }
 
 export interface InstallProgress {

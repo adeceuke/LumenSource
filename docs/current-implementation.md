@@ -140,9 +140,13 @@ input.
 - Stopping a specific model uses `POST /api/generate` with `keep_alive: 0`.
 
 If no reachable Ollama service exists, Lumen Source first looks for an existing
-Ollama executable. If one is unavailable, the current Linux adapter can install
-a catalog-pinned `.tar.zst` archive after verifying its SHA-256 checksum. It
-then launches the fixed `ollama serve` command without a shell.
+Ollama executable. If one is unavailable, the local install step offers an
+explicit **Download and install Ollama** choice. When selected, Linux installs
+a catalog-pinned `.tar.zst` archive and Windows installs a catalog-pinned
+standalone ZIP after verifying its SHA-256 checksum. The runtime is stored in
+the operating system's local application-data directory rather than bundled
+with Lumen Source. It then launches the fixed `ollama serve` command without a
+shell. Remote targets continue to require an existing Ollama installation.
 
 An Ollama server launched by Lumen Source is deliberately independent from the
 desktop process: closing Lumen Source does not terminate it. A later launch
@@ -276,20 +280,21 @@ errors remain visible through the application error banner.
 
 ## Current boundaries
 
-- Linux-to-Linux remote deployment controls an existing target Ollama
+- Linux/Windows remote deployment controls an existing target Ollama
   installation through an authenticated SSH tunnel and does not require a
-  Lumen Source agent. It checks SSH and Linux, finds Ollama through the SSH
-  user's login or interactive shell and common install paths, starts a stopped
-  `ollama serve`, checks its loopback API, and collects normalized CPU, memory,
-  storage, and supported GPU facts for recommendation and preflight. The
+  Lumen Source agent. It identifies Linux or Windows, finds Ollama through
+  platform-specific paths, starts a stopped `ollama serve`, checks its loopback
+  API, and collects normalized CPU, memory, storage, and supported GPU facts
+  for recommendation and preflight. The
   deployment step uses an initially empty selector backed by saved non-secret
   target profiles; adding a target happens in a dialog and selects the saved
   target. SSH keys/agents are preferred; a password can remain session-only or
-  be saved in the operating system credential store for automatic reconnects.
+  be saved in the operating system credential store for automatic reconnects
+  on Unix controllers. Windows controllers currently require SSH keys.
   Remote runtime installation is not implemented. See
   [`remote-hosts.md`](remote-hosts.md).
-- Linux hardware probing is implemented; macOS and Windows probes remain
-  planned adapters.
+- Linux and Windows hardware probing are implemented; macOS remains a planned
+  adapter.
 - Ollama does not expose per-model processor utilization or per-request
   throughput, token rate, and latency through `/api/ps`; Performance therefore
   reports per-model memory allocation and context capacity.
