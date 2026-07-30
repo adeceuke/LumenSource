@@ -4,6 +4,9 @@ use lumen_source_catalog::License;
 use lumen_source_hardware::{AcceleratorKind, HardwareFacts, UsageSnapshot};
 use serde::{Deserialize, Serialize};
 
+use crate::runtime_registry::RuntimeCapabilities;
+use crate::settings::ModelSettings;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PersistedModelEntry {
@@ -11,8 +14,14 @@ pub struct PersistedModelEntry {
     pub name: String,
     pub model_id: String,
     pub model_name: String,
+    #[serde(default = "default_runtime_id")]
+    pub runtime_id: String,
     #[serde(default)]
     pub runtime_model_id: Option<String>,
+    #[serde(default)]
+    pub runtime_capabilities: RuntimeCapabilities,
+    #[serde(default)]
+    pub model_settings: Option<ModelSettings>,
     pub version: String,
     pub location: String,
     #[serde(default = "local_target_id")]
@@ -47,6 +56,10 @@ pub struct PersistedModelEntry {
 
 fn default_managed() -> bool {
     true
+}
+
+fn default_runtime_id() -> String {
+    crate::runtime_registry::OLLAMA_RUNTIME.to_owned()
 }
 
 pub(crate) fn local_target_id() -> String {
@@ -177,6 +190,40 @@ pub struct MachineAcceleratorUsage {
 pub struct RemoteCredentialStatus {
     pub password_required: bool,
     pub password_saved: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeMigrationOption {
+    pub runtime_id: String,
+    pub variant_id: Option<String>,
+    pub available: bool,
+    pub reason: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeMigrationReport {
+    pub replacement: PersistedModelEntry,
+    pub source_entry_id: String,
+    pub source_can_be_removed: bool,
+    pub message: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDiagnostics {
+    pub runtime_id: String,
+    pub version: String,
+    pub health: String,
+    pub lifecycle: String,
+    pub endpoint: Option<String>,
+    pub effective_context_length: Option<u32>,
+    pub effective_keep_alive: Option<String>,
+    pub managed_container_engine: Option<String>,
+    pub managed_container_name: Option<String>,
+    pub managed_port: Option<u16>,
+    pub recent_logs: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]

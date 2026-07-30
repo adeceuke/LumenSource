@@ -144,6 +144,20 @@ pub struct ModelVariant {
     pub id: String,
     pub runtime: String,
     pub runtime_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama_model_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hugging_face_model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
+    #[serde(default)]
+    pub runtime_compatibility: Vec<String>,
     pub parameters_b: f64,
     pub quantization: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -152,6 +166,8 @@ pub struct ModelVariant {
     pub runtime_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub download_item_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_size_bytes: Option<u64>,
     pub requirements: Requirements,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<Artifact>,
@@ -238,6 +254,18 @@ struct ModelListRuntime {
     engine: String,
     model_ref: String,
     digest: Option<String>,
+    #[serde(default)]
+    hugging_face_model_id: Option<String>,
+    #[serde(default)]
+    model_revision: Option<String>,
+    #[serde(default)]
+    tokenizer_revision: Option<String>,
+    #[serde(default)]
+    task: Option<String>,
+    #[serde(default)]
+    runner: Option<String>,
+    #[serde(default)]
+    compatibility: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,15 +380,25 @@ impl ModelListVariant {
             requirements.supported_architectures,
             requirements.notes,
         );
+        let ollama_model_ref =
+            (self.runtime.engine == "ollama").then(|| self.runtime.model_ref.clone());
         ModelVariant {
             id: self.id,
             runtime: self.runtime.engine,
             runtime_ref: self.runtime.model_ref,
+            ollama_model_ref,
+            hugging_face_model_id: self.runtime.hugging_face_model_id,
+            model_revision: self.runtime.model_revision,
+            tokenizer_revision: self.runtime.tokenizer_revision,
+            task: self.runtime.task,
+            runner: self.runtime.runner,
+            runtime_compatibility: self.runtime.compatibility,
             parameters_b: self.parameters_billion,
             quantization: self.quantization,
             context_window_tokens: Some(self.context_window_tokens),
             runtime_digest: self.runtime.digest,
             download_item_count: Some(self.download_item_count),
+            download_size_bytes: Some(self.model_size_bytes),
             requirements: Requirements {
                 min_ram_gb: bytes_to_gib(requirements.minimum_system_ram_bytes),
                 min_vram_gb: requirements.minimum_vram_bytes.map(bytes_to_gib),

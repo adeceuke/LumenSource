@@ -4,14 +4,18 @@ import { usePerformanceMonitor } from "../hooks/usePerformanceMonitor";
 import { browserMessages } from "../i18n";
 import { curlExample, formatBytes, inferenceLabel, inferenceUrl } from "../modelUi";
 import type { RunningModelEntry } from "../types";
+import type { ApplicationSettings } from "../types";
+import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import { PerformanceChart } from "./PerformanceChart";
+import { VllmModelSettings } from "./VllmModelSettings";
 
 const text = browserMessages();
 
-export type DetailTab = "chat" | "logs" | "performance" | "api";
+export type DetailTab = "chat" | "logs" | "performance" | "api" | "settings";
 
 interface ModelDetailsProps {
   model: RunningModelEntry;
+  applicationSettings?: ApplicationSettings;
   tab: DetailTab;
   modelAction?: { id: string; action: "starting" | "stopping" };
   copiedField?: string;
@@ -21,10 +25,12 @@ interface ModelDetailsProps {
   onToggleRunning: () => void;
   onClearLogs: () => void;
   onCopy: (value: string, feedbackKey: string) => void;
+  onModelSaved: (model: RunningModelEntry) => void;
 }
 
 export function ModelDetails({
   model,
+  applicationSettings,
   tab,
   modelAction,
   copiedField,
@@ -34,6 +40,7 @@ export function ModelDetails({
   onToggleRunning,
   onClearLogs,
   onCopy,
+  onModelSaved,
 }: ModelDetailsProps) {
   const performance = usePerformanceMonitor(model, errorFrom);
   const chat = useModelChat(model, tab === "api" || tab === "chat", errorFrom);
@@ -72,7 +79,7 @@ export function ModelDetails({
             className="secondary-button detail-runtime-button"
             type="button"
             onClick={onToggleRunning}
-            disabled={model.managed === false || modelAction !== undefined}
+            disabled={!model.runtimeCapabilities.modelStartStop || modelAction !== undefined}
           >
             {modelAction?.id === model.id ? (
               <><span className="model-control-spinner" /> {modelAction.action === "starting" ? text.details.starting : text.details.stopping}</>
@@ -86,10 +93,15 @@ export function ModelDetails({
       </div>
 
       <nav className="detail-tabs" aria-label={text.details.tabsLabel}>
-        <button type="button" className={tab === "chat" ? "active" : ""} onClick={() => onTab("chat")}>{text.chat.tab}</button>
+        {model.runtimeCapabilities.chat && (
+          <button type="button" className={tab === "chat" ? "active" : ""} onClick={() => onTab("chat")}>{text.chat.tab}</button>
+        )}
         <button type="button" className={tab === "logs" ? "active" : ""} onClick={() => onTab("logs")}>{text.common.logs}</button>
         <button type="button" className={tab === "performance" ? "active" : ""} onClick={() => onTab("performance")}>{text.common.performance}</button>
         <button type="button" className={tab === "api" ? "active" : ""} onClick={() => onTab("api")}>{text.common.api}</button>
+        {model.runtimeCapabilities.perModelConfiguration && (
+          <button type="button" className={tab === "settings" ? "active" : ""} onClick={() => onTab("settings")}>{text.navigation.settings}</button>
+        )}
       </nav>
 
       {tab === "logs" ? (
@@ -98,8 +110,25 @@ export function ModelDetails({
         <PerformancePanel model={model} performance={performance} />
       ) : tab === "chat" ? (
         <ChatPanel model={model} chat={chat} transcriptRef={transcriptRef} onKeyDown={handleChatKeyDown} />
-      ) : (
+      ) : tab === "api" ? (
         <ApiPanel model={model} chat={chat} copiedField={copiedField} onCopy={onCopy} />
+      ) : (
+        <div className="model-settings-stack">
+          {applicationSettings ? (
+            <ModelSettingsPanel
+              model={model}
+              applicationSettings={applicationSettings}
+              onSaved={onModelSaved}
+            />
+          ) : (
+            <section className="detail-section">
+              <div className="details-empty full-detail-empty">{text.common.loading}</div>
+            </section>
+          )}
+          {model.runtimeId === "vllm" && model.runtimeCapabilities.lifecycle === "external" && (
+            <VllmModelSettings model={model} onSaved={onModelSaved} />
+          )}
+        </div>
       )}
     </section>
   );
@@ -143,6 +172,19 @@ function LogsPanel({
 type PerformanceState = ReturnType<typeof usePerformanceMonitor>;
 
 function PerformancePanel({ model, performance }: { model: RunningModelEntry; performance: PerformanceState }) {
+  if (model.runtimeCapabilities.lifecycle === "external") {
+    return (
+      <section className="detail-section" aria-labelledby="model-performance-title">
+        <div className="detail-section-header">
+          <div>
+            <h2 id="model-performance-title">{text.performance.title}</h2>
+            <p>{text.performance.externalDescription}</p>
+          </div>
+        </div>
+        <div className="details-empty full-detail-empty">{text.performance.externalUnavailable}</div>
+      </section>
+    );
+  }
   return (
     <section className="detail-section" aria-labelledby="model-performance-title">
       <div className="detail-section-header">
@@ -221,8 +263,6 @@ function ChatPanel({
       )}
       {chat.endpointLoading ? (
         <div className="details-empty full-detail-empty">{text.chat.preparing}</div>
-      ) : model.managed === false ? (
-        <div className="details-empty full-detail-empty">{text.chat.unmanaged}</div>
       ) : chat.endpoint && !chat.endpoint.apiAvailable ? (
         <div className="details-empty full-detail-empty">{text.chat.testRuntime}</div>
       ) : chat.endpoint && !chat.endpoint.chatAvailable ? (
@@ -237,7 +277,9 @@ function ChatPanel({
                   model.runtimeModelId ?? model.modelId,
                   model.location === "remote"
                     ? text.chat.remoteTransport(model.targetName ?? text.wizard.hardware.remoteTargetFallback)
-                    : text.chat.localTransport,
+                    : model.runtimeId === "vllm"
+                      ? text.chat.vllmTransport
+                      : text.chat.localTransport,
                 )}</span>
               </div>
             ) : chat.messages.map((message, index) => (
@@ -290,7 +332,7 @@ function ApiPanel({
       <div className="detail-section-header">
         <div>
           <h2 id="model-api-title">{text.api.title}</h2>
-          <p>{text.api.description(model.location === "remote" ? text.api.remoteEndpoint : text.api.localEndpoint)}</p>
+          <p>{text.api.description(model.location === "remote" ? text.api.remoteEndpoint : model.runtimeId === "vllm" ? "configured vLLM endpoint" : text.api.localEndpoint)}</p>
         </div>
       </div>
       {chat.endpointError && <div className="inline-error" role="alert">{chat.endpointError}</div>}

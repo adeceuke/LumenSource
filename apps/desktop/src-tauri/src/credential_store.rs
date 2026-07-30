@@ -1,5 +1,5 @@
 use keyring::{Entry, Error};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::settings::RuntimeSecretKind;
 
@@ -58,8 +58,16 @@ pub async fn save_runtime_secret(
     kind: RuntimeSecretKind,
     secret: Zeroizing<String>,
 ) -> Result<(), String> {
+    save_runtime_secret_for_account(kind, RUNTIME_SECRET_ACCOUNT.to_owned(), secret).await
+}
+
+pub async fn save_runtime_secret_for_account(
+    kind: RuntimeSecretKind,
+    account: String,
+    secret: Zeroizing<String>,
+) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let entry = Entry::new(kind.service_name(), RUNTIME_SECRET_ACCOUNT)
+        let entry = Entry::new(kind.service_name(), &account)
             .map_err(|error| secret_storage_error(kind, "open", error))?;
         entry
             .set_password(secret.as_str())
@@ -70,15 +78,28 @@ pub async fn save_runtime_secret(
 }
 
 pub async fn runtime_secret_is_saved(kind: RuntimeSecretKind) -> Result<bool, String> {
+    runtime_secret_is_saved_for_account(kind, RUNTIME_SECRET_ACCOUNT.to_owned()).await
+}
+
+pub async fn runtime_secret_is_saved_for_account(
+    kind: RuntimeSecretKind,
+    account: String,
+) -> Result<bool, String> {
+    Ok(load_runtime_secret_for_account(kind, account)
+        .await?
+        .is_some())
+}
+
+pub async fn load_runtime_secret_for_account(
+    kind: RuntimeSecretKind,
+    account: String,
+) -> Result<Option<Zeroizing<String>>, String> {
     tokio::task::spawn_blocking(move || {
-        let entry = Entry::new(kind.service_name(), RUNTIME_SECRET_ACCOUNT)
+        let entry = Entry::new(kind.service_name(), &account)
             .map_err(|error| secret_storage_error(kind, "open", error))?;
         match entry.get_password() {
-            Ok(mut secret) => {
-                secret.zeroize();
-                Ok(true)
-            }
-            Err(Error::NoEntry) => Ok(false),
+            Ok(secret) => Ok(Some(Zeroizing::new(secret))),
+            Err(Error::NoEntry) => Ok(None),
             Err(error) => Err(secret_storage_error(kind, "read", error)),
         }
     })
@@ -87,8 +108,15 @@ pub async fn runtime_secret_is_saved(kind: RuntimeSecretKind) -> Result<bool, St
 }
 
 pub async fn delete_runtime_secret(kind: RuntimeSecretKind) -> Result<(), String> {
+    delete_runtime_secret_for_account(kind, RUNTIME_SECRET_ACCOUNT.to_owned()).await
+}
+
+pub async fn delete_runtime_secret_for_account(
+    kind: RuntimeSecretKind,
+    account: String,
+) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let entry = Entry::new(kind.service_name(), RUNTIME_SECRET_ACCOUNT)
+        let entry = Entry::new(kind.service_name(), &account)
             .map_err(|error| secret_storage_error(kind, "open", error))?;
         match entry.delete_credential() {
             Ok(()) | Err(Error::NoEntry) => Ok(()),

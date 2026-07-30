@@ -390,17 +390,50 @@
       "required": ["engine", "model_ref"],
       "properties": {
         "engine": {
-          "const": "ollama",
-          "description": "LumenSource currently integrates with Ollama only."
+          "enum": ["ollama", "vllm"],
+          "description": "Runtime that can serve this exact variant. vLLM entries describe compatibility metadata; external vLLM connections are configured per model."
         },
         "model_ref": {
           "type": "string",
           "minLength": 1,
-          "description": "Exact Ollama model reference including its tag."
+          "description": "Exact runtime model reference: an Ollama tag or the served vLLM model identifier."
         },
         "digest": {
           "type": ["string", "null"],
           "description": "Immutable content digest when the producer can obtain one."
+        },
+        "hugging_face_model_id": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Canonical Hugging Face repository identifier used by vLLM."
+        },
+        "model_revision": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Pinned immutable model revision when known."
+        },
+        "tokenizer_revision": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Pinned immutable tokenizer revision when it differs from the model revision."
+        },
+        "task": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Supported task such as generate, embed, classify, score, or reward."
+        },
+        "runner": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Runtime runner or execution mode required by this variant."
+        },
+        "compatibility": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/tag"
+          },
+          "description": "Versioned runtime or quantization compatibility tags."
         }
       }
     },

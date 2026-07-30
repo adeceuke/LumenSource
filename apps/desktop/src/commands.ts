@@ -6,10 +6,14 @@ import type {
   ChatEvent,
   ChatMessage,
   EndpointDetails,
+  ExternalVllmConfig,
   HardwareProfile,
   InstallProgress,
   InstallRequest,
   MachineUsageSnapshot,
+  ManagedVllmSupport,
+  ModelSettings,
+  ModelSettingsSaveReport,
   OllamaConnectionReport,
   PerformanceSnapshot,
   PreflightReport,
@@ -20,10 +24,14 @@ import type {
   RemoteTargetProfile,
   RunningModelEntry,
   RuntimeSecretKind,
+  RuntimeDiagnostics,
+  RuntimeMigrationOption,
+  RuntimeMigrationReport,
   RuntimeStatus,
   SettingsSaveReport,
   SettingsValidationError,
   UseIntent,
+  VllmConnectionReport,
 } from "./types";
 
 export const desktopCommands = {
@@ -46,6 +54,37 @@ export const desktopCommands = {
     invoke<void>("save_runtime_secret", { kind, secret }),
   deleteRuntimeSecret: (kind: RuntimeSecretKind) =>
     invoke<void>("delete_runtime_secret", { kind }),
+  testVllmConnection: (
+    config: ExternalVllmConfig,
+    apiKey?: string,
+    entryId?: string,
+  ) => invoke<VllmConnectionReport>("test_vllm_connection", { config, apiKey, entryId }),
+  saveVllmModel: (
+    entryId: string | undefined,
+    displayName: string,
+    config: ExternalVllmConfig,
+    apiKey?: string,
+    clearApiKey = false,
+  ) => invoke<RunningModelEntry>("save_vllm_model", {
+    entryId,
+    displayName,
+    config,
+    apiKey,
+    clearApiKey,
+  }),
+  vllmCredentialStatus: (entryId: string) =>
+    invoke<boolean>("vllm_credential_status", { entryId }),
+  saveModelSettings: (entryId: string, settings: ModelSettings, applyRestart: boolean) =>
+    invoke<ModelSettingsSaveReport>("save_model_settings", { entryId, settings, applyRestart }),
+  managedVllmSupport: () => invoke<ManagedVllmSupport>("managed_vllm_support"),
+  runtimeMigrationOptions: (entryId: string) =>
+    invoke<RuntimeMigrationOption[]>("runtime_migration_options", { entryId }),
+  reinstallWithRuntime: (entryId: string, targetRuntime: string) =>
+    invoke<RuntimeMigrationReport>("reinstall_with_runtime", { entryId, targetRuntime }),
+  runtimeDiagnostics: (entryId: string) =>
+    invoke<RuntimeDiagnostics>("runtime_diagnostics", { entryId }),
+  deleteManagedVllmCaches: (confirmed: boolean) =>
+    invoke<void>("delete_managed_vllm_caches", { confirmed }),
   detectHardware: (targetId: string, password?: string) =>
     invoke<HardwareProfile>("detect_hardware", { targetId, password }),
   machineUsage: (targetId: string, password?: string) =>
@@ -74,18 +113,19 @@ export const desktopCommands = {
     handler: (progress: InstallProgress) => void,
   ): Promise<UnlistenFn> =>
     listen<InstallProgress>("install-progress", ({ payload }) => handler(payload)),
-  start: (modelId: string, targetId: string, password?: string) =>
-    invoke<RuntimeStatus>("start_runtime", { modelId, targetId, password }),
-  stop: (modelId: string, targetId: string, password?: string) =>
-    invoke<RuntimeStatus>("stop_runtime", { modelId, targetId, password }),
+  start: (modelId: string, targetId: string, password?: string, entryId?: string) =>
+    invoke<RuntimeStatus>("start_runtime", { entryId, modelId, targetId, password }),
+  stop: (modelId: string, targetId: string, password?: string, entryId?: string) =>
+    invoke<RuntimeStatus>("stop_runtime", { entryId, modelId, targetId, password }),
   status: () => invoke<RuntimeStatus>("runtime_status"),
-  performance: (modelId: string, runtimeModelId: string, targetId: string) =>
-    invoke<PerformanceSnapshot>("model_performance", { modelId, runtimeModelId, targetId }),
+  performance: (entryId: string, modelId: string, runtimeModelId: string, targetId: string) =>
+    invoke<PerformanceSnapshot>("model_performance", { entryId, modelId, runtimeModelId, targetId }),
   endpoint: (targetId: string) => invoke<EndpointDetails>("endpoint_details", { targetId }),
-  modelEndpoint: (modelId: string, runtimeModelId: string, targetId: string) =>
-    invoke<EndpointDetails>("model_endpoint_details", { modelId, runtimeModelId, targetId }),
+  modelEndpoint: (entryId: string, modelId: string, runtimeModelId: string, targetId: string) =>
+    invoke<EndpointDetails>("model_endpoint_details", { entryId, modelId, runtimeModelId, targetId }),
   chat: (
     modelId: string,
+    entryId: string,
     runtimeModelId: string,
     targetId: string,
     messages: ChatMessage[],
@@ -93,7 +133,7 @@ export const desktopCommands = {
   ) => {
     const onEvent = new Channel<ChatEvent>();
     onEvent.onmessage = handler;
-    return invoke<void>("chat_with_model", { modelId, runtimeModelId, targetId, messages, onEvent });
+    return invoke<void>("chat_with_model", { entryId, modelId, runtimeModelId, targetId, messages, onEvent });
   },
   cancelChat: () => invoke<boolean>("cancel_chat"),
   loadModels: () => invoke<RunningModelEntry[]>("load_models"),

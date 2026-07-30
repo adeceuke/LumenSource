@@ -5,6 +5,7 @@ import type {
   PreflightCheck,
   RemoteConnectionCheck,
   RemoteTargetConfig,
+  RuntimeCapabilities,
 } from "./types";
 
 const text = browserMessages();
@@ -86,6 +87,38 @@ export function remoteCheckCopy(check: RemoteConnectionCheck): { label: string; 
 
 export function lifecycleLog(message: string): string {
   return `[${new Date().toISOString()}] ${message}`;
+}
+
+export function runtimeCapabilities(runtimeId: string): RuntimeCapabilities {
+  if (runtimeId === "vllm") {
+    return {
+      managedModelStorage: false,
+      multipleModels: false,
+      chat: true,
+      embeddings: true,
+      pooling: true,
+      modelStartStop: false,
+      globalConfiguration: false,
+      perModelConfiguration: true,
+      artifactAcquisition: false,
+      remoteConnection: false,
+      lifecycle: "external",
+    };
+  }
+  const dummy = runtimeId === "dummy-runtime";
+  return {
+    managedModelStorage: true,
+    multipleModels: true,
+    chat: !dummy,
+    embeddings: !dummy,
+    pooling: false,
+    modelStartStop: true,
+    globalConfiguration: !dummy,
+    perModelConfiguration: !dummy,
+    artifactAcquisition: !dummy,
+    remoteConnection: !dummy,
+    lifecycle: dummy ? "simulated" : "managed",
+  };
 }
 
 export function inferenceLabel(details: EndpointDetails): string {

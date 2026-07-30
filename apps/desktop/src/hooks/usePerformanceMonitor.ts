@@ -26,17 +26,24 @@ export function usePerformanceMonitor(
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    if (!model?.runtimeModelId) return;
+    if (!model?.runtimeModelId || model.runtimeCapabilities.lifecycle === "external") {
+      setSnapshot(undefined);
+      setHistory([]);
+      setLoading(false);
+      setError(undefined);
+      return;
+    }
 
     let disposed = false;
     let refreshInFlight = false;
     const modelId = model.modelId;
+    const entryId = model.id;
     const runtimeModelId = model.runtimeModelId;
     const refresh = async () => {
       if (refreshInFlight) return;
       refreshInFlight = true;
       try {
-        const nextSnapshot = await desktopCommands.performance(modelId, runtimeModelId, model.targetId);
+        const nextSnapshot = await desktopCommands.performance(entryId, modelId, runtimeModelId, model.targetId);
         if (!disposed) {
           setSnapshot(nextSnapshot);
           const historyPoint: PerformanceHistoryPoint = {
@@ -69,7 +76,7 @@ export function usePerformanceMonitor(
       disposed = true;
       window.clearInterval(interval);
     };
-  }, [errorFrom, model?.modelId, model?.runtimeModelId, model?.targetId]);
+  }, [errorFrom, model?.id, model?.modelId, model?.runtimeCapabilities.lifecycle, model?.runtimeModelId, model?.targetId]);
 
   return { snapshot, history, loading, error };
 }

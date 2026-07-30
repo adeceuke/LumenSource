@@ -1,5 +1,6 @@
 //! Thin adaptation seam between Tauri and the shared Lumen Source crates.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -12,29 +13,35 @@ use lumen_source_hardware::{HardwareFacts, HardwareProbe, PlatformHardwareProbe}
 use lumen_source_host::{Host, LocalHost};
 use lumen_source_recommend::{recommend, RecommendationRequest};
 use lumen_source_runtime::{
-    Artifact as RuntimeArtifact, ArtifactInstaller, CancellationToken, ChatMessage, ChatProgress,
-    DummyRuntime, OllamaRuntime, Runtime, RuntimeEndpoint, RuntimeError, RuntimeProgress,
-    RuntimeStatus as CoreRuntimeStatus, Url,
+    Artifact as RuntimeArtifact, ArtifactInstaller, CancellationToken, ChatMessage, ChatOptions,
+    ChatProgress, DummyRuntime, OllamaRuntime, Runtime, RuntimeEndpoint, RuntimeError,
+    RuntimeProgress, RuntimeStatus as CoreRuntimeStatus, Url, VllmRuntime,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock};
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 pub use crate::bridge_types::*;
 use crate::credential_store;
+use crate::managed_vllm::{self, ManagedVllmSpec, ManagedVllmSupport};
 use crate::model_reconciliation::{
     reconcile_models, reconcile_unavailable_models, same_ollama_reference, with_remote_models,
-    DUMMY_RUNTIME,
 };
 use crate::remote::{
     connect as connect_remote, probe_hardware as probe_remote_hardware,
     probe_usage as probe_remote_usage, RemoteAuthentication, RemoteConnectionReport, RemoteSession,
     RemoteTargetConfig, RemoteTargetProfile,
 };
+use crate::runtime_registry::{
+    RuntimeId, RuntimeRegistry, DUMMY_RUNTIME, OLLAMA_RUNTIME, VLLM_RUNTIME,
+};
 use crate::settings::{
-    migrate_settings, validate_settings, ApplicationSettings, OllamaConnectionReport,
-    SettingsSaveReport,
+    migrate_settings, validate_external_vllm_config, validate_model_settings, validate_settings,
+    ApplicationSettings, ExternalVllmConfig, ModelInferenceTask, ModelSettings,
+    ModelSettingsSaveReport, OllamaConnectionReport, RuntimeSecretKind, SettingsSaveReport,
+    VllmConnectionReport,
 };
 use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
 
@@ -48,7 +55,6 @@ const TEST_CATALOG: &[u8] = include_bytes!("../../../../catalog/fixtures/catalog
 const DEVELOPMENT_CATALOG: &[u8] =
     include_bytes!("../../../../catalog/fixtures/catalog.v1.valid.json");
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-const OLLAMA_RUNTIME: &str = "ollama";
 
 struct LoadedCatalog {
     catalog: Catalog,
@@ -98,6 +104,7 @@ pub struct SharedCoreAdapter {
     probe: Arc<PlatformHardwareProbe>,
     runtime: Arc<OllamaRuntime>,
     dummy_runtime: Arc<DummyRuntime>,
+    runtime_registry: RuntimeRegistry,
     host: LocalHost<PlatformHardwareProbe, OllamaRuntime>,
     catalog: RwLock<Option<LoadedCatalog>>,
     installed_model: RwLock<Option<String>>,
@@ -106,6 +113,7 @@ pub struct SharedCoreAdapter {
     state_write: Mutex<()>,
     active_install: Mutex<Option<ActiveInstall>>,
     active_chat: Mutex<Option<ActiveChat>>,
+    managed_ports: Mutex<BTreeSet<u16>>,
     remote_session: RwLock<Option<Arc<RemoteSession>>>,
     state_path: PathBuf,
     telemetry: Telemetry,
@@ -155,10 +163,16 @@ impl SharedCoreAdapter {
                 .map_err(|error| format!("Invalid dummy endpoint: {error}"))?,
         );
         let host = LocalHost::new(Arc::clone(&probe), Arc::clone(&runtime));
+        let managed_ports = persisted
+            .models
+            .iter()
+            .filter_map(|model| model.model_settings.as_ref()?.managed_port)
+            .collect();
         Ok(Self {
             probe,
             runtime,
             dummy_runtime,
+            runtime_registry: RuntimeRegistry::default(),
             host,
             catalog: RwLock::new(None),
             installed_model: RwLock::new(persisted.installed_model.clone()),
@@ -167,6 +181,7 @@ impl SharedCoreAdapter {
             state_write: Mutex::new(()),
             active_install: Mutex::new(None),
             active_chat: Mutex::new(None),
+            managed_ports: Mutex::new(managed_ports),
             remote_session: RwLock::new(None),
             state_path,
             telemetry,
@@ -296,6 +311,889 @@ impl SharedCoreAdapter {
             .await
             .map_err(|error| error.to_string())?;
         Ok(self.test_ollama_connection(settings).await)
+    }
+
+    pub async fn test_vllm_connection(
+        &self,
+        config: ExternalVllmConfig,
+        api_key: Option<Zeroizing<String>>,
+        entry_id: Option<&str>,
+    ) -> VllmConnectionReport {
+        let endpoint = config.endpoint.clone();
+        let validation = validate_external_vllm_config(&config, false);
+        if !validation.is_empty() {
+            return VllmConnectionReport {
+                healthy: false,
+                authenticated: false,
+                endpoint,
+                models: Vec::new(),
+                message: validation
+                    .into_iter()
+                    .map(|error| error.message)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            };
+        }
+        let stored_key = if api_key.is_none() {
+            match entry_id {
+                Some(entry_id) => credential_store::load_runtime_secret_for_account(
+                    RuntimeSecretKind::VllmApiKey,
+                    entry_id.to_owned(),
+                )
+                .await
+                .ok()
+                .flatten(),
+                None => None,
+            }
+        } else {
+            None
+        };
+        let key = api_key
+            .as_deref()
+            .map(String::as_str)
+            .or_else(|| stored_key.as_deref().map(String::as_str));
+        let runtime = match vllm_runtime(&config) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                return VllmConnectionReport {
+                    healthy: false,
+                    authenticated: false,
+                    endpoint,
+                    models: Vec::new(),
+                    message: error.to_string(),
+                };
+            }
+        };
+        match runtime.models(key).await {
+            Ok(models) => VllmConnectionReport {
+                healthy: true,
+                authenticated: true,
+                endpoint,
+                message: if models.is_empty() {
+                    "Connected, but this vLLM server is not currently serving a model.".to_owned()
+                } else {
+                    format!("Connected to vLLM. {} served model(s) found.", models.len())
+                },
+                models,
+            },
+            Err(RuntimeError::AuthenticationRejected) => VllmConnectionReport {
+                healthy: false,
+                authenticated: false,
+                endpoint,
+                models: Vec::new(),
+                message: "vLLM rejected the API key. Enter the server's current key and retry."
+                    .to_owned(),
+            },
+            Err(error) => VllmConnectionReport {
+                healthy: false,
+                authenticated: key.is_some(),
+                endpoint,
+                models: Vec::new(),
+                message: format!("Could not connect to vLLM: {error}"),
+            },
+        }
+    }
+
+    pub async fn save_vllm_model(
+        &self,
+        entry_id: Option<String>,
+        display_name: String,
+        config: ExternalVllmConfig,
+        api_key: Option<Zeroizing<String>>,
+        clear_api_key: bool,
+    ) -> Result<PersistedModelEntry, String> {
+        let errors = validate_external_vllm_config(&config, true);
+        if !errors.is_empty() {
+            return Err(errors
+                .into_iter()
+                .map(|error| format!("{}: {}", error.field, error.message))
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+        let id = entry_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        // Clearing a credential must test the exact post-save state. Passing an
+        // explicit empty value prevents the connection test from falling back
+        // to the credential that is about to be removed.
+        let test_api_key = if clear_api_key {
+            Some(Zeroizing::new(String::new()))
+        } else {
+            api_key.clone()
+        };
+        let report = self
+            .test_vllm_connection(config.clone(), test_api_key, Some(&id))
+            .await;
+        if !report.healthy {
+            return Err(report.message);
+        }
+        if !report
+            .models
+            .iter()
+            .any(|model| model == &config.served_model)
+        {
+            return Err(
+                "The selected model is no longer reported by this vLLM endpoint. Test the connection again."
+                    .to_owned(),
+            );
+        }
+        if clear_api_key {
+            credential_store::delete_runtime_secret_for_account(
+                RuntimeSecretKind::VllmApiKey,
+                id.clone(),
+            )
+            .await?;
+        } else if let Some(api_key) = api_key {
+            credential_store::save_runtime_secret_for_account(
+                RuntimeSecretKind::VllmApiKey,
+                id.clone(),
+                api_key,
+            )
+            .await?;
+        }
+        let existing = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == id)
+            .cloned();
+        let mut entry = PersistedModelEntry {
+            id: id.clone(),
+            name: if display_name.trim().is_empty() {
+                config.served_model.clone()
+            } else {
+                display_name.trim().to_owned()
+            },
+            model_id: format!("external-vllm-{id}"),
+            model_name: config.served_model.clone(),
+            runtime_id: VLLM_RUNTIME.to_owned(),
+            runtime_model_id: Some(config.served_model.clone()),
+            runtime_capabilities: external_vllm_capabilities(
+                &self.runtime_registry,
+                config.inference_task,
+            ),
+            model_settings: Some(config.model_settings()),
+            version: "External service".to_owned(),
+            location: "local".to_owned(),
+            target_id: "local".to_owned(),
+            target_name: None,
+            running: true,
+            managed: false,
+            digest: None,
+            size_bytes: None,
+            license_basis: None,
+            license_reference: None,
+            license_acknowledged_at: None,
+            license_profile_id: None,
+            license_name: None,
+            license_url: None,
+            license_reviewed_at: None,
+            license_catalog_version: None,
+            logs: existing.map_or_else(
+                || vec!["Connected to an externally managed vLLM model.".to_owned()],
+                |model| model.logs,
+            ),
+        };
+        let retention = self
+            .state
+            .read()
+            .await
+            .settings
+            .privacy
+            .lifecycle_log_retention as usize;
+        if entry.logs.len() > retention {
+            entry.logs.drain(..entry.logs.len() - retention);
+        }
+        {
+            let mut state = self.state.write().await;
+            state.models.retain(|model| model.id != id);
+            state.models.push(entry.clone());
+        }
+        self.flush_state().await?;
+        Ok(entry)
+    }
+
+    pub async fn vllm_credential_status(&self, entry_id: &str) -> Result<bool, String> {
+        credential_store::runtime_secret_is_saved_for_account(
+            RuntimeSecretKind::VllmApiKey,
+            entry_id.to_owned(),
+        )
+        .await
+    }
+
+    pub async fn save_model_settings(
+        &self,
+        entry_id: &str,
+        settings: ModelSettings,
+        apply_restart: bool,
+    ) -> Result<ModelSettingsSaveReport, String> {
+        let existing = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let maximum_context = self
+            .catalog_clone()
+            .await?
+            .models
+            .iter()
+            .flat_map(|model| &model.variants)
+            .find(|variant| variant.id == existing.model_id)
+            .and_then(|variant| variant.context_window_tokens);
+        let errors = validate_model_settings(&settings, maximum_context);
+        if !errors.is_empty() {
+            return Err(errors
+                .into_iter()
+                .map(|error| format!("{}: {}", error.field, error.message))
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+        let previous = existing.model_settings.clone().unwrap_or_default();
+        if existing.runtime_capabilities.lifecycle
+            == Some(crate::runtime_registry::RuntimeLifecycle::External)
+            && external_engine_settings_changed(&previous, &settings)
+        {
+            return Err(
+                "Engine and load settings are read-only for an externally managed service."
+                    .to_owned(),
+            );
+        }
+        let restart_required = load_settings_changed(&previous, &settings, &existing.runtime_id);
+        let mut updated = existing.clone();
+        updated.model_settings = Some(settings);
+        updated.logs.push(format!(
+            "[{}] Model settings changed{}.",
+            current_timestamp(),
+            if restart_required {
+                "; a restart is required"
+            } else {
+                ""
+            }
+        ));
+        {
+            let mut state = self.state.write().await;
+            let model = state
+                .models
+                .iter_mut()
+                .find(|model| model.id == entry_id)
+                .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+            *model = updated.clone();
+        }
+        self.flush_state().await?;
+        if !apply_restart || !restart_required {
+            return Ok(ModelSettingsSaveReport {
+                model: updated,
+                restart_required,
+                restarted: false,
+                message: if restart_required {
+                    "Settings saved. Apply and restart the model to use load-time changes."
+                        .to_owned()
+                } else {
+                    "Request-time defaults saved and active for the next Lumen Source request."
+                        .to_owned()
+                },
+            });
+        }
+        if !existing.runtime_capabilities.model_start_stop {
+            return Err("This runtime cannot be restarted by Lumen Source.".to_owned());
+        }
+        let managed_vllm = existing.runtime_id == VLLM_RUNTIME
+            && existing.runtime_capabilities.lifecycle
+                == Some(crate::runtime_registry::RuntimeLifecycle::Managed);
+        let applied_settings = updated
+            .model_settings
+            .clone()
+            .ok_or_else(|| "The model settings were not persisted.".to_owned())?;
+        let restart_result = async {
+            if managed_vllm {
+                self.relaunch_managed_vllm(&existing, &applied_settings)
+                    .await?;
+                if !existing.running {
+                    self.stop(
+                        Some(&existing.id),
+                        existing.model_id.clone(),
+                        existing.target_id.clone(),
+                        None,
+                    )
+                    .await?;
+                }
+            } else {
+                if existing.runtime_id == OLLAMA_RUNTIME {
+                    self.apply_ollama_persistent_settings(&existing, &applied_settings)
+                        .await?;
+                }
+                if !existing.running {
+                    return Ok::<(), String>(());
+                }
+                self.stop(
+                    Some(&existing.id),
+                    existing.model_id.clone(),
+                    existing.target_id.clone(),
+                    None,
+                )
+                .await?;
+                self.start(
+                    Some(&existing.id),
+                    existing.model_id.clone(),
+                    existing.target_id.clone(),
+                    None,
+                )
+                .await?;
+            }
+            Ok::<(), String>(())
+        }
+        .await;
+        if let Err(error) = restart_result {
+            {
+                let mut state = self.state.write().await;
+                if let Some(model) = state.models.iter_mut().find(|model| model.id == entry_id) {
+                    model.model_settings = Some(previous.clone());
+                    model.runtime_model_id = existing.runtime_model_id.clone();
+                    model.logs.push(format!(
+                        "[{}] Settings restart failed; restored the last working configuration.",
+                        current_timestamp()
+                    ));
+                }
+            }
+            self.flush_state().await?;
+            if managed_vllm {
+                if self
+                    .relaunch_managed_vllm(&existing, &previous)
+                    .await
+                    .is_ok()
+                    && !existing.running
+                {
+                    let _ = self
+                        .stop(
+                            Some(&existing.id),
+                            existing.model_id.clone(),
+                            existing.target_id.clone(),
+                            None,
+                        )
+                        .await;
+                }
+            } else if existing.running {
+                let _ = self
+                    .start(
+                        Some(&existing.id),
+                        existing.model_id.clone(),
+                        existing.target_id.clone(),
+                        None,
+                    )
+                    .await;
+            }
+            return Err(format!(
+                "The model could not restart with the new settings. The previous configuration was restored. {error}"
+            ));
+        }
+        self.flush_state().await?;
+        let model = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .unwrap_or(updated);
+        Ok(ModelSettingsSaveReport {
+            model,
+            restart_required: false,
+            restarted: existing.running,
+            message: if existing.running {
+                "Settings applied and the model restarted successfully.".to_owned()
+            } else {
+                "Settings saved. They will apply when the model starts.".to_owned()
+            },
+        })
+    }
+
+    pub async fn managed_vllm_support(&self) -> ManagedVllmSupport {
+        managed_vllm::detect_support().await
+    }
+
+    async fn managed_vllm_entry(&self, entry_id: Option<&str>) -> Option<PersistedModelEntry> {
+        let entry_id = entry_id?;
+        self.state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| {
+                model.id == entry_id
+                    && model.runtime_id == VLLM_RUNTIME
+                    && model.runtime_capabilities.lifecycle
+                        == Some(crate::runtime_registry::RuntimeLifecycle::Managed)
+            })
+            .cloned()
+    }
+
+    async fn relaunch_managed_vllm(
+        &self,
+        entry: &PersistedModelEntry,
+        settings: &ModelSettings,
+    ) -> Result<(), String> {
+        let engine = settings
+            .managed_container_engine
+            .as_deref()
+            .and_then(managed_vllm::parse_engine)
+            .ok_or_else(|| "The managed container engine is unavailable.".to_owned())?;
+        let port = settings
+            .managed_port
+            .ok_or_else(|| "The managed vLLM port is unavailable.".to_owned())?;
+        let catalog = self.catalog_clone().await?;
+        let variant = catalog
+            .models
+            .iter()
+            .flat_map(|model| &model.variants)
+            .find(|variant| variant.id == entry.model_id)
+            .ok_or_else(|| "The managed vLLM catalog variant is no longer available.".to_owned())?;
+        let model_id = variant.hugging_face_model_id.clone().ok_or_else(|| {
+            "The catalog variant has no Hugging Face model identifier.".to_owned()
+        })?;
+        let served_model_name = settings
+            .vllm_served_model_name
+            .clone()
+            .or_else(|| entry.runtime_model_id.clone())
+            .ok_or_else(|| "The served vLLM model name is unavailable.".to_owned())?;
+        let spec = ManagedVllmSpec {
+            entry_id: entry.id.clone(),
+            model_id,
+            served_model_name,
+            port,
+            settings: settings.clone(),
+            defaults: self.state.read().await.settings.vllm.clone(),
+        };
+        managed_vllm::validate_spec(&spec)?;
+        let token = credential_store::load_runtime_secret_for_account(
+            RuntimeSecretKind::HuggingFaceToken,
+            "default".to_owned(),
+        )
+        .await?;
+        managed_vllm::launch(engine, &spec, token.as_ref()).await
+    }
+
+    async fn apply_ollama_persistent_settings(
+        &self,
+        entry: &PersistedModelEntry,
+        settings: &ModelSettings,
+    ) -> Result<(), String> {
+        let catalog = self.catalog_clone().await?;
+        let (_, variant) = find_variant(&catalog, &entry.model_id)?;
+        let runtime_model_id = if settings.ollama_persistent_parameters {
+            let derived_name = settings
+                .ollama_derived_model_name
+                .as_deref()
+                .ok_or_else(|| {
+                    "A derived model name is required for persistent Ollama parameters.".to_owned()
+                })?;
+            let runtime = self.runtime_for_target(&entry.target_id).await?;
+            runtime
+                .ensure_running()
+                .await
+                .map_err(|error| error.to_string())?;
+            runtime
+                .create_derived_model(derived_name, &variant.runtime_ref, &chat_options(settings))
+                .await
+                .map_err(|error| error.to_string())?;
+            derived_name.to_owned()
+        } else {
+            variant.runtime_ref.clone()
+        };
+        let mut state = self.state.write().await;
+        if let Some(model) = state.models.iter_mut().find(|model| model.id == entry.id) {
+            model.runtime_model_id = Some(runtime_model_id);
+        }
+        Ok(())
+    }
+
+    pub async fn runtime_migration_options(
+        &self,
+        entry_id: &str,
+    ) -> Result<Vec<RuntimeMigrationOption>, String> {
+        let entry = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let target_runtime = if entry.runtime_id == OLLAMA_RUNTIME {
+            VLLM_RUNTIME
+        } else {
+            OLLAMA_RUNTIME
+        };
+        let catalog = self.catalog_clone().await?;
+        let model = catalog.models.iter().find(|model| {
+            model
+                .variants
+                .iter()
+                .any(|variant| variant.id == entry.model_id)
+        });
+        let equivalent = model.and_then(|model| {
+            model
+                .variants
+                .iter()
+                .find(|variant| variant.runtime == target_runtime)
+        });
+        let already_installed = equivalent.is_some_and(|variant| {
+            self.state.try_read().is_ok_and(|state| {
+                state
+                    .models
+                    .iter()
+                    .any(|model| model.runtime_id == target_runtime && model.model_id == variant.id)
+            })
+        });
+        let managed_support = if target_runtime == VLLM_RUNTIME {
+            Some(managed_vllm::detect_support().await)
+        } else {
+            None
+        };
+        let (available, reason) = match equivalent {
+            None => (
+                false,
+                format!(
+                    "The active catalog does not provide an equivalent {target_runtime} variant."
+                ),
+            ),
+            Some(_) if already_installed => (
+                false,
+                format!("The equivalent {target_runtime} variant is already installed."),
+            ),
+            Some(_)
+                if managed_support
+                    .as_ref()
+                    .is_some_and(|support| !support.supported) =>
+            (
+                false,
+                managed_support
+                    .as_ref()
+                    .map(|support| support.message.clone())
+                    .unwrap_or_else(|| {
+                        "Managed vLLM installation is unavailable on this machine.".to_owned()
+                    }),
+            ),
+            Some(_) => (
+                true,
+                "An equivalent catalog variant is available. The existing model will remain installed until you remove it explicitly.".to_owned(),
+            ),
+        };
+        Ok(vec![RuntimeMigrationOption {
+            runtime_id: target_runtime.to_owned(),
+            variant_id: equivalent.map(|variant| variant.id.clone()),
+            available,
+            reason,
+        }])
+    }
+
+    pub async fn reinstall_with_runtime(
+        &self,
+        entry_id: &str,
+        target_runtime: &str,
+    ) -> Result<RuntimeMigrationReport, String> {
+        let source = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The source model is no longer installed.".to_owned())?;
+        if source.runtime_id == target_runtime {
+            return Err("Choose a runtime different from the current runtime.".to_owned());
+        }
+        let catalog = self.catalog_clone().await?;
+        let catalog_model = catalog
+            .models
+            .iter()
+            .find(|model| {
+                model
+                    .variants
+                    .iter()
+                    .any(|variant| variant.id == source.model_id)
+            })
+            .ok_or_else(|| {
+                "The source model is not tied to the active catalog, so equivalence cannot be verified."
+                    .to_owned()
+            })?;
+        let variant = catalog_model
+            .variants
+            .iter()
+            .find(|variant| variant.runtime == target_runtime)
+            .ok_or_else(|| {
+                format!(
+                    "The active catalog has no equivalent {target_runtime} variant for this model."
+                )
+            })?
+            .clone();
+        if self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .any(|model| model.runtime_id == target_runtime && model.model_id == variant.id)
+        {
+            return Err("The equivalent runtime variant is already installed.".to_owned());
+        }
+        let replacement = match RuntimeId::parse(target_runtime) {
+            Some(RuntimeId::Vllm) => {
+                self.install_managed_vllm_variant(catalog_model, &variant, &source)
+                    .await?
+            }
+            Some(RuntimeId::Ollama) => {
+                let runtime = self.runtime_for_target("local").await?;
+                runtime
+                    .ensure_running()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let reporter = |_: RuntimeProgress| {};
+                runtime
+                    .pull_model(&variant.runtime_ref, &reporter)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mut replacement = PersistedModelEntry {
+                    id: Uuid::new_v4().to_string(),
+                    name: source.name.clone(),
+                    model_id: variant.id.clone(),
+                    model_name: catalog_model.display_name.clone(),
+                    runtime_id: OLLAMA_RUNTIME.to_owned(),
+                    runtime_model_id: Some(variant.runtime_ref.clone()),
+                    runtime_capabilities: capabilities_for_catalog_model(
+                        &self.runtime_registry,
+                        OLLAMA_RUNTIME,
+                        catalog_model,
+                    ),
+                    model_settings: Some(ModelSettings::default()),
+                    version: catalog
+                        .runtimes
+                        .iter()
+                        .find(|runtime| runtime.id == OLLAMA_RUNTIME)
+                        .map(|runtime| runtime.install.version.clone())
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    location: "local".to_owned(),
+                    target_id: "local".to_owned(),
+                    target_name: None,
+                    running: false,
+                    managed: true,
+                    digest: variant.runtime_digest.clone(),
+                    size_bytes: Some(variant_size_bytes(&variant)),
+                    license_basis: source.license_basis.clone(),
+                    license_reference: source.license_reference.clone(),
+                    license_acknowledged_at: source.license_acknowledged_at.clone(),
+                    license_profile_id: source.license_profile_id.clone(),
+                    license_name: source.license_name.clone(),
+                    license_url: source.license_url.clone(),
+                    license_reviewed_at: source.license_reviewed_at.clone(),
+                    license_catalog_version: source.license_catalog_version.clone(),
+                    logs: vec![format!(
+                        "[{}] Reinstalled with Ollama; the source runtime copy was retained.",
+                        current_timestamp()
+                    )],
+                };
+                replacement.running = runtime
+                    .status()
+                    .await
+                    .is_ok_and(|status| matches!(status, CoreRuntimeStatus::Running { models } if models.iter().any(|model| same_ollama_reference(model, &variant.runtime_ref))));
+                self.state.write().await.models.push(replacement.clone());
+                self.flush_state().await?;
+                replacement
+            }
+            Some(RuntimeId::Dummy) | None => {
+                return Err("The requested migration target is not supported.".to_owned())
+            }
+        };
+        Ok(RuntimeMigrationReport {
+            replacement,
+            source_entry_id: source.id,
+            source_can_be_removed: true,
+            message: "The replacement was installed and validated. The original copy remains available until you choose to remove it.".to_owned(),
+        })
+    }
+
+    async fn install_managed_vllm_variant(
+        &self,
+        catalog_model: &ModelEntry,
+        variant: &ModelVariant,
+        source: &PersistedModelEntry,
+    ) -> Result<PersistedModelEntry, String> {
+        let support = managed_vllm::detect_support().await;
+        if !support.supported {
+            return Err(support.message);
+        }
+        let engine = support
+            .container_engine
+            .as_deref()
+            .and_then(managed_vllm::parse_engine)
+            .ok_or_else(|| "No supported container engine is available.".to_owned())?;
+        let hugging_face_model = variant.hugging_face_model_id.clone().ok_or_else(|| {
+            "The catalog variant has no Hugging Face model identifier.".to_owned()
+        })?;
+        let entry_id = Uuid::new_v4().to_string();
+        let port = self.reserve_managed_port().await?;
+        let defaults = self.state.read().await.settings.vllm.clone();
+        let served_name = variant.runtime_ref.clone();
+        let inference_task = if catalog_model
+            .capabilities
+            .iter()
+            .any(|capability| capability == "embeddings")
+            && !model_supports_chat(catalog_model)
+        {
+            ModelInferenceTask::Embeddings
+        } else {
+            ModelInferenceTask::Chat
+        };
+        let settings = ModelSettings {
+            runtime_management_mode: Some(crate::settings::RuntimeManagementMode::Managed),
+            inference_task: Some(inference_task),
+            endpoint: Some(format!("http://127.0.0.1:{port}")),
+            context_length: variant.context_window_tokens,
+            vllm_model_revision: variant.model_revision.clone(),
+            vllm_tokenizer_revision: variant.tokenizer_revision.clone(),
+            vllm_served_model_name: Some(served_name.clone()),
+            vllm_task: variant.task.clone(),
+            vllm_runner: variant.runner.clone(),
+            vllm_quantization: variant.quantization.clone(),
+            managed_container_engine: Some(engine.as_str().to_owned()),
+            managed_port: Some(port),
+            ..ModelSettings::default()
+        };
+        let spec = ManagedVllmSpec {
+            entry_id: entry_id.clone(),
+            model_id: hugging_face_model,
+            served_model_name: served_name.clone(),
+            port,
+            settings: settings.clone(),
+            defaults: defaults.clone(),
+        };
+        managed_vllm::validate_spec(&spec)?;
+        let token = credential_store::load_runtime_secret_for_account(
+            RuntimeSecretKind::HuggingFaceToken,
+            "default".to_owned(),
+        )
+        .await?;
+        if let Err(error) = managed_vllm::launch(engine, &spec, token.as_ref()).await {
+            self.managed_ports.lock().await.remove(&port);
+            return Err(error);
+        }
+        let mut settings = settings;
+        settings.managed_container_name = Some(spec.container_name());
+        let entry = PersistedModelEntry {
+            id: entry_id,
+            name: source.name.clone(),
+            model_id: variant.id.clone(),
+            model_name: catalog_model.display_name.clone(),
+            runtime_id: VLLM_RUNTIME.to_owned(),
+            runtime_model_id: Some(served_name),
+            runtime_capabilities: managed_vllm_capabilities(&self.runtime_registry, inference_task),
+            model_settings: Some(settings),
+            version: defaults.pinned_runtime_version,
+            location: "local".to_owned(),
+            target_id: "local".to_owned(),
+            target_name: None,
+            running: true,
+            managed: true,
+            digest: variant.runtime_digest.clone(),
+            size_bytes: Some(variant_size_bytes(variant)),
+            license_basis: source.license_basis.clone(),
+            license_reference: source.license_reference.clone(),
+            license_acknowledged_at: source.license_acknowledged_at.clone(),
+            license_profile_id: source.license_profile_id.clone(),
+            license_name: source.license_name.clone(),
+            license_url: source.license_url.clone(),
+            license_reviewed_at: source.license_reviewed_at.clone(),
+            license_catalog_version: source.license_catalog_version.clone(),
+            logs: vec![format!(
+                "[{}] Managed vLLM container installed and validated.",
+                current_timestamp()
+            )],
+        };
+        self.state.write().await.models.push(entry.clone());
+        self.flush_state().await?;
+        Ok(entry)
+    }
+
+    async fn reserve_managed_port(&self) -> Result<u16, String> {
+        let settings = self.state.read().await.settings.vllm.clone();
+        let mut reserved = self.managed_ports.lock().await;
+        for port in settings.managed_port_start..=settings.managed_port_end {
+            if reserved.contains(&port) {
+                continue;
+            }
+            if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                reserved.insert(port);
+                return Ok(port);
+            }
+        }
+        Err("No free port is available in the managed vLLM port range.".to_owned())
+    }
+
+    pub async fn runtime_diagnostics(&self, entry_id: &str) -> Result<RuntimeDiagnostics, String> {
+        let entry = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let settings = entry.model_settings.clone().unwrap_or_default();
+        let lifecycle = entry
+            .runtime_capabilities
+            .lifecycle
+            .map(|lifecycle| format!("{lifecycle:?}").to_ascii_lowercase())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let managed_container = if entry.runtime_id == VLLM_RUNTIME && lifecycle == "managed" {
+            settings
+                .managed_container_engine
+                .as_deref()
+                .and_then(managed_vllm::parse_engine)
+                .zip(settings.managed_container_name.as_deref())
+        } else {
+            None
+        };
+        let recent_logs = if let Some((engine, name)) = managed_container {
+            managed_vllm::logs(engine, name, 50)
+                .await
+                .unwrap_or_default()
+        } else {
+            entry.logs.iter().rev().take(50).cloned().collect()
+        };
+        Ok(RuntimeDiagnostics {
+            runtime_id: entry.runtime_id,
+            version: entry.version,
+            health: if entry.running {
+                "healthy".to_owned()
+            } else {
+                "stopped or unavailable".to_owned()
+            },
+            lifecycle,
+            endpoint: settings.endpoint,
+            effective_context_length: settings.context_length,
+            effective_keep_alive: settings.keep_alive,
+            managed_container_engine: settings.managed_container_engine,
+            managed_container_name: settings.managed_container_name,
+            managed_port: settings.managed_port,
+            recent_logs,
+        })
+    }
+
+    pub async fn delete_managed_vllm_caches(&self, confirmed: bool) -> Result<(), String> {
+        let support = managed_vllm::detect_support().await;
+        let engine = support
+            .container_engine
+            .as_deref()
+            .and_then(managed_vllm::parse_engine)
+            .ok_or_else(|| "No supported container engine is available.".to_owned())?;
+        managed_vllm::delete_caches(engine, confirmed).await
     }
 
     pub async fn set_telemetry_enabled(&self, enabled: bool) -> Result<(), String> {
@@ -629,9 +1527,8 @@ impl SharedCoreAdapter {
             max_results: 0,
         };
         let report = recommend(&catalog, &hardware, &request);
-        let supports_runtime = |runtime: &str| {
-            runtime == OLLAMA_RUNTIME || (target_id == "local" && runtime == DUMMY_RUNTIME)
-        };
+        let supports_runtime =
+            |runtime: &str| supports_catalog_runtime(&self.runtime_registry, runtime, target_id);
         let recommended_variant_id = report
             .recommendations
             .iter()
@@ -724,8 +1621,15 @@ impl SharedCoreAdapter {
         ensure_supported_runtime(variant)?;
         let facts = self.hardware_for_target(target_id).await?;
         if target_id != "local" {
-            if variant.runtime != OLLAMA_RUNTIME {
-                return Err("Remote targets support Ollama catalog models only".to_owned());
+            if !self
+                .runtime_registry
+                .resolve_name(&variant.runtime)
+                .is_some_and(|runtime| runtime.capabilities.remote_connection)
+            {
+                return Err(format!(
+                    "{} catalog models cannot be installed on remote targets",
+                    variant.runtime
+                ));
             }
             let compatibility = recommend(&catalog, &facts, &RecommendationRequest::default());
             let hardware_reasons = compatibility
@@ -1014,8 +1918,16 @@ impl SharedCoreAdapter {
             let _ = progress_app.emit("install-progress", payload);
         };
 
-        if target_id != "local" && variant.runtime != OLLAMA_RUNTIME {
-            return Err("Remote targets support Ollama catalog models only".to_owned());
+        if target_id != "local"
+            && !self
+                .runtime_registry
+                .resolve_name(&variant.runtime)
+                .is_some_and(|runtime| runtime.capabilities.remote_connection)
+        {
+            return Err(format!(
+                "{} catalog models cannot be installed on remote targets",
+                variant.runtime
+            ));
         }
         if variant.runtime == DUMMY_RUNTIME {
             self.dummy_runtime
@@ -1115,18 +2027,92 @@ impl SharedCoreAdapter {
 
     pub async fn start(
         &self,
+        entry_id: Option<&str>,
         variant_id: String,
         target_id: String,
         password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
+        if let Some(entry) = self.managed_vllm_entry(entry_id).await {
+            let settings = entry.model_settings.as_ref().ok_or_else(|| {
+                "The managed vLLM model has incomplete deployment settings.".to_owned()
+            })?;
+            let engine = settings
+                .managed_container_engine
+                .as_deref()
+                .and_then(managed_vllm::parse_engine)
+                .ok_or_else(|| "The managed container engine is unavailable.".to_owned())?;
+            let name = settings
+                .managed_container_name
+                .as_deref()
+                .ok_or_else(|| "The managed vLLM container identity is unavailable.".to_owned())?;
+            managed_vllm::start(engine, name).await?;
+            let port = settings
+                .managed_port
+                .ok_or_else(|| "The managed vLLM port is unavailable.".to_owned())?;
+            let served_model = settings
+                .vllm_served_model_name
+                .as_deref()
+                .or(entry.runtime_model_id.as_deref())
+                .ok_or_else(|| "The served vLLM model name is unavailable.".to_owned())?;
+            if let Err(error) = managed_vllm::wait_until_healthy(port, served_model, 180).await {
+                let logs = managed_vllm::logs(engine, name, 30)
+                    .await
+                    .unwrap_or_default();
+                return Err(format!(
+                    "{error} {}",
+                    logs.last().cloned().unwrap_or_else(|| {
+                        "Inspect the managed-container logs for the model-loading error.".to_owned()
+                    })
+                ));
+            }
+            let mut state = self.state.write().await;
+            if let Some(model) = state.models.iter_mut().find(|model| model.id == entry.id) {
+                model.running = true;
+                model.logs.push(format!(
+                    "[{}] Managed vLLM container started.",
+                    current_timestamp()
+                ));
+            }
+            drop(state);
+            self.flush_state().await?;
+            return Ok(RuntimeStatus {
+                state: "running".to_owned(),
+                model_id: entry.runtime_model_id,
+                message: Some("Managed vLLM container is running on loopback.".to_owned()),
+            });
+        }
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, &variant_id)?;
+        let runtime_ref = if variant.runtime == OLLAMA_RUNTIME {
+            match entry_id {
+                Some(entry_id) => self
+                    .state
+                    .read()
+                    .await
+                    .models
+                    .iter()
+                    .find(|entry| entry.id == entry_id)
+                    .and_then(|entry| entry.runtime_model_id.clone())
+                    .unwrap_or_else(|| variant.runtime_ref.clone()),
+                None => variant.runtime_ref.clone(),
+            }
+        } else {
+            variant.runtime_ref.clone()
+        };
         let telemetry_model_id = model.id.clone();
         let telemetry_variant_id = variant.id.clone();
         ensure_supported_runtime(variant)?;
         let result: Result<RuntimeStatus, String> = async {
-            if target_id != "local" && variant.runtime != OLLAMA_RUNTIME {
-                return Err("Remote targets support Ollama catalog models only".to_owned());
+            if target_id != "local"
+                && !self
+                    .runtime_registry
+                    .resolve_name(&variant.runtime)
+                    .is_some_and(|runtime| runtime.capabilities.remote_connection)
+            {
+                return Err(format!(
+                    "{} catalog models cannot be started on remote targets",
+                    variant.runtime
+                ));
             }
             if variant.runtime == DUMMY_RUNTIME {
                 self.dummy_runtime
@@ -1145,22 +2131,22 @@ impl SharedCoreAdapter {
                 }
                 if model_is_embedding_only(model) {
                     runtime
-                        .start_embedding(&variant.runtime_ref)
+                        .start_embedding(&runtime_ref)
                         .await
                         .map_err(|error| error.to_string())?;
                 } else {
                     runtime
-                        .start(&variant.runtime_ref)
+                        .start(&runtime_ref)
                         .await
                         .map_err(|error| error.to_string())?;
                 }
             }
-            *self.installed_model.write().await = Some(variant.runtime_ref.clone());
+            *self.installed_model.write().await = Some(runtime_ref.clone());
             *self.selected_runtime.write().await = Some(variant.runtime.clone());
             self.persist_state().await?;
             Ok(RuntimeStatus {
                 state: "running".to_owned(),
-                model_id: Some(variant.runtime_ref.clone()),
+                model_id: Some(runtime_ref.clone()),
                 message: Some(if target_id == "local" {
                     "Listening on localhost".to_owned()
                 } else {
@@ -1181,25 +2167,77 @@ impl SharedCoreAdapter {
 
     pub async fn stop(
         &self,
+        entry_id: Option<&str>,
         variant_id: String,
         target_id: String,
         password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
+        if let Some(entry) = self.managed_vllm_entry(entry_id).await {
+            let settings = entry.model_settings.as_ref().ok_or_else(|| {
+                "The managed vLLM model has incomplete deployment settings.".to_owned()
+            })?;
+            let engine = settings
+                .managed_container_engine
+                .as_deref()
+                .and_then(managed_vllm::parse_engine)
+                .ok_or_else(|| "The managed container engine is unavailable.".to_owned())?;
+            let name = settings
+                .managed_container_name
+                .as_deref()
+                .ok_or_else(|| "The managed vLLM container identity is unavailable.".to_owned())?;
+            managed_vllm::stop(engine, name).await?;
+            let mut state = self.state.write().await;
+            if let Some(model) = state.models.iter_mut().find(|model| model.id == entry.id) {
+                model.running = false;
+                model.logs.push(format!(
+                    "[{}] Managed vLLM container stopped.",
+                    current_timestamp()
+                ));
+            }
+            drop(state);
+            self.flush_state().await?;
+            return Ok(RuntimeStatus::stopped());
+        }
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, &variant_id)?;
+        let runtime_ref = if variant.runtime == OLLAMA_RUNTIME {
+            match entry_id {
+                Some(entry_id) => self
+                    .state
+                    .read()
+                    .await
+                    .models
+                    .iter()
+                    .find(|entry| entry.id == entry_id)
+                    .and_then(|entry| entry.runtime_model_id.clone())
+                    .unwrap_or_else(|| variant.runtime_ref.clone()),
+                None => variant.runtime_ref.clone(),
+            }
+        } else {
+            variant.runtime_ref.clone()
+        };
         ensure_supported_runtime(variant)?;
         {
             let active = self.active_chat.lock().await;
-            if active.as_ref().is_some_and(|chat| {
-                same_ollama_reference(&chat.runtime_model_id, &variant.runtime_ref)
-            }) {
+            if active
+                .as_ref()
+                .is_some_and(|chat| same_ollama_reference(&chat.runtime_model_id, &runtime_ref))
+            {
                 if let Some(chat) = active.as_ref() {
                     chat.cancellation.cancel();
                 }
             }
         }
-        if target_id != "local" && variant.runtime != OLLAMA_RUNTIME {
-            return Err("Remote targets support Ollama catalog models only".to_owned());
+        if target_id != "local"
+            && !self
+                .runtime_registry
+                .resolve_name(&variant.runtime)
+                .is_some_and(|runtime| runtime.capabilities.remote_connection)
+        {
+            return Err(format!(
+                "{} catalog models cannot be stopped on remote targets",
+                variant.runtime
+            ));
         }
         if variant.runtime == DUMMY_RUNTIME {
             self.dummy_runtime
@@ -1212,12 +2250,12 @@ impl SharedCoreAdapter {
                 .await?;
             if model_is_embedding_only(model) {
                 runtime
-                    .stop_embedding(&variant.runtime_ref)
+                    .stop_embedding(&runtime_ref)
                     .await
                     .map_err(|error| error.to_string())?;
             } else {
                 runtime
-                    .stop(&variant.runtime_ref)
+                    .stop(&runtime_ref)
                     .await
                     .map_err(|error| error.to_string())?;
             }
@@ -1255,10 +2293,46 @@ impl SharedCoreAdapter {
 
     pub async fn performance(
         &self,
+        entry_id: &str,
         model_id: &str,
         runtime_model_id: &str,
         target_id: &str,
     ) -> Result<PerformanceSnapshot, String> {
+        if let Some(entry) = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id && model.runtime_id == VLLM_RUNTIME)
+            .cloned()
+        {
+            let config = vllm_config_for_entry(&entry)
+                .ok_or_else(|| "This vLLM model has incomplete connection settings.".to_owned())?;
+            let key = credential_store::load_runtime_secret_for_account(
+                RuntimeSecretKind::VllmApiKey,
+                entry.id,
+            )
+            .await?;
+            let state = match vllm_runtime(&config)
+                .map_err(|error| error.to_string())?
+                .models(key.as_deref().map(String::as_str))
+                .await
+            {
+                Ok(models) if models.iter().any(|model| model == runtime_model_id) => "running",
+                Ok(_) => "stopped",
+                Err(_) => "unavailable",
+            };
+            return Ok(PerformanceSnapshot {
+                model_id: runtime_model_id.to_owned(),
+                state: state.to_owned(),
+                sampled_at_unix_ms: current_unix_time_ms(),
+                allocated_memory_bytes: 0,
+                allocated_vram_bytes: 0,
+                allocated_system_memory_bytes: 0,
+                context_length: None,
+            });
+        }
         let catalog = self.catalog_clone().await?;
         let is_dummy = catalog.models.iter().any(|model| {
             model
@@ -1331,6 +2405,7 @@ impl SharedCoreAdapter {
 
     pub async fn chat(
         &self,
+        entry_id: &str,
         model_id: &str,
         runtime_model_id: &str,
         target_id: &str,
@@ -1338,6 +2413,19 @@ impl SharedCoreAdapter {
         reporter: &(dyn Fn(ChatEvent) + Send + Sync),
     ) -> Result<(), String> {
         validate_chat_messages(&messages)?;
+        if let Some(entry) = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id && model.runtime_id == VLLM_RUNTIME)
+            .cloned()
+        {
+            return self
+                .chat_with_vllm(entry, runtime_model_id, messages, reporter)
+                .await;
+        }
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, model_id)?;
         if variant.runtime != OLLAMA_RUNTIME {
@@ -1350,7 +2438,18 @@ impl SharedCoreAdapter {
                 "This model does not support chat".to_owned()
             });
         }
-        if !same_ollama_reference(&variant.runtime_ref, runtime_model_id) {
+        let persisted_runtime_matches = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .and_then(|entry| entry.runtime_model_id.as_deref())
+            .is_some_and(|persisted| same_ollama_reference(persisted, runtime_model_id));
+        if !same_ollama_reference(&variant.runtime_ref, runtime_model_id)
+            && !persisted_runtime_matches
+        {
             return Err("The runtime model identifier does not match the catalog entry".to_owned());
         }
         let runtime = self.runtime_for_target(target_id).await?;
@@ -1376,8 +2475,24 @@ impl SharedCoreAdapter {
             ChatProgress::Content(content) => reporter(ChatEvent::Delta { content }),
             ChatProgress::Done => reporter(ChatEvent::Done),
         };
+        let options = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .and_then(|entry| entry.model_settings.as_ref())
+            .map(chat_options)
+            .unwrap_or_default();
         let result = runtime
-            .chat_cancellable(runtime_model_id, &messages, &chat_reporter, &cancellation)
+            .chat_with_options_cancellable(
+                runtime_model_id,
+                &messages,
+                &options,
+                &chat_reporter,
+                &cancellation,
+            )
             .await
             .map_err(|error| {
                 if matches!(error, RuntimeError::Cancelled) {
@@ -1391,6 +2506,78 @@ impl SharedCoreAdapter {
             model_id: model.id.clone(),
             variant_id: variant.id.clone(),
             deployment: deployment_kind(target_id),
+            outcome: match &result {
+                Ok(()) => ChatOutcome::Succeeded,
+                Err(error) if error == "chat cancelled" => ChatOutcome::Cancelled,
+                Err(_) => ChatOutcome::Failed,
+            },
+        });
+        result
+    }
+
+    async fn chat_with_vllm(
+        &self,
+        entry: PersistedModelEntry,
+        runtime_model_id: &str,
+        messages: Vec<ChatMessage>,
+        reporter: &(dyn Fn(ChatEvent) + Send + Sync),
+    ) -> Result<(), String> {
+        if !entry.runtime_capabilities.chat {
+            return Err("This vLLM endpoint does not expose chat completions.".to_owned());
+        }
+        if entry.runtime_model_id.as_deref() != Some(runtime_model_id) {
+            return Err("The served vLLM model identifier has changed.".to_owned());
+        }
+        let config = vllm_config_for_entry(&entry)
+            .ok_or_else(|| "This vLLM model has incomplete connection settings.".to_owned())?;
+        let key = credential_store::load_runtime_secret_for_account(
+            RuntimeSecretKind::VllmApiKey,
+            entry.id.clone(),
+        )
+        .await?;
+        let runtime = vllm_runtime(&config).map_err(|error| error.to_string())?;
+        let options = entry
+            .model_settings
+            .as_ref()
+            .map(chat_options)
+            .unwrap_or_default();
+        let cancellation = CancellationToken::new();
+        {
+            let mut active = self.active_chat.lock().await;
+            if active.is_some() {
+                return Err("Another chat response is already being generated".to_owned());
+            }
+            *active = Some(ActiveChat {
+                runtime_model_id: runtime_model_id.to_owned(),
+                cancellation: cancellation.clone(),
+            });
+        }
+        let chat_reporter = |progress| match progress {
+            ChatProgress::Content(content) => reporter(ChatEvent::Delta { content }),
+            ChatProgress::Done => reporter(ChatEvent::Done),
+        };
+        let result = runtime
+            .chat_with_options(
+                runtime_model_id,
+                &messages,
+                key.as_deref().map(String::as_str),
+                &options,
+                &chat_reporter,
+                &cancellation,
+            )
+            .await
+            .map_err(|error| {
+                if matches!(error, RuntimeError::Cancelled) {
+                    "chat cancelled".to_owned()
+                } else {
+                    error.to_string()
+                }
+            });
+        self.active_chat.lock().await.take();
+        self.telemetry.record(TelemetryEvent::Chat {
+            model_id: "external-vllm".to_owned(),
+            variant_id: "external".to_owned(),
+            deployment: "local".to_owned(),
             outcome: match &result {
                 Ok(()) => ChatOutcome::Succeeded,
                 Err(error) if error == "chat cancelled" => ChatOutcome::Cancelled,
@@ -1446,12 +2633,35 @@ impl SharedCoreAdapter {
 
     pub async fn model_endpoint(
         &self,
+        entry_id: &str,
         model_id: &str,
         runtime_model_id: &str,
         target_id: &str,
     ) -> Result<EndpointDetails, String> {
         if runtime_model_id.trim().is_empty() {
             return Err("The model does not expose a runtime model identifier".to_owned());
+        }
+        if let Some(entry) = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id && model.runtime_id == VLLM_RUNTIME)
+            .cloned()
+        {
+            let config = vllm_config_for_entry(&entry)
+                .ok_or_else(|| "This vLLM model has incomplete connection settings.".to_owned())?;
+            let runtime = vllm_runtime(&config).map_err(|error| error.to_string())?;
+            let mut details = endpoint_details(
+                runtime.endpoint(),
+                runtime_model_id.to_owned(),
+                true,
+                entry.runtime_capabilities.chat,
+                entry.runtime_capabilities.embeddings,
+            )?;
+            details.api_key_required = self.vllm_credential_status(&entry.id).await?;
+            return Ok(details);
         }
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, model_id)?;
@@ -1475,7 +2685,17 @@ impl SharedCoreAdapter {
         let (local_persisted, mut remote_persisted): (Vec<_>, Vec<_>) = persisted
             .into_iter()
             .partition(|model| model.target_id == "local");
+        let (mut vllm_persisted, local_persisted): (Vec<_>, Vec<_>) = local_persisted
+            .into_iter()
+            .partition(|model| model.runtime_id == VLLM_RUNTIME);
+        self.refresh_vllm_models(&mut vllm_persisted).await;
         for model in &mut remote_persisted {
+            model.runtime_id = OLLAMA_RUNTIME.to_owned();
+            model.runtime_capabilities = self
+                .runtime_registry
+                .resolve(RuntimeId::Ollama)
+                .capabilities
+                .clone();
             model.running = false;
         }
         let catalog = self.catalog_clone().await?;
@@ -1502,7 +2722,9 @@ impl SharedCoreAdapter {
                     &dummy_installed,
                     &dummy_running,
                 );
-                let models = with_remote_models(models, remote_persisted);
+                let mut models = with_remote_models(models, remote_persisted);
+                models.extend(vllm_persisted);
+                models.sort_by_key(|model| model.name.to_ascii_lowercase());
                 self.replace_models(models.clone()).await?;
                 return Ok(models);
             }
@@ -1537,9 +2759,62 @@ impl SharedCoreAdapter {
             &dummy_installed,
             &running,
         );
-        let models = with_remote_models(models, remote_persisted);
+        let mut models = with_remote_models(models, remote_persisted);
+        models.extend(vllm_persisted);
+        models.sort_by_key(|model| model.name.to_ascii_lowercase());
         self.replace_models(models.clone()).await?;
         Ok(models)
+    }
+
+    async fn refresh_vllm_models(&self, models: &mut [PersistedModelEntry]) {
+        for model in models {
+            let settings = model.model_settings.clone().unwrap_or_default();
+            if settings.runtime_management_mode
+                == Some(crate::settings::RuntimeManagementMode::Managed)
+            {
+                let task = settings.inference_task.unwrap_or_default();
+                model.runtime_capabilities =
+                    managed_vllm_capabilities(&self.runtime_registry, task);
+                model.running = match (
+                    settings
+                        .managed_container_engine
+                        .as_deref()
+                        .and_then(managed_vllm::parse_engine),
+                    settings.managed_container_name.as_deref(),
+                ) {
+                    (Some(engine), Some(name)) => managed_vllm::is_running(engine, name)
+                        .await
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                continue;
+            }
+            let Some(config) = vllm_config_for_entry(model) else {
+                model.running = false;
+                continue;
+            };
+            model.runtime_capabilities =
+                external_vllm_capabilities(&self.runtime_registry, config.inference_task);
+            let key = credential_store::load_runtime_secret_for_account(
+                RuntimeSecretKind::VllmApiKey,
+                model.id.clone(),
+            )
+            .await
+            .ok()
+            .flatten();
+            model.running = match vllm_runtime(&config) {
+                Ok(runtime) => runtime
+                    .models(key.as_deref().map(String::as_str))
+                    .await
+                    .is_ok_and(|served| {
+                        model
+                            .runtime_model_id
+                            .as_ref()
+                            .is_some_and(|expected| served.contains(expected))
+                    }),
+                Err(_) => false,
+            };
+        }
     }
 
     pub async fn save_models(&self, models: Vec<PersistedModelEntry>) -> Result<(), String> {
@@ -1556,6 +2831,39 @@ impl SharedCoreAdapter {
             .find(|model| model.id == model_id)
             .cloned()
             .ok_or_else(|| "The model is no longer in the local model list".to_owned())?;
+        if entry.runtime_id == VLLM_RUNTIME {
+            if entry.runtime_capabilities.lifecycle
+                == Some(crate::runtime_registry::RuntimeLifecycle::Managed)
+            {
+                let settings = entry.model_settings.as_ref().ok_or_else(|| {
+                    "The managed vLLM model has incomplete deployment settings.".to_owned()
+                })?;
+                let engine = settings
+                    .managed_container_engine
+                    .as_deref()
+                    .and_then(managed_vllm::parse_engine)
+                    .ok_or_else(|| "The managed container engine is unavailable.".to_owned())?;
+                let name = settings.managed_container_name.as_deref().ok_or_else(|| {
+                    "The managed vLLM container identity is unavailable.".to_owned()
+                })?;
+                managed_vllm::remove_container(engine, name).await?;
+                if let Some(port) = settings.managed_port {
+                    self.managed_ports.lock().await.remove(&port);
+                }
+            }
+            credential_store::delete_runtime_secret_for_account(
+                RuntimeSecretKind::VllmApiKey,
+                entry.id.clone(),
+            )
+            .await?;
+            let models = {
+                let mut state = self.state.write().await;
+                state.models.retain(|model| model.id != entry.id);
+                state.models.clone()
+            };
+            self.flush_state().await?;
+            return Ok(models);
+        }
         let target_id = entry.target_id.clone();
         let runtime_model_id = entry.runtime_model_id.as_deref().ok_or_else(|| {
             "The model has no runtime identifier and cannot be deleted".to_owned()
@@ -1585,67 +2893,68 @@ impl SharedCoreAdapter {
         });
 
         let result: Result<Vec<PersistedModelEntry>, String> = async {
-        if is_dummy {
-            let status = self
-                .dummy_runtime
-                .status()
-                .await
-                .map_err(|error| error.to_string())?;
-            if matches!(status, CoreRuntimeStatus::Running { ref models } if models.iter().any(|model| model == runtime_model_id))
-            {
+            if is_dummy {
+                let status = self
+                    .dummy_runtime
+                    .status()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if matches!(status, CoreRuntimeStatus::Running { ref models } if models.iter().any(|model| model == runtime_model_id))
+                {
+                    self.dummy_runtime
+                        .stop(runtime_model_id)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
                 self.dummy_runtime
-                    .stop(runtime_model_id)
+                    .delete_model(runtime_model_id)
                     .await
                     .map_err(|error| error.to_string())?;
-            }
-            self.dummy_runtime
-                .delete_model(runtime_model_id)
-                .await
-                .map_err(|error| error.to_string())?;
-        } else {
-            let runtime = self.runtime_for_target(&target_id).await?;
-            if target_id == "local" {
+            } else {
+                let runtime = self.runtime_for_target(&target_id).await?;
+                if target_id == "local" {
+                    runtime
+                        .ensure_running()
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                let status = runtime.status().await.map_err(|error| error.to_string())?;
+                if matches!(status, CoreRuntimeStatus::Running { ref models } if models.iter().any(|model| same_ollama_reference(model, runtime_model_id)))
+                {
+                    runtime
+                        .stop(runtime_model_id)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
                 runtime
-                    .ensure_running()
+                    .delete_model(runtime_model_id)
                     .await
                     .map_err(|error| error.to_string())?;
             }
-            let status = runtime.status().await.map_err(|error| error.to_string())?;
-            if matches!(status, CoreRuntimeStatus::Running { ref models } if models.iter().any(|model| same_ollama_reference(model, runtime_model_id)))
-            {
-                runtime
-                    .stop(runtime_model_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-            }
-            runtime
-                .delete_model(runtime_model_id)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
 
-        let models = {
-            let mut state = self.state.write().await;
-            state.models.retain(|model| {
-                model.target_id != target_id
-                    || !model.runtime_model_id.as_deref().is_some_and(|runtime_id| {
-                        same_ollama_reference(runtime_id, runtime_model_id)
-                    })
-            });
-            state.models.clone()
-        };
-        if self
-            .installed_model
-            .read()
-            .await
-            .as_deref()
-            .is_some_and(|installed| same_ollama_reference(installed, runtime_model_id))
-        {
-            *self.installed_model.write().await = None;
-            *self.selected_runtime.write().await = None;
-        }
-        self.persist_state().await?;
-        Ok(models)
+            let models = {
+                let mut state = self.state.write().await;
+                state.models.retain(|model| {
+                    model.runtime_id != entry.runtime_id
+                        || model.target_id != target_id
+                        || !model.runtime_model_id.as_deref().is_some_and(|runtime_id| {
+                            same_ollama_reference(runtime_id, runtime_model_id)
+                        })
+                });
+                state.models.clone()
+            };
+            if self
+                .installed_model
+                .read()
+                .await
+                .as_deref()
+                .is_some_and(|installed| same_ollama_reference(installed, runtime_model_id))
+            {
+                *self.installed_model.write().await = None;
+                *self.selected_runtime.write().await = None;
+            }
+            self.persist_state().await?;
+            Ok(models)
         }
         .await;
         self.telemetry.record(TelemetryEvent::ModelUninstall {
@@ -1694,6 +3003,9 @@ impl SharedCoreAdapter {
         let models = models
             .into_iter()
             .map(|mut model| {
+                if model.managed && model.model_settings.is_none() {
+                    model.model_settings = Some(ModelSettings::default());
+                }
                 if model.logs.len() > retention {
                     model.logs.drain(..model.logs.len() - retention);
                 }
@@ -1754,6 +3066,150 @@ fn resolve_ollama_executable(persisted: &std::path::Path) -> PathBuf {
         }
     }
     persisted.to_path_buf()
+}
+
+fn vllm_runtime(config: &ExternalVllmConfig) -> Result<VllmRuntime, RuntimeError> {
+    VllmRuntime::new(
+        &config.endpoint,
+        config.verify_tls,
+        std::time::Duration::from_secs(config.connection_timeout_seconds.into()),
+        std::time::Duration::from_secs(config.request_timeout_seconds.into()),
+    )
+}
+
+fn vllm_config_for_entry(entry: &PersistedModelEntry) -> Option<ExternalVllmConfig> {
+    let settings = entry.model_settings.as_ref()?;
+    Some(ExternalVllmConfig {
+        endpoint: settings.endpoint.clone()?,
+        served_model: entry.runtime_model_id.clone().unwrap_or_default(),
+        inference_task: settings.inference_task.unwrap_or_default(),
+        verify_tls: settings.verify_tls,
+        connection_timeout_seconds: settings.connection_timeout_seconds,
+        request_timeout_seconds: settings.request_timeout_seconds,
+    })
+}
+
+fn chat_options(settings: &crate::settings::ModelSettings) -> ChatOptions {
+    ChatOptions {
+        system_prompt: settings.system_prompt.clone(),
+        temperature: settings.temperature,
+        max_output_tokens: settings.max_output_tokens,
+        top_p: settings.top_p,
+        top_k: settings.top_k,
+        min_p: settings.min_p,
+        repetition_penalty: settings.repetition_penalty,
+        seed: settings.seed,
+        stop_sequences: settings.stop_sequences.clone(),
+        structured_output: settings.structured_output,
+        reasoning_level: settings
+            .reasoning_level
+            .map(|level| format!("{level:?}").to_ascii_lowercase()),
+        keep_alive: settings.keep_alive.clone(),
+    }
+}
+
+fn load_settings_changed(previous: &ModelSettings, next: &ModelSettings, runtime_id: &str) -> bool {
+    if previous.context_length != next.context_length
+        || previous.load_on_startup != next.load_on_startup
+        || previous.preferred_accelerator != next.preferred_accelerator
+    {
+        return true;
+    }
+    match RuntimeId::parse(runtime_id) {
+        Some(RuntimeId::Ollama) => {
+            previous.ollama_derived_model_name != next.ollama_derived_model_name
+                || previous.ollama_persistent_parameters != next.ollama_persistent_parameters
+                || ((previous.ollama_persistent_parameters || next.ollama_persistent_parameters)
+                    && ollama_persistent_settings_changed(previous, next))
+        }
+        Some(RuntimeId::Vllm) => external_engine_settings_changed(previous, next),
+        Some(RuntimeId::Dummy) | None => false,
+    }
+}
+
+fn ollama_persistent_settings_changed(previous: &ModelSettings, next: &ModelSettings) -> bool {
+    previous.system_prompt != next.system_prompt
+        || previous.temperature != next.temperature
+        || previous.max_output_tokens != next.max_output_tokens
+        || previous.top_p != next.top_p
+        || previous.top_k != next.top_k
+        || previous.min_p != next.min_p
+        || previous.repetition_penalty != next.repetition_penalty
+        || previous.seed != next.seed
+        || previous.stop_sequences != next.stop_sequences
+}
+
+fn external_engine_settings_changed(previous: &ModelSettings, next: &ModelSettings) -> bool {
+    previous.runtime_management_mode != next.runtime_management_mode
+        || previous.inference_task != next.inference_task
+        || previous.endpoint != next.endpoint
+        || previous.verify_tls != next.verify_tls
+        || previous.connection_timeout_seconds != next.connection_timeout_seconds
+        || previous.request_timeout_seconds != next.request_timeout_seconds
+        || previous.context_length != next.context_length
+        || previous.keep_alive != next.keep_alive
+        || previous.load_on_startup != next.load_on_startup
+        || previous.preferred_accelerator != next.preferred_accelerator
+        || previous.vllm_model_revision != next.vllm_model_revision
+        || previous.vllm_tokenizer_revision != next.vllm_tokenizer_revision
+        || previous.vllm_served_model_name != next.vllm_served_model_name
+        || previous.vllm_task != next.vllm_task
+        || previous.vllm_runner != next.vllm_runner
+        || previous.vllm_weight_dtype != next.vllm_weight_dtype
+        || previous.vllm_quantization != next.vllm_quantization
+        || previous.vllm_gpu_memory_utilization != next.vllm_gpu_memory_utilization
+        || previous.vllm_max_concurrent_sequences != next.vllm_max_concurrent_sequences
+        || previous.vllm_prefix_caching != next.vllm_prefix_caching
+        || previous.vllm_kv_cache_dtype != next.vllm_kv_cache_dtype
+        || previous.vllm_cpu_offload_gib != next.vllm_cpu_offload_gib
+        || previous.vllm_tensor_parallel_size != next.vllm_tensor_parallel_size
+        || previous.vllm_pipeline_parallel_size != next.vllm_pipeline_parallel_size
+}
+
+fn current_timestamp() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
+fn external_vllm_capabilities(
+    registry: &RuntimeRegistry,
+    task: ModelInferenceTask,
+) -> crate::runtime_registry::RuntimeCapabilities {
+    let mut capabilities = registry.resolve(RuntimeId::Vllm).capabilities.clone();
+    capabilities.chat = task == ModelInferenceTask::Chat;
+    capabilities.embeddings = task == ModelInferenceTask::Embeddings;
+    capabilities.pooling = false;
+    capabilities
+}
+
+fn managed_vllm_capabilities(
+    registry: &RuntimeRegistry,
+    task: ModelInferenceTask,
+) -> crate::runtime_registry::RuntimeCapabilities {
+    let mut capabilities = external_vllm_capabilities(registry, task);
+    capabilities.managed_model_storage = true;
+    capabilities.multiple_models = false;
+    capabilities.model_start_stop = true;
+    capabilities.global_configuration = true;
+    capabilities.artifact_acquisition = true;
+    capabilities.lifecycle = Some(crate::runtime_registry::RuntimeLifecycle::Managed);
+    capabilities
+}
+
+fn capabilities_for_catalog_model(
+    registry: &RuntimeRegistry,
+    runtime_id: &str,
+    model: &ModelEntry,
+) -> crate::runtime_registry::RuntimeCapabilities {
+    let mut capabilities = registry
+        .resolve_name(runtime_id)
+        .map(|runtime| runtime.capabilities.clone())
+        .unwrap_or_default();
+    capabilities.chat = model_supports_chat(model);
+    capabilities.embeddings = model_is_embedding_only(model);
+    capabilities
 }
 
 fn bundled_catalog() -> Result<LoadedCatalog, String> {
@@ -1879,7 +3335,14 @@ fn find_variant<'a>(
 }
 
 fn ensure_supported_runtime(variant: &ModelVariant) -> Result<(), String> {
-    if matches!(variant.runtime.as_str(), OLLAMA_RUNTIME | DUMMY_RUNTIME) {
+    let registry = RuntimeRegistry::default();
+    if registry.supports(&variant.runtime)
+        && registry
+            .resolve_name(&variant.runtime)
+            .is_some_and(|runtime| {
+                runtime.capabilities.artifact_acquisition || runtime.id == RuntimeId::Dummy
+            })
+    {
         Ok(())
     } else {
         Err(format!(
@@ -1887,6 +3350,14 @@ fn ensure_supported_runtime(variant: &ModelVariant) -> Result<(), String> {
             variant.runtime
         ))
     }
+}
+
+fn supports_catalog_runtime(registry: &RuntimeRegistry, runtime_id: &str, target_id: &str) -> bool {
+    registry.resolve_name(runtime_id).is_some_and(|runtime| {
+        let locally_installable =
+            runtime.capabilities.artifact_acquisition || runtime.id == RuntimeId::Dummy;
+        locally_installable && (target_id == "local" || runtime.capabilities.remote_connection)
+    })
 }
 
 fn runtime_artifact(
@@ -2138,6 +3609,7 @@ mod tests {
         assert_eq!(state.settings.ollama.endpoint, "http://127.0.0.1:11434");
         assert_eq!(state.models.len(), 1);
         assert_eq!(state.models[0].name, "My Qwen");
+        assert_eq!(state.models[0].runtime_id, OLLAMA_RUNTIME);
         assert_eq!(state.models[0].logs, ["Installed before settings existed."]);
     }
 
@@ -2287,7 +3759,10 @@ mod tests {
             name: name.to_owned(),
             model_id: "qwen2.5-coder-14b-q4_k_m".to_owned(),
             model_name: "Qwen2.5 Coder 14B".to_owned(),
+            runtime_id: OLLAMA_RUNTIME.to_owned(),
             runtime_model_id: Some("qwen2.5-coder:14b".to_owned()),
+            runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
+            model_settings: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -2338,7 +3813,10 @@ mod tests {
             name: "Dummy Test Model".to_owned(),
             model_id: "dummy-test-model-variant".to_owned(),
             model_name: "Dummy Test Model".to_owned(),
+            runtime_id: DUMMY_RUNTIME.to_owned(),
             runtime_model_id: Some("dummy-test-model:latest".to_owned()),
+            runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
+            model_settings: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -2381,7 +3859,10 @@ mod tests {
             name: "Dummy Test Model".to_owned(),
             model_id: "dummy-test-model-variant".to_owned(),
             model_name: "Dummy Test Model".to_owned(),
+            runtime_id: DUMMY_RUNTIME.to_owned(),
             runtime_model_id: Some("dummy-test-model:latest".to_owned()),
+            runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
+            model_settings: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -2405,7 +3886,10 @@ mod tests {
             name: "Qwen".to_owned(),
             model_id: "qwen2.5-coder-14b-q4_k_m".to_owned(),
             model_name: "Qwen2.5 Coder 14B".to_owned(),
+            runtime_id: OLLAMA_RUNTIME.to_owned(),
             runtime_model_id: Some("qwen2.5-coder:14b".to_owned()),
+            runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
+            model_settings: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),

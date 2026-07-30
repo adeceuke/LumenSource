@@ -63,13 +63,13 @@ export function useModels(onError: (error: unknown) => void): ModelsController {
 
   const toggleRunning = async (id: string, password?: string) => {
     const selected = models.find((model) => model.id === id);
-    if (!selected || action) return;
+    if (!selected || action || !selected.runtimeCapabilities.modelStartStop) return;
     setAction({ id, action: selected.running ? "stopping" : "starting" });
     try {
       if (selected.running) {
-        await desktopCommands.stop(selected.modelId, selected.targetId, password);
+        await desktopCommands.stop(selected.modelId, selected.targetId, password, selected.id);
       } else {
-        await desktopCommands.start(selected.modelId, selected.targetId, password);
+        await desktopCommands.start(selected.modelId, selected.targetId, password, selected.id);
       }
       const running = !selected.running;
       const log = lifecycleLog(running ? text.lifecycle.started : text.lifecycle.stopped);

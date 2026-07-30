@@ -4,15 +4,9 @@ use std::path::PathBuf;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
-pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
+pub use crate::runtime_registry::RuntimeId;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RuntimeId {
-    #[default]
-    Ollama,
-    Vllm,
-}
+pub const SETTINGS_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +14,22 @@ pub enum RuntimeManagementMode {
     #[default]
     Managed,
     External,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelInferenceTask {
+    #[default]
+    Chat,
+    Embeddings,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReasoningLevel {
+    Low,
+    Medium,
+    High,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -200,19 +210,141 @@ impl OllamaSettings {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
-pub struct VllmSettings {}
+pub struct VllmSettings {
+    pub hugging_face_cache_directory: Option<PathBuf>,
+    pub gpu_selection: Option<String>,
+    pub gpu_memory_utilization: f32,
+    pub max_context_length: Option<u32>,
+    pub max_concurrent_sequences: u32,
+    pub prefix_caching: bool,
+    pub weight_dtype: String,
+    pub quantization: Option<String>,
+    pub kv_cache_dtype: String,
+    pub cpu_offload_gib: f32,
+    pub tensor_parallel_size: u16,
+    pub pipeline_parallel_size: u16,
+    pub bind_address: String,
+    pub managed_port_start: u16,
+    pub managed_port_end: u16,
+    pub pinned_runtime_version: String,
+}
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+impl Default for VllmSettings {
+    fn default() -> Self {
+        Self {
+            hugging_face_cache_directory: dirs::cache_dir()
+                .map(|directory| directory.join("huggingface")),
+            gpu_selection: None,
+            gpu_memory_utilization: 0.9,
+            max_context_length: None,
+            max_concurrent_sequences: 256,
+            prefix_caching: true,
+            weight_dtype: "auto".to_owned(),
+            quantization: None,
+            kv_cache_dtype: "auto".to_owned(),
+            cpu_offload_gib: 0.0,
+            tensor_parallel_size: 1,
+            pipeline_parallel_size: 1,
+            bind_address: "127.0.0.1".to_owned(),
+            managed_port_start: 8_000,
+            managed_port_end: 8_099,
+            pinned_runtime_version: "0.23.0".to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ModelSettings {
     pub runtime_management_mode: Option<RuntimeManagementMode>,
+    pub inference_task: Option<ModelInferenceTask>,
     pub endpoint: Option<String>,
+    pub verify_tls: bool,
+    pub connection_timeout_seconds: u16,
+    pub request_timeout_seconds: u16,
+    pub system_prompt: Option<String>,
+    pub temperature: Option<f32>,
+    pub max_output_tokens: Option<u32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    pub min_p: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub seed: Option<i64>,
+    pub stop_sequences: Vec<String>,
+    pub structured_output: Option<bool>,
+    pub reasoning_level: Option<ReasoningLevel>,
     pub context_length: Option<u32>,
     pub keep_alive: Option<String>,
     pub load_on_startup: Option<bool>,
     pub preferred_accelerator: Option<String>,
+    pub ollama_derived_model_name: Option<String>,
+    pub ollama_persistent_parameters: bool,
+    pub vllm_model_revision: Option<String>,
+    pub vllm_tokenizer_revision: Option<String>,
+    pub vllm_served_model_name: Option<String>,
+    pub vllm_task: Option<String>,
+    pub vllm_runner: Option<String>,
+    pub vllm_weight_dtype: Option<String>,
+    pub vllm_quantization: Option<String>,
+    pub vllm_gpu_memory_utilization: Option<f32>,
+    pub vllm_max_concurrent_sequences: Option<u32>,
+    pub vllm_prefix_caching: Option<bool>,
+    pub vllm_kv_cache_dtype: Option<String>,
+    pub vllm_cpu_offload_gib: Option<f32>,
+    pub vllm_tensor_parallel_size: Option<u16>,
+    pub vllm_pipeline_parallel_size: Option<u16>,
+    pub managed_container_engine: Option<String>,
+    pub managed_container_name: Option<String>,
+    pub managed_port: Option<u16>,
+}
+
+impl Default for ModelSettings {
+    fn default() -> Self {
+        Self {
+            runtime_management_mode: None,
+            inference_task: None,
+            endpoint: None,
+            verify_tls: true,
+            connection_timeout_seconds: 5,
+            request_timeout_seconds: 120,
+            system_prompt: None,
+            temperature: None,
+            max_output_tokens: None,
+            top_p: None,
+            top_k: None,
+            min_p: None,
+            repetition_penalty: None,
+            seed: None,
+            stop_sequences: Vec::new(),
+            structured_output: None,
+            reasoning_level: None,
+            context_length: None,
+            keep_alive: None,
+            load_on_startup: None,
+            preferred_accelerator: None,
+            ollama_derived_model_name: None,
+            ollama_persistent_parameters: false,
+            vllm_model_revision: None,
+            vllm_tokenizer_revision: None,
+            vllm_served_model_name: None,
+            vllm_task: None,
+            vllm_runner: None,
+            vllm_weight_dtype: None,
+            vllm_quantization: None,
+            vllm_gpu_memory_utilization: None,
+            vllm_max_concurrent_sequences: None,
+            vllm_prefix_caching: None,
+            vllm_kv_cache_dtype: None,
+            vllm_cpu_offload_gib: None,
+            vllm_tensor_parallel_size: None,
+            vllm_pipeline_parallel_size: None,
+            managed_container_engine: None,
+            managed_container_name: None,
+            managed_port: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -235,6 +367,63 @@ pub struct OllamaConnectionReport {
     pub healthy: bool,
     pub endpoint: String,
     pub version: Option<String>,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ExternalVllmConfig {
+    pub endpoint: String,
+    pub served_model: String,
+    pub inference_task: ModelInferenceTask,
+    pub verify_tls: bool,
+    pub connection_timeout_seconds: u16,
+    pub request_timeout_seconds: u16,
+}
+
+impl Default for ExternalVllmConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: "http://127.0.0.1:8000".to_owned(),
+            served_model: String::new(),
+            inference_task: ModelInferenceTask::Chat,
+            verify_tls: true,
+            connection_timeout_seconds: 5,
+            request_timeout_seconds: 120,
+        }
+    }
+}
+
+impl ExternalVllmConfig {
+    pub fn model_settings(&self) -> ModelSettings {
+        ModelSettings {
+            runtime_management_mode: Some(RuntimeManagementMode::External),
+            inference_task: Some(self.inference_task),
+            endpoint: Some(self.endpoint.clone()),
+            verify_tls: self.verify_tls,
+            connection_timeout_seconds: self.connection_timeout_seconds,
+            request_timeout_seconds: self.request_timeout_seconds,
+            ..ModelSettings::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VllmConnectionReport {
+    pub healthy: bool,
+    pub authenticated: bool,
+    pub endpoint: String,
+    pub models: Vec<String>,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelSettingsSaveReport {
+    pub model: crate::bridge_types::PersistedModelEntry,
+    pub restart_required: bool,
+    pub restarted: bool,
     pub message: String,
 }
 
@@ -358,7 +547,298 @@ pub fn validate_settings(settings: &ApplicationSettings) -> Vec<SettingsValidati
         0,
         10_000,
     );
+    if !(0.1..=1.0).contains(&settings.vllm.gpu_memory_utilization) {
+        push_error(
+            &mut errors,
+            "vllm.gpuMemoryUtilization",
+            "GPU memory utilization must be between 0.1 and 1.0.",
+        );
+    }
+    validate_range(
+        &mut errors,
+        "vllm.maxConcurrentSequences",
+        settings.vllm.max_concurrent_sequences.into(),
+        1,
+        65_536,
+    );
+    validate_range(
+        &mut errors,
+        "vllm.tensorParallelSize",
+        settings.vllm.tensor_parallel_size.into(),
+        1,
+        256,
+    );
+    validate_range(
+        &mut errors,
+        "vllm.pipelineParallelSize",
+        settings.vllm.pipeline_parallel_size.into(),
+        1,
+        256,
+    );
+    if settings.vllm.managed_port_start == 0
+        || settings.vllm.managed_port_end < settings.vllm.managed_port_start
+    {
+        push_error(
+            &mut errors,
+            "vllm.managedPortStart",
+            "The managed vLLM port range is invalid.",
+        );
+    }
+    if settings.vllm.pinned_runtime_version != "0.23.0" {
+        push_error(
+            &mut errors,
+            "vllm.pinnedRuntimeVersion",
+            "This version of Lumen Source supports managed-vLLM defaults for vLLM 0.23.0.",
+        );
+    }
+    if !matches!(
+        settings.vllm.weight_dtype.as_str(),
+        "auto" | "half" | "float16" | "bfloat16" | "float" | "float32"
+    ) {
+        push_error(
+            &mut errors,
+            "vllm.weightDtype",
+            "Choose a data type supported by the pinned vLLM version.",
+        );
+    }
+    if !matches!(
+        settings.vllm.kv_cache_dtype.as_str(),
+        "auto" | "fp8" | "fp8_e4m3" | "fp8_e5m2" | "fp8_inc"
+    ) {
+        push_error(
+            &mut errors,
+            "vllm.kvCacheDtype",
+            "Choose a KV-cache data type supported by the pinned vLLM version.",
+        );
+    }
     errors
+}
+
+pub fn validate_external_model_settings(settings: &ModelSettings) -> Vec<SettingsValidationError> {
+    let mut errors = Vec::new();
+    match settings.endpoint.as_deref() {
+        Some(endpoint) => validate_http_url(&mut errors, "endpoint", endpoint),
+        None => push_error(&mut errors, "endpoint", "Enter the vLLM endpoint URL."),
+    }
+    validate_range(
+        &mut errors,
+        "connectionTimeoutSeconds",
+        settings.connection_timeout_seconds.into(),
+        1,
+        300,
+    );
+    validate_range(
+        &mut errors,
+        "requestTimeoutSeconds",
+        settings.request_timeout_seconds.into(),
+        1,
+        3_600,
+    );
+    errors
+}
+
+pub fn validate_external_vllm_config(
+    config: &ExternalVllmConfig,
+    require_model: bool,
+) -> Vec<SettingsValidationError> {
+    let mut errors = validate_external_model_settings(&config.model_settings());
+    if require_model && config.served_model.trim().is_empty() {
+        push_error(
+            &mut errors,
+            "servedModel",
+            "Choose the model served by this vLLM endpoint.",
+        );
+    }
+    errors
+}
+
+pub fn validate_model_settings(
+    settings: &ModelSettings,
+    maximum_context_length: Option<u32>,
+) -> Vec<SettingsValidationError> {
+    let mut errors = Vec::new();
+    validate_optional_float(&mut errors, "temperature", settings.temperature, 0.0, 2.0);
+    validate_optional_float(&mut errors, "topP", settings.top_p, 0.0, 1.0);
+    validate_optional_float(&mut errors, "minP", settings.min_p, 0.0, 1.0);
+    validate_optional_float(
+        &mut errors,
+        "repetitionPenalty",
+        settings.repetition_penalty,
+        0.0,
+        2.0,
+    );
+    validate_optional_float(
+        &mut errors,
+        "vllmGpuMemoryUtilization",
+        settings.vllm_gpu_memory_utilization,
+        0.1,
+        1.0,
+    );
+    if settings.max_output_tokens.is_some_and(|value| value == 0) {
+        push_error(
+            &mut errors,
+            "maxOutputTokens",
+            "Maximum output tokens must be greater than zero.",
+        );
+    }
+    if settings.top_k.is_some_and(|value| value == 0) {
+        push_error(&mut errors, "topK", "Top-k must be greater than zero.");
+    }
+    if let Some(context_length) = settings.context_length {
+        let maximum = maximum_context_length.unwrap_or(1_048_576);
+        if context_length < 256 || context_length > maximum {
+            push_error(
+                &mut errors,
+                "contextLength",
+                format!("Context length must be between 256 and {maximum} tokens."),
+            );
+        }
+    }
+    if let Some(keep_alive) = settings.keep_alive.as_deref() {
+        if !valid_duration(keep_alive) {
+            push_error(
+                &mut errors,
+                "keepAlive",
+                "Use a duration such as 5m, 30s, 2h, 0, or -1.",
+            );
+        }
+    }
+    if settings.stop_sequences.len() > 16
+        || settings
+            .stop_sequences
+            .iter()
+            .any(|sequence| sequence.is_empty() || sequence.len() > 256)
+    {
+        push_error(
+            &mut errors,
+            "stopSequences",
+            "Provide at most 16 non-empty stop sequences of at most 256 characters.",
+        );
+    }
+    if settings.ollama_persistent_parameters
+        && settings
+            .ollama_derived_model_name
+            .as_deref()
+            .is_none_or(|name| name.trim().is_empty())
+    {
+        push_error(
+            &mut errors,
+            "ollamaDerivedModelName",
+            "A derived model name is required for persistent Ollama parameters.",
+        );
+    }
+    for (field, value) in [
+        (
+            "ollamaDerivedModelName",
+            settings.ollama_derived_model_name.as_deref(),
+        ),
+        ("vllmModelRevision", settings.vllm_model_revision.as_deref()),
+        (
+            "vllmTokenizerRevision",
+            settings.vllm_tokenizer_revision.as_deref(),
+        ),
+        (
+            "vllmServedModelName",
+            settings.vllm_served_model_name.as_deref(),
+        ),
+        ("vllmTask", settings.vllm_task.as_deref()),
+        ("vllmRunner", settings.vllm_runner.as_deref()),
+        ("vllmWeightDtype", settings.vllm_weight_dtype.as_deref()),
+        ("vllmQuantization", settings.vllm_quantization.as_deref()),
+        ("vllmKvCacheDtype", settings.vllm_kv_cache_dtype.as_deref()),
+        (
+            "preferredAccelerator",
+            settings.preferred_accelerator.as_deref(),
+        ),
+    ] {
+        if value.is_some_and(|value| {
+            value.len() > 160 || value.contains(['\n', '\r', '\0']) || value.starts_with('-')
+        }) {
+            push_error(&mut errors, field, "Value contains unsupported characters.");
+        }
+    }
+    if settings.vllm_weight_dtype.as_deref().is_some_and(|value| {
+        !matches!(
+            value,
+            "auto" | "half" | "float16" | "bfloat16" | "float" | "float32"
+        )
+    }) {
+        push_error(
+            &mut errors,
+            "vllmWeightDtype",
+            "Choose a data type supported by the pinned vLLM version.",
+        );
+    }
+    if settings
+        .vllm_kv_cache_dtype
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "auto" | "fp8" | "fp8_e4m3" | "fp8_e5m2" | "fp8_inc"))
+    {
+        push_error(
+            &mut errors,
+            "vllmKvCacheDtype",
+            "Choose a KV-cache data type supported by the pinned vLLM version.",
+        );
+    }
+    for (field, value) in [
+        ("vllmTask", settings.vllm_task.as_deref()),
+        ("vllmRunner", settings.vllm_runner.as_deref()),
+    ] {
+        if value.is_some_and(|value| {
+            !matches!(
+                value,
+                "auto" | "generate" | "draft" | "pooling" | "transcription"
+            )
+        }) {
+            push_error(
+                &mut errors,
+                field,
+                "Choose a task or runner supported by the pinned vLLM version.",
+            );
+        }
+    }
+    if settings
+        .vllm_max_concurrent_sequences
+        .is_some_and(|value| value == 0 || value > 65_536)
+    {
+        push_error(
+            &mut errors,
+            "vllmMaxConcurrentSequences",
+            "Concurrent sequences must be between 1 and 65,536.",
+        );
+    }
+    for (field, value) in [
+        ("vllmTensorParallelSize", settings.vllm_tensor_parallel_size),
+        (
+            "vllmPipelineParallelSize",
+            settings.vllm_pipeline_parallel_size,
+        ),
+    ] {
+        if value.is_some_and(|value| value == 0 || value > 256) {
+            push_error(
+                &mut errors,
+                field,
+                "Parallel size must be between 1 and 256.",
+            );
+        }
+    }
+    errors
+}
+
+fn validate_optional_float(
+    errors: &mut Vec<SettingsValidationError>,
+    field: &str,
+    value: Option<f32>,
+    minimum: f32,
+    maximum: f32,
+) {
+    if value.is_some_and(|value| !value.is_finite() || !(minimum..=maximum).contains(&value)) {
+        push_error(
+            errors,
+            field,
+            format!("Value must be between {minimum} and {maximum}."),
+        );
+    }
 }
 
 fn validate_http_url(errors: &mut Vec<SettingsValidationError>, field: &str, value: &str) {
@@ -498,5 +978,51 @@ mod tests {
             environment.get("OLLAMA_HOST").map(String::as_str),
             Some("127.0.0.1:11434")
         );
+    }
+
+    #[test]
+    fn external_vllm_settings_reject_credentials_in_urls_and_invalid_limits() {
+        let config = ExternalVllmConfig {
+            endpoint: "https://user:secret@example.test:8000".to_owned(),
+            served_model: String::new(),
+            connection_timeout_seconds: 0,
+            request_timeout_seconds: 3_601,
+            ..ExternalVllmConfig::default()
+        };
+        let fields = validate_external_vllm_config(&config, true)
+            .into_iter()
+            .map(|error| error.field)
+            .collect::<Vec<_>>();
+
+        assert!(fields.contains(&"endpoint".to_owned()));
+        assert!(fields.contains(&"servedModel".to_owned()));
+        assert!(fields.contains(&"connectionTimeoutSeconds".to_owned()));
+        assert!(fields.contains(&"requestTimeoutSeconds".to_owned()));
+    }
+
+    #[test]
+    fn managed_vllm_defaults_are_pinned_and_security_constrained() {
+        let settings = VllmSettings::default();
+
+        assert_eq!(settings.pinned_runtime_version, "0.23.0");
+        assert_eq!(settings.bind_address, "127.0.0.1");
+        assert!((settings.gpu_memory_utilization - 0.9).abs() < f32::EPSILON);
+        assert!(validate_settings(&ApplicationSettings::default()).is_empty());
+    }
+
+    #[test]
+    fn model_settings_validate_catalog_limits_and_persistent_identity() {
+        let settings = ModelSettings {
+            context_length: Some(65_536),
+            ollama_persistent_parameters: true,
+            ..ModelSettings::default()
+        };
+        let fields = validate_model_settings(&settings, Some(32_768))
+            .into_iter()
+            .map(|error| error.field)
+            .collect::<Vec<_>>();
+
+        assert!(fields.contains(&"contextLength".to_owned()));
+        assert!(fields.contains(&"ollamaDerivedModelName".to_owned()));
     }
 }

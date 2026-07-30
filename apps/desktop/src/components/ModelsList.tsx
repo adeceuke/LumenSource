@@ -10,12 +10,14 @@ interface ModelsListProps {
   menuOpenId?: string;
   menuPosition: { top: number; left: number } | null;
   onAdd: () => void;
+  onConnectVllm: () => void;
   onOpen: (model: RunningModelEntry) => void;
   onToggleRunning: (id: string) => void;
   onToggleMenu: (id: string, trigger: HTMLButtonElement) => void;
   onRename: (model: RunningModelEntry) => void;
   onPerformance: (model: RunningModelEntry) => void;
   onApi: (model: RunningModelEntry) => void;
+  onSettings: (model: RunningModelEntry) => void;
   onRemove: (id: string) => void;
 }
 
@@ -25,12 +27,14 @@ export function ModelsList({
   menuOpenId,
   menuPosition,
   onAdd,
+  onConnectVllm,
   onOpen,
   onToggleRunning,
   onToggleMenu,
   onRename,
   onPerformance,
   onApi,
+  onSettings,
   onRemove,
 }: ModelsListProps) {
   return (
@@ -40,9 +44,14 @@ export function ModelsList({
           <span className="eyebrow">{text.common.models}</span>
           <h1>{text.common.models}</h1>
         </div>
-        <button className="primary-button" type="button" onClick={onAdd}>
-          {text.common.addModel}
-        </button>
+        <div className="models-toolbar-actions">
+          <button className="secondary-button" type="button" onClick={onConnectVllm}>
+            {text.vllm.connectAction}
+          </button>
+          <button className="primary-button" type="button" onClick={onAdd}>
+            {text.common.addModel}
+          </button>
+        </div>
       </div>
 
       <div className="models-table" role="table" aria-label={text.models.tableLabel}>
@@ -53,7 +62,7 @@ export function ModelsList({
                 <span className={`led ${model.running ? "on" : "off"}`} aria-label={model.running ? text.details.running : text.details.stopped} />
                 <div>
                   <strong role="cell">{model.name}</strong>
-                  <p>{model.modelName} · {model.version} · {model.location === "remote" ? model.targetName ?? text.models.remoteLinux : text.models.thisMachine}{model.managed === false ? text.models.discoveredSuffix : ""}</p>
+                  <p>{model.modelName} · {model.runtimeId === "vllm" ? "vLLM" : model.runtimeId === "ollama" ? "Ollama" : "Dummy"} · {model.version} · {model.location === "remote" ? model.targetName ?? text.models.remoteLinux : text.models.thisMachine}{model.runtimeId === "vllm" ? text.models.externalSuffix : model.managed === false ? text.models.discoveredSuffix : ""}</p>
                   {modelAction?.id === model.id && (
                     <span className="model-transition"><i className="model-control-spinner" /> {modelAction.action === "starting" ? text.models.starting : text.models.stopping}</span>
                   )}
@@ -65,8 +74,8 @@ export function ModelsList({
                 className="icon-button"
                 type="button"
                 onClick={() => onToggleRunning(model.id)}
-                disabled={model.managed === false || modelAction !== undefined}
-                title={model.managed === false ? text.models.unmanagedTitle : model.running ? text.details.stop : text.details.start}
+                disabled={!model.runtimeCapabilities.modelStartStop || modelAction !== undefined}
+                title={!model.runtimeCapabilities.modelStartStop ? model.runtimeCapabilities.lifecycle === "external" ? text.models.externalLifecycleTitle : text.models.unmanagedTitle : model.running ? text.details.stop : text.details.start}
                 aria-label={modelAction?.id === model.id ? modelAction.action === "starting" ? text.models.startingAria : text.models.stoppingAria : model.running ? text.details.stop : text.details.start}
               >
                 {modelAction?.id === model.id
@@ -89,6 +98,9 @@ export function ModelsList({
                     <button type="button" role="menuitem" onClick={() => onOpen(model)}>{text.common.logs}</button>
                     <button type="button" role="menuitem" onClick={() => onPerformance(model)}>{text.common.performance}</button>
                     <button type="button" role="menuitem" onClick={() => onApi(model)}>{text.common.api}</button>
+                    {model.runtimeCapabilities.perModelConfiguration && (
+                      <button type="button" role="menuitem" onClick={() => onSettings(model)}>{text.navigation.settings}</button>
+                    )}
                     <button type="button" role="menuitem" onClick={() => onRemove(model.id)}>{text.common.remove}</button>
                   </div>,
                   document.body,

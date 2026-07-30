@@ -12,6 +12,7 @@ import { ModelSetupWizard } from "./components/ModelSetupWizard";
 import { MachinesPage } from "./components/MachinesPage";
 import { ModelsList } from "./components/ModelsList";
 import { SettingsPage } from "./components/SettingsPage";
+import { VllmModelSettings } from "./components/VllmModelSettings";
 import { desktopCommands, messageFromError } from "./commands";
 import { useModels } from "./hooks/useModels";
 import { useModelWizard } from "./hooks/useModelWizard";
@@ -28,6 +29,7 @@ function App() {
   const [section, setSection] = useState<"models" | "machines" | "settings">("models");
   const [settings, setSettings] = useState<ApplicationSettings>();
   const [settingsDirty, setSettingsDirty] = useState(false);
+  const [vllmDialogOpen, setVllmDialogOpen] = useState(false);
   const [catalog, setCatalog] = useState<CatalogSummary>();
   const [error, setError] = useState<string>();
   const reportError = useCallback(
@@ -305,6 +307,7 @@ function App() {
             ) : detailModel ? (
               <ModelDetails
                 model={detailModel}
+                applicationSettings={settings}
                 tab={detailTab}
                 modelAction={modelAction}
                 copiedField={copiedField}
@@ -314,6 +317,15 @@ function App() {
                 onToggleRunning={() => void toggleRunning(detailModel.id)}
                 onClearLogs={clearLogs}
                 onCopy={(value, key) => void copyText(value, key)}
+                onModelSaved={(savedModel) => {
+                  setRunningModels((current) => [
+                    savedModel,
+                    ...current.filter((model) => model.id !== savedModel.id),
+                  ]);
+                  if (detailTab === "chat" && !savedModel.runtimeCapabilities.chat) {
+                    setDetailTab("api");
+                  }
+                }}
               />
             ) : (
               <ModelsList
@@ -322,12 +334,14 @@ function App() {
                 menuOpenId={menuOpenId}
                 menuPosition={menuPosition}
                 onAdd={wizard.openWizard}
+                onConnectVllm={() => setVllmDialogOpen(true)}
                 onOpen={(model) => openDetail(model, "logs")}
                 onToggleRunning={(id) => void toggleRunning(id)}
                 onToggleMenu={toggleMenu}
                 onRename={openRename}
                 onPerformance={(model) => openDetail(model, "performance")}
                 onApi={(model) => openDetail(model, "api")}
+                onSettings={(model) => openDetail(model, "settings")}
                 onRemove={requestRemoval}
               />
             )}
@@ -389,9 +403,24 @@ function App() {
 
       {pendingRemovalId && (
         <RemoveDialog
+          model={runningModels.find((model) => model.id === pendingRemovalId)}
           busy={removalBusy}
           onCancel={() => setPendingRemovalId(undefined)}
           onConfirm={() => void confirmRemoval()}
+        />
+      )}
+
+      {vllmDialogOpen && (
+        <VllmModelSettings
+          dialog
+          onCancel={() => setVllmDialogOpen(false)}
+          onSaved={(savedModel) => {
+            setRunningModels((current) => [
+              savedModel,
+              ...current.filter((model) => model.id !== savedModel.id),
+            ]);
+            setVllmDialogOpen(false);
+          }}
         />
       )}
 

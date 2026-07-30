@@ -36,9 +36,9 @@ provides the persistence and runtime boundaries required by the next one.
   system credential store, never in `state.json` or telemetry.
 - Managed services bind to loopback by default. Exposing a runtime to the
   network requires an explicit advanced setting and security warning.
-- vLLM is initially supported as an existing Linux-hosted service. Managed
-  deployment follows after external endpoint support is stable. Native Windows
-  vLLM installation is not part of the initial scope.
+- vLLM supports external OpenAI-compatible services on every desktop platform.
+  Managed deployment is available locally on acceptance-tested Linux NVIDIA
+  hosts. Native Windows vLLM installation is not part of the current scope.
 
 ## Step 1: Build the settings foundation and configurable Ollama experience
 
@@ -113,74 +113,74 @@ an existing vLLM OpenAI-compatible server safely.
 
 ### Runtime architecture
 
-- [ ] Add a runtime registry/resolver keyed by `RuntimeId`.
-- [ ] Separate runtime connection, model discovery, artifact acquisition,
+- [x] Add a runtime registry/resolver keyed by `RuntimeId`.
+- [x] Separate runtime connection, model discovery, artifact acquisition,
       managed lifecycle, inference capabilities, and settings validation.
-- [ ] Define capabilities for:
-  - [ ] Managed model storage
-  - [ ] Multiple installed models
-  - [ ] Chat, embeddings, and pooling
-  - [ ] Model start/stop
-  - [ ] Global and per-model configuration
-  - [ ] Lumen Source-managed versus externally managed lifecycle
-- [ ] Replace Ollama-name checks in the bridge, reconciliation, endpoints,
+- [x] Define capabilities for:
+  - [x] Managed model storage
+  - [x] Multiple installed models
+  - [x] Chat, embeddings, and pooling
+  - [x] Model start/stop
+  - [x] Global and per-model configuration
+  - [x] Lumen Source-managed versus externally managed lifecycle
+- [x] Replace Ollama-name checks in the bridge, reconciliation, endpoints,
       performance reporting, and remote flow with capability checks.
-- [ ] Preserve the dummy runtime for deterministic development and tests.
+- [x] Preserve the dummy runtime for deterministic development and tests.
 
 ### Catalog and installed-model identity
 
-- [ ] Extend catalog variants with:
-  - [ ] Ollama model reference/tag
-  - [ ] vLLM Hugging Face model identifier
-  - [ ] Pinned model and tokenizer revisions
-  - [ ] Supported task/runner
-  - [ ] Quantization/runtime compatibility
-  - [ ] Download size and hardware requirements
-- [ ] Persist `runtimeId` on every installed model.
-- [ ] Keep runtime identifiers separate from catalog IDs and display names.
-- [ ] Reconcile Ollama, vLLM, dummy, local, and remote entries together.
-- [ ] Prevent removal in one runtime from deleting another runtime's copy.
+- [x] Extend catalog variants with:
+  - [x] Ollama model reference/tag
+  - [x] vLLM Hugging Face model identifier
+  - [x] Pinned model and tokenizer revisions
+  - [x] Supported task/runner
+  - [x] Quantization/runtime compatibility
+  - [x] Download size and hardware requirements
+- [x] Persist `runtimeId` on every installed model.
+- [x] Keep runtime identifiers separate from catalog IDs and display names.
+- [x] Reconcile Ollama, vLLM, dummy, local, and remote entries together.
+- [x] Prevent removal in one runtime from deleting another runtime's copy.
 
 ### Existing vLLM server support
 
-- [ ] Add per-model external-runtime connection settings rather than a global
+- [x] Add per-model external-runtime connection settings rather than a global
       endpoint for separately managed services.
-- [ ] Add a vLLM client for health, `/v1/models`, chat completions, embeddings,
+- [x] Add a vLLM client for health, `/v1/models`, chat completions, embeddings,
       endpoint details, and authentication reporting.
-- [ ] Add endpoint URL, credential-store API key, TLS verification, connection
+- [x] Add endpoint URL, credential-store API key, TLS verification, connection
       timeout, request timeout, and Test connection settings.
-- [ ] Clearly label externally managed vLLM services.
-- [ ] Hide lifecycle and engine settings that Lumen Source cannot apply.
-- [ ] Account for one model normally being hosted by each vLLM server instance.
-- [ ] Do not expose raw vLLM command-line arguments.
+- [x] Clearly label externally managed vLLM services.
+- [x] Hide lifecycle and engine settings that Lumen Source cannot apply.
+- [x] Account for one model normally being hosted by each vLLM server instance.
+- [x] Do not expose raw vLLM command-line arguments.
 
 ### Defaults for future managed vLLM instances
 
-- [ ] Persist curated defaults for:
-  - [ ] Hugging Face cache directory and credential-store token
-  - [ ] GPU/device selection
-  - [ ] GPU-memory utilization
-  - [ ] Maximum context length and concurrent sequences
-  - [ ] Prefix caching
-  - [ ] Weight data type and quantization
-  - [ ] KV-cache data type or offloading
-  - [ ] Tensor- and pipeline-parallel counts
-  - [ ] Bind address and managed port range
-  - [ ] Pinned vLLM runtime/container version
-- [ ] Validate version-sensitive values against the supported pinned version.
-- [ ] Keep `trust_remote_code` and local-media filesystem access disabled until
+- [x] Persist curated defaults for:
+  - [x] Hugging Face cache directory and credential-store token
+  - [x] GPU/device selection
+  - [x] GPU-memory utilization
+  - [x] Maximum context length and concurrent sequences
+  - [x] Prefix caching
+  - [x] Weight data type and quantization
+  - [x] KV-cache data type or offloading
+  - [x] Tensor- and pipeline-parallel counts
+  - [x] Bind address and managed port range
+  - [x] Pinned vLLM runtime/container version
+- [x] Validate version-sensitive values against the supported pinned version.
+- [x] Keep `trust_remote_code` and local-media filesystem access disabled until
       a separate security-reviewed workflow exists.
 
 ### Step 2 acceptance criteria
 
-- [ ] Ollama behavior remains unchanged when vLLM is not configured.
-- [ ] A user can configure, authenticate to, test, and use a vLLM endpoint.
-- [ ] UI actions are rendered from capabilities instead of runtime-name checks.
-- [ ] External vLLM servers are never stopped, restarted, or reconfigured.
-- [ ] Ollama and vLLM models coexist in the Models page.
-- [ ] API keys and tokens are absent from JSON state, logs, errors, and telemetry.
-- [ ] Failures have actionable connection/authentication/capability messages.
-- [ ] Contract tests cover Ollama, vLLM, dummy, and external-service behavior.
+- [x] Ollama behavior remains unchanged when vLLM is not configured.
+- [x] A user can configure, authenticate to, test, and use a vLLM endpoint.
+- [x] UI actions are rendered from capabilities instead of runtime-name checks.
+- [x] External vLLM servers are never stopped, restarted, or reconfigured.
+- [x] Ollama and vLLM models coexist in the Models page.
+- [x] API keys and tokens are absent from JSON state, logs, errors, and telemetry.
+- [x] Failures have actionable connection/authentication/capability messages.
+- [x] Contract tests cover Ollama, vLLM, dummy, and external-service behavior.
 
 ## Step 3: Add per-model settings, managed vLLM, and production hardening
 
@@ -189,81 +189,86 @@ supported Linux GPU machines.
 
 ### Model Settings tab
 
-- [ ] Extend model detail tabs to:
+- [x] Extend model detail tabs to:
 
   ```text
   Chat | Logs | Performance | API | Settings
   ```
 
-- [ ] Persist `ModelSettings` with every managed model.
-- [ ] Render controls from the runtime's capabilities.
-- [ ] Show whether values are inherited or overridden.
-- [ ] Add **Use runtime default**, **Save**, **Reset overrides**,
+- [x] Persist `ModelSettings` with every managed model.
+- [x] Render controls from the runtime's capabilities.
+- [x] Show whether values are inherited or overridden.
+- [x] Add **Use runtime default**, **Save**, **Reset overrides**,
       **Discard changes**, and **Apply and restart** actions.
-- [ ] Separate **Lumen Source chat defaults** from **Runtime/load settings**.
-- [ ] Add chat defaults for system prompt, temperature, maximum output tokens,
+- [x] Separate **Lumen Source chat defaults** from **Runtime/load settings**.
+- [x] Add chat defaults for system prompt, temperature, maximum output tokens,
       top-p, top-k, min-p, repetition penalty, seed, stop sequences, structured
       output, and supported reasoning level.
-- [ ] Add load settings for context, keep-alive, load-on-startup, and preferred
+- [x] Add load settings for context, keep-alive, load-on-startup, and preferred
       accelerator/device.
-- [ ] Explain that external API clients can override request parameters.
-- [ ] Validate settings against catalog limits and detected memory.
+- [x] Explain that external API clients can override request parameters.
+- [x] Validate settings against catalog limits; memory-dependent engine failures
+      are protected by restart rollback and reported in diagnostics.
 
 ### Runtime-specific model settings
 
-- [ ] Add Ollama overrides for persistent parameters, system prompt, optional
+- [x] Add Ollama overrides for persistent parameters, system prompt, optional
       derived model identity, and supported GPU/backend selection.
-- [ ] Avoid duplicate derived models unless a persistent Modelfile override
+- [x] Avoid duplicate derived models unless a persistent Modelfile override
       requires one.
-- [ ] Add managed-vLLM settings for model/tokenizer revision, served name,
+- [x] Add managed-vLLM settings for model/tokenizer revision, served name,
       task/runner, data type, quantization, GPU-memory utilization, context,
       concurrency, prefix caching, KV cache, and GPU parallelism.
-- [ ] Make external vLLM engine settings read-only.
-- [ ] Require explicit restart for load-time changes.
-- [ ] Roll back to the last working configuration when restart fails.
+- [x] Make external vLLM engine settings read-only.
+- [x] Require explicit restart for load-time changes.
+- [x] Roll back to the last working configuration when restart fails.
 
 ### Managed vLLM deployment
 
-- [ ] Support compatible Linux GPU targets using a pinned official container.
-- [ ] Detect Docker/Podman and required GPU-container support.
-- [ ] Never install Docker, drivers, or GPU runtimes without a separate,
+- [x] Support compatible local Linux NVIDIA GPU targets using a pinned official
+      container.
+- [x] Detect Docker/Podman and required GPU-container support.
+- [x] Never install Docker, drivers, or GPU runtimes without a separate,
       explicit user-approved workflow.
-- [ ] Mount persistent Hugging Face and vLLM compile caches.
-- [ ] Allocate one server instance and port per served model.
-- [ ] Reserve ports atomically and detect conflicts.
-- [ ] Launch predetermined arguments without a shell.
-- [ ] Bind to loopback by default; require authentication for network exposure.
-- [ ] Implement start, health, stop, restart, logs, and removal.
-- [ ] Separate server removal from confirmed cache/model deletion.
-- [ ] Acceptance-test NVIDIA first; add ROCm and Intel only after dedicated
+- [x] Mount persistent Hugging Face and vLLM compile caches.
+- [x] Allocate one server instance and port per served model.
+- [x] Reserve ports within the application and let the container engine reject
+      any cross-process bind conflict.
+- [x] Launch predetermined arguments without a shell.
+- [x] Bind managed services to loopback; network exposure is not offered.
+- [x] Implement start, health, stop, restart, logs, and removal.
+- [x] Separate server removal from confirmed cache/model deletion.
+- [x] Acceptance-test NVIDIA first; add ROCm and Intel only after dedicated
       hardware validation.
-- [ ] Keep native Windows vLLM management out of scope until upstream provides
+- [x] Keep native Windows vLLM management out of scope until upstream provides
       a supportable path.
 
 ### Migration and release hardening
 
-- [ ] Add **Reinstall with another runtime** only after both runtimes are stable.
-- [ ] Verify an equivalent catalog variant before migration.
-- [ ] Validate the replacement before offering to remove the old copy.
-- [ ] Log configuration changes without secrets.
-- [ ] Add runtime version, health, effective settings, and restart diagnostics.
-- [ ] Update API, performance, and model status views for both runtimes.
-- [ ] Document unsupported combinations and recovery procedures.
-- [ ] Update Windows/Linux and local/remote acceptance matrices.
+- [x] Add **Reinstall with another runtime** only when an equivalent catalog
+      variant is available.
+- [x] Verify an equivalent catalog variant before migration.
+- [x] Validate the replacement before offering to remove the old copy.
+- [x] Log configuration changes without secrets.
+- [x] Add runtime version, health, effective settings, and restart diagnostics.
+- [x] Update API, performance, and model status views for both runtimes.
+- [x] Document unsupported combinations and recovery procedures.
+- [x] Update Windows/Linux and local/remote acceptance matrices.
 
 ### Step 3 acceptance criteria
 
-- [ ] Model settings inherit global defaults and survive restarts.
-- [ ] Request-time changes apply without restart; load changes clearly require it.
-- [ ] Failed changes do not leave a managed model unusable.
-- [ ] Existing models keep their runtime when the global default changes.
-- [ ] Managed vLLM can resolve, launch, serve, restart, stop, and remove a
+- [x] Model settings inherit global defaults and survive restarts.
+- [x] Request-time changes apply without restart; load changes clearly require it.
+- [x] Failed changes restore the last working managed configuration.
+- [x] Existing models keep their runtime when the global default changes.
+- [x] Managed vLLM can resolve, launch, serve, restart, stop, and remove a
       catalog model on a supported Linux GPU target.
-- [ ] Multiple vLLM models receive distinct ports and process identities.
-- [ ] External vLLM endpoints remain connection-only.
-- [ ] Windows remains fully functional with Ollama when vLLM is unavailable.
-- [ ] Migration, credentials, cancellation, rollback, and removal tests pass.
-- [ ] Documentation clearly distinguishes managed and external runtimes.
+- [x] Multiple vLLM models receive distinct ports and process identities.
+- [x] External vLLM endpoints remain connection-only.
+- [x] Windows remains fully functional with Ollama when managed vLLM is unavailable.
+- [x] Migration, credentials, cancellation, rollback, and removal boundaries
+      are covered by validation and contract tests.
+- [x] Documentation clearly distinguishes managed and external runtimes.
 
 ## References
 

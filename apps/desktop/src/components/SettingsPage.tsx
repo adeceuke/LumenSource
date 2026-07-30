@@ -3,6 +3,7 @@ import { desktopCommands, messageFromError } from "../commands";
 import { browserMessages } from "../i18n";
 import type {
   ApplicationSettings,
+  ManagedVllmSupport,
   OllamaConnectionReport,
   RemoteTargetProfile,
   SettingsValidationError,
@@ -47,6 +48,10 @@ export function SettingsPage({
   const [restarting, setRestarting] = useState(false);
   const [restartRequired, setRestartRequired] = useState(false);
   const [connection, setConnection] = useState<OllamaConnectionReport>();
+  const [managedVllmSupport, setManagedVllmSupport] = useState<ManagedVllmSupport>();
+  const [huggingFaceToken, setHuggingFaceToken] = useState("");
+  const [huggingFaceTokenSaved, setHuggingFaceTokenSaved] = useState(false);
+  const [vllmBusy, setVllmBusy] = useState(false);
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(settings),
     [draft, settings],
@@ -77,7 +82,52 @@ export function SettingsPage({
     void desktopCommands.loadRemoteTargets()
       .then(setTargets)
       .catch(() => setTargets([]));
+    void desktopCommands.managedVllmSupport()
+      .then(setManagedVllmSupport)
+      .catch(() => setManagedVllmSupport(undefined));
+    void desktopCommands.runtimeSecretStatus("huggingFaceToken")
+      .then(setHuggingFaceTokenSaved)
+      .catch(() => setHuggingFaceTokenSaved(false));
   }, []);
+
+  const saveHuggingFaceToken = async () => {
+    if (!huggingFaceToken.trim()) return;
+    setVllmBusy(true);
+    try {
+      await desktopCommands.saveRuntimeSecret("huggingFaceToken", huggingFaceToken);
+      setHuggingFaceToken("");
+      setHuggingFaceTokenSaved(true);
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setVllmBusy(false);
+    }
+  };
+
+  const forgetHuggingFaceToken = async () => {
+    setVllmBusy(true);
+    try {
+      await desktopCommands.deleteRuntimeSecret("huggingFaceToken");
+      setHuggingFaceToken("");
+      setHuggingFaceTokenSaved(false);
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setVllmBusy(false);
+    }
+  };
+
+  const deleteVllmCaches = async () => {
+    if (!window.confirm(text.settings.vllm.deleteCachesConfirmation)) return;
+    setVllmBusy(true);
+    try {
+      await desktopCommands.deleteManagedVllmCaches(true);
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setVllmBusy(false);
+    }
+  };
 
   const update = (recipe: (next: ApplicationSettings) => void) => {
     setDraft((current) => {
@@ -205,7 +255,7 @@ export function SettingsPage({
               onChange={(event) => update((next) => { next.defaultRuntime = event.target.value as ApplicationSettings["defaultRuntime"]; })}
             >
               <option value="ollama">Ollama</option>
-              <option value="vllm" disabled>vLLM ({text.settings.comingNext})</option>
+              <option value="vllm" disabled>vLLM ({text.settings.externalConnections})</option>
             </select>
             <small>{text.settings.general.runtimeHint}</small>
           </label>
@@ -387,9 +437,75 @@ export function SettingsPage({
             )}
           </div>
         </div>
-        <div className="runtime-card disabled-runtime">
-          <div className="runtime-card-heading"><div><strong>vLLM</strong><span>{text.settings.comingNext}</span></div></div>
-          <p>{text.settings.runtimes.vllmPreview}</p>
+        <div className="runtime-card">
+          <div className="runtime-card-heading">
+            <div><strong>vLLM</strong><span>{text.settings.vllm.managedLinux}</span></div>
+          </div>
+          <p>{text.settings.vllm.managedHint}</p>
+          {managedVllmSupport && (
+            <p className={managedVllmSupport.supported ? "connection-ok" : "connection-error"}>
+              {managedVllmSupport.message}
+            </p>
+          )}
+          <div className="settings-grid">
+            <label>
+              <span>{text.settings.vllm.huggingFaceToken}</span>
+              <input
+                type="password"
+                value={huggingFaceToken}
+                autoComplete="off"
+                placeholder={huggingFaceTokenSaved ? text.settings.vllm.tokenSaved : text.settings.vllm.tokenOptional}
+                onChange={(event) => setHuggingFaceToken(event.target.value)}
+              />
+              <small>{text.settings.vllm.tokenHint}</small>
+            </label>
+            <label>
+              <span>{text.settings.vllm.gpuMemory}</span>
+              <input type="number" min={0.1} max={1} step={0.01} value={draft.vllm.gpuMemoryUtilization} onChange={(event) => update((next) => { next.vllm.gpuMemoryUtilization = Number(event.target.value); })} />
+              {fieldError("vllm.gpuMemoryUtilization")}
+            </label>
+            <label>
+              <span>{text.settings.vllm.contextLength}</span>
+              <input type="number" min={256} value={draft.vllm.maxContextLength ?? ""} placeholder={text.settings.ollama.auto} onChange={(event) => update((next) => { next.vllm.maxContextLength = event.target.value ? valueFromNumber(event.target.value) : undefined; })} />
+              {fieldError("vllm.maxContextLength")}
+            </label>
+            <label>
+              <span>{text.settings.vllm.concurrency}</span>
+              <input type="number" min={1} value={draft.vllm.maxConcurrentSequences} onChange={(event) => update((next) => { next.vllm.maxConcurrentSequences = valueFromNumber(event.target.value); })} />
+            </label>
+            <label>
+              <span>{text.settings.vllm.weightDtype}</span>
+              <input value={draft.vllm.weightDtype} onChange={(event) => update((next) => { next.vllm.weightDtype = event.target.value; })} />
+            </label>
+            <label>
+              <span>{text.settings.vllm.kvCacheDtype}</span>
+              <input value={draft.vllm.kvCacheDtype} onChange={(event) => update((next) => { next.vllm.kvCacheDtype = event.target.value; })} />
+            </label>
+            <label>
+              <span>{text.settings.vllm.tensorParallel}</span>
+              <input type="number" min={1} value={draft.vllm.tensorParallelSize} onChange={(event) => update((next) => { next.vllm.tensorParallelSize = valueFromNumber(event.target.value); })} />
+            </label>
+            <label>
+              <span>{text.settings.vllm.pipelineParallel}</span>
+              <input type="number" min={1} value={draft.vllm.pipelineParallelSize} onChange={(event) => update((next) => { next.vllm.pipelineParallelSize = valueFromNumber(event.target.value); })} />
+            </label>
+            <label>
+              <span>{text.settings.vllm.portRange}</span>
+              <span className="inline-number-fields">
+                <input type="number" min={1024} value={draft.vllm.managedPortStart} onChange={(event) => update((next) => { next.vllm.managedPortStart = valueFromNumber(event.target.value); })} />
+                <input type="number" min={1024} value={draft.vllm.managedPortEnd} onChange={(event) => update((next) => { next.vllm.managedPortEnd = valueFromNumber(event.target.value); })} />
+              </span>
+            </label>
+            <label className="check-setting">
+              <input type="checkbox" checked={draft.vllm.prefixCaching} onChange={(event) => update((next) => { next.vllm.prefixCaching = event.target.checked; })} />
+              <span><strong>{text.settings.vllm.prefixCaching}</strong></span>
+            </label>
+          </div>
+          <div className="runtime-actions">
+            <button className="secondary-button" type="button" disabled={vllmBusy || !huggingFaceToken.trim()} onClick={() => void saveHuggingFaceToken()}>{text.settings.vllm.saveToken}</button>
+            {huggingFaceTokenSaved && <button className="secondary-button" type="button" disabled={vllmBusy} onClick={() => void forgetHuggingFaceToken()}>{text.settings.vllm.forgetToken}</button>}
+            <button className="secondary-button" type="button" disabled={vllmBusy || !managedVllmSupport?.supported} onClick={() => void deleteVllmCaches()}>{text.settings.vllm.deleteCaches}</button>
+          </div>
         </div>
       </section>
 
@@ -459,7 +575,7 @@ export function SettingsPage({
           <h2 id="settings-about">{text.settings.about.title}</h2>
           <p>{text.settings.about.description}</p>
         </div>
-        <dl><div><dt>{text.settings.about.version}</dt><dd>0.4.0</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
+        <dl><div><dt>{text.settings.about.version}</dt><dd>0.5.0</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
       </section>
     </div>
   );

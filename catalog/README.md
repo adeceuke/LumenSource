@@ -31,9 +31,13 @@ tokens-per-second estimate.
 
 The model-list contract intentionally excludes runtime binary download and
 installation metadata. That metadata is security-sensitive and remains owned
-by Lumen Source's signed runtime catalog. The generated model list currently
-accepts only the `ollama` engine because that is the runtime implemented by the
-desktop application.
+by Lumen Source's signed runtime catalog. The generated model list accepts
+`ollama` and `vllm` engine metadata. Ollama variants use an exact tagged model
+reference. vLLM-compatible variants may also provide a Hugging Face repository
+identifier, pinned model and tokenizer revisions, task/runner information, and
+compatibility tags. These vLLM fields describe model compatibility only: an
+external vLLM service is connected from the installed model's Settings tab,
+while managed vLLM installation remains a separate delivery step.
 
 Schema v2 includes structured license permissions, obligations, restrictions,
 usage-policy links, geographic conditions, and minimum UI notice behavior. The

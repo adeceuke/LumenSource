@@ -2,8 +2,10 @@ pub mod bridge;
 mod bridge_types;
 pub mod commands;
 mod credential_store;
+mod managed_vllm;
 mod model_reconciliation;
 pub mod remote;
+mod runtime_registry;
 pub mod settings;
 pub mod telemetry;
 
@@ -45,6 +47,15 @@ pub fn run() {
             commands::runtime_secret_status,
             commands::save_runtime_secret,
             commands::delete_runtime_secret,
+            commands::test_vllm_connection,
+            commands::save_vllm_model,
+            commands::vllm_credential_status,
+            commands::save_model_settings,
+            commands::managed_vllm_support,
+            commands::runtime_migration_options,
+            commands::reinstall_with_runtime,
+            commands::runtime_diagnostics,
+            commands::delete_managed_vllm_caches,
             commands::detect_hardware,
             commands::machine_usage,
             commands::load_remote_targets,

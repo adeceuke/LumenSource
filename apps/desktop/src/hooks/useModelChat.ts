@@ -33,7 +33,7 @@ export function useModelChat(
     setEndpoint(undefined);
     setEndpointError(undefined);
     setEndpointLoading(true);
-    void desktopCommands.modelEndpoint(model.modelId, model.runtimeModelId, model.targetId)
+    void desktopCommands.modelEndpoint(model.id, model.modelId, model.runtimeModelId, model.targetId)
       .then((details) => {
         if (!disposed) setEndpoint(details);
       })
@@ -46,7 +46,7 @@ export function useModelChat(
     return () => {
       disposed = true;
     };
-  }, [endpointActive, errorFrom, model?.modelId, model?.runtimeModelId, model?.targetId]);
+  }, [endpointActive, errorFrom, model?.id, model?.modelId, model?.runtimeModelId, model?.targetId]);
 
   useEffect(() => {
     setDraft("");
@@ -66,7 +66,7 @@ export function useModelChat(
       setError(text.errors.startBeforeChat);
       return;
     }
-    if (model.managed === false || !model.runtimeModelId || !endpoint?.apiAvailable || !endpoint.chatAvailable) {
+    if (!model.runtimeCapabilities.chat || !model.runtimeModelId || !endpoint?.apiAvailable || !endpoint.chatAvailable) {
       setError(text.errors.chatUnavailable);
       return;
     }
@@ -84,6 +84,7 @@ export function useModelChat(
     try {
       await desktopCommands.chat(
         model.modelId,
+        model.id,
         model.runtimeModelId,
         model.targetId,
         requestMessages,

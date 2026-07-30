@@ -583,7 +583,7 @@ mod tests {
                 report_id: Uuid::new_v4(),
                 period_start: format!("2025-{index:02}-01"),
                 period_end: format!("2025-{index:02}-07"),
-                app_version: "0.4.0".to_owned(),
+                app_version: "0.5.0".to_owned(),
                 platform: "linux".to_owned(),
                 architecture: "x86_64".to_owned(),
                 catalog: BTreeMap::new(),

@@ -7,7 +7,7 @@ import {
   messageFromError,
 } from "../commands";
 import { browserMessages } from "../i18n";
-import { emptyRemoteTarget, lifecycleLog } from "../modelUi";
+import { emptyRemoteTarget, lifecycleLog, runtimeCapabilities } from "../modelUi";
 import type {
   CatalogSummary,
   EndpointDetails,
@@ -400,7 +400,9 @@ export function useModelWizard({
           wizardTargetId ?? "local",
         );
         const result = wizardLocation === "remote"
-          ? available.filter((recommendation) => recommendation.runtimeId === "ollama")
+          ? available.filter(
+            (recommendation) => runtimeCapabilities(recommendation.runtimeId).remoteConnection,
+          )
           : available;
         if (!result.length) {
           throw new Error(text.errors.noSupportedModel);
@@ -462,7 +464,9 @@ export function useModelWizard({
         name: selected.name,
         modelId: selected.modelId,
         modelName: selected.name,
+        runtimeId: selected.runtimeId as RunningModelEntry["runtimeId"],
         runtimeModelId,
+        runtimeCapabilities: runtimeCapabilities(selected.runtimeId),
         version: selected.version,
         location: wizardLocation,
         targetId,

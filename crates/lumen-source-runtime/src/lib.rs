@@ -99,6 +99,22 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct ChatOptions {
+    pub system_prompt: Option<String>,
+    pub temperature: Option<f32>,
+    pub max_output_tokens: Option<u32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    pub min_p: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub seed: Option<i64>,
+    pub stop_sequences: Vec<String>,
+    pub structured_output: Option<bool>,
+    pub reasoning_level: Option<String>,
+    pub keep_alive: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChatProgress {
     Content(String),
@@ -107,6 +123,29 @@ pub enum ChatProgress {
 
 pub trait ChatReporter: Send + Sync {
     fn report(&self, progress: ChatProgress);
+}
+
+fn messages_with_system_prompt(
+    messages: &[ChatMessage],
+    system_prompt: Option<&str>,
+) -> Vec<ChatMessage> {
+    let Some(system_prompt) = system_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return messages.to_vec();
+    };
+    let mut combined = Vec::with_capacity(messages.len() + 1);
+    combined.push(ChatMessage {
+        role: "system".to_owned(),
+        content: system_prompt.to_owned(),
+    });
+    combined.extend_from_slice(messages);
+    combined
+}
+
+fn slice_is_empty<T>(values: &[T]) -> bool {
+    values.is_empty()
 }
 
 impl<F> ChatReporter for F
@@ -156,6 +195,8 @@ pub enum RuntimeError {
     Http(#[from] reqwest::Error),
     #[error("runtime returned HTTP {status}: {body}")]
     HttpStatus { status: StatusCode, body: String },
+    #[error("runtime authentication was rejected; check the API key")]
+    AuthenticationRejected,
     #[error("runtime reported an error: {0}")]
     Remote(String),
     #[error("runtime response was invalid: {0}")]
@@ -562,6 +603,59 @@ impl OllamaRuntime {
         Ok(())
     }
 
+    /// Creates or replaces a named Ollama model whose persistent defaults are
+    /// derived from an already installed base model.
+    pub async fn create_derived_model(
+        &self,
+        name: &str,
+        base_model: &str,
+        options: &ChatOptions,
+    ) -> Result<(), RuntimeError> {
+        let mut parameters = serde_json::Map::new();
+        for (name, value) in [
+            (
+                "temperature",
+                options.temperature.map(serde_json::Value::from),
+            ),
+            (
+                "num_predict",
+                options.max_output_tokens.map(serde_json::Value::from),
+            ),
+            ("top_p", options.top_p.map(serde_json::Value::from)),
+            ("top_k", options.top_k.map(serde_json::Value::from)),
+            ("min_p", options.min_p.map(serde_json::Value::from)),
+            (
+                "repeat_penalty",
+                options.repetition_penalty.map(serde_json::Value::from),
+            ),
+            ("seed", options.seed.map(serde_json::Value::from)),
+        ] {
+            if let Some(value) = value {
+                parameters.insert(name.to_owned(), value);
+            }
+        }
+        if !options.stop_sequences.is_empty() {
+            parameters.insert(
+                "stop".to_owned(),
+                serde_json::Value::from(options.stop_sequences.clone()),
+            );
+        }
+        let response = self
+            .client
+            .post(self.api_url("api/create")?)
+            .json(&CreateRequest {
+                model: name,
+                from: base_model,
+                system: options.system_prompt.as_deref(),
+                parameters,
+                stream: false,
+            })
+            .send()
+            .await?;
+        Self::checked(response).await?;
+        Ok(())
+    }
+
     pub async fn chat_cancellable(
         &self,
         model: &str,
@@ -569,15 +663,36 @@ impl OllamaRuntime {
         reporter: &dyn ChatReporter,
         cancellation: &CancellationToken,
     ) -> Result<(), RuntimeError> {
+        self.chat_with_options_cancellable(
+            model,
+            messages,
+            &ChatOptions::default(),
+            reporter,
+            cancellation,
+        )
+        .await
+    }
+
+    pub async fn chat_with_options_cancellable(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        options: &ChatOptions,
+        reporter: &dyn ChatReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
         cancellation.check()?;
+        let messages = messages_with_system_prompt(messages, options.system_prompt.as_deref());
         let request = self
             .client
             .post(self.api_url("api/chat")?)
             .json(&ChatRequest {
                 model,
-                messages,
+                messages: &messages,
                 stream: true,
-                keep_alive: -1,
+                keep_alive: options.keep_alive.as_deref().unwrap_or("-1"),
+                format: options.structured_output.unwrap_or(false).then_some("json"),
+                options: OllamaChatOptions::from(options),
             })
             .send();
         let response = tokio::select! {
@@ -671,6 +786,16 @@ struct DeleteRequest<'a> {
     model: &'a str,
 }
 
+#[derive(Serialize)]
+struct CreateRequest<'a> {
+    model: &'a str,
+    from: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<&'a str>,
+    parameters: serde_json::Map<String, serde_json::Value>,
+    stream: bool,
+}
+
 #[derive(Deserialize)]
 struct PullResponse {
     status: String,
@@ -685,7 +810,45 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     stream: bool,
-    keep_alive: i64,
+    keep_alive: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<&'a str>,
+    options: OllamaChatOptions<'a>,
+}
+
+#[derive(Serialize)]
+struct OllamaChatOptions<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_predict: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repeat_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<i64>,
+    #[serde(skip_serializing_if = "slice_is_empty")]
+    stop: &'a [String],
+}
+
+impl<'a> From<&'a ChatOptions> for OllamaChatOptions<'a> {
+    fn from(options: &'a ChatOptions) -> Self {
+        Self {
+            temperature: options.temperature,
+            num_predict: options.max_output_tokens,
+            top_p: options.top_p,
+            top_k: options.top_k,
+            min_p: options.min_p,
+            repeat_penalty: options.repetition_penalty,
+            seed: options.seed,
+            stop: &options.stop_sequences,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -855,6 +1018,273 @@ impl Runtime for OllamaRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
     }
+}
+
+/// Client for an externally managed vLLM OpenAI-compatible server.
+///
+/// Lifecycle operations intentionally do not exist here: Lumen Source may
+/// connect to this service, but must never start, stop, or reconfigure it.
+#[derive(Clone)]
+pub struct VllmRuntime {
+    client: Client,
+    endpoint: RuntimeEndpoint,
+}
+
+impl VllmRuntime {
+    pub fn new(
+        base_url: &str,
+        verify_tls: bool,
+        connection_timeout: std::time::Duration,
+        request_timeout: std::time::Duration,
+    ) -> Result<Self, RuntimeError> {
+        let mut url =
+            Url::parse(base_url).map_err(|error| RuntimeError::InvalidUrl(error.to_string()))?;
+        let path = url.path().trim_end_matches('/').to_owned();
+        if let Some(api_root) = path.strip_suffix("/v1") {
+            url.set_path(if api_root.is_empty() { "/" } else { api_root });
+        }
+        if !url.path().ends_with('/') {
+            url.set_path(&format!("{}/", url.path()));
+        }
+        let client = Client::builder()
+            .connect_timeout(connection_timeout)
+            .timeout(request_timeout)
+            .danger_accept_invalid_certs(!verify_tls)
+            .build()?;
+        Ok(Self {
+            client,
+            endpoint: RuntimeEndpoint { base_url: url },
+        })
+    }
+
+    fn api_url(&self, path: &str) -> Result<Url, RuntimeError> {
+        self.endpoint
+            .base_url
+            .join(path)
+            .map_err(|error| RuntimeError::InvalidUrl(error.to_string()))
+    }
+
+    fn authenticated(
+        &self,
+        request: reqwest::RequestBuilder,
+        api_key: Option<&str>,
+    ) -> reqwest::RequestBuilder {
+        match api_key.filter(|key| !key.is_empty()) {
+            Some(api_key) => request.bearer_auth(api_key),
+            None => request,
+        }
+    }
+
+    async fn checked(response: reqwest::Response) -> Result<reqwest::Response, RuntimeError> {
+        if matches!(
+            response.status(),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+        ) {
+            return Err(RuntimeError::AuthenticationRejected);
+        }
+        if response.status().is_success() {
+            Ok(response)
+        } else {
+            // An externally managed service controls its response body. Do not
+            // copy that body into application errors because it could echo an
+            // Authorization header or other sensitive request data.
+            Err(RuntimeError::Remote(format!(
+                "vLLM returned HTTP {}",
+                response.status()
+            )))
+        }
+    }
+
+    pub async fn models(&self, api_key: Option<&str>) -> Result<Vec<String>, RuntimeError> {
+        let request = self.authenticated(self.client.get(self.api_url("v1/models")?), api_key);
+        let response = Self::checked(request.send().await?).await?;
+        let models: VllmModelList = response.json().await?;
+        Ok(models.data.into_iter().map(|model| model.id).collect())
+    }
+
+    pub async fn health(&self, api_key: Option<&str>) -> Result<(), RuntimeError> {
+        self.models(api_key).await.map(|_| ())
+    }
+
+    pub async fn chat(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        api_key: Option<&str>,
+        reporter: &dyn ChatReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        self.chat_with_options(
+            model,
+            messages,
+            api_key,
+            &ChatOptions::default(),
+            reporter,
+            cancellation,
+        )
+        .await
+    }
+
+    pub async fn chat_with_options(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        api_key: Option<&str>,
+        options: &ChatOptions,
+        reporter: &dyn ChatReporter,
+        cancellation: &CancellationToken,
+    ) -> Result<(), RuntimeError> {
+        cancellation.check()?;
+        let messages = messages_with_system_prompt(messages, options.system_prompt.as_deref());
+        let request = self.authenticated(
+            self.client
+                .post(self.api_url("v1/chat/completions")?)
+                .json(&VllmChatRequest {
+                    model,
+                    messages: &messages,
+                    stream: false,
+                    temperature: options.temperature,
+                    max_tokens: options.max_output_tokens,
+                    top_p: options.top_p,
+                    top_k: options.top_k,
+                    min_p: options.min_p,
+                    repetition_penalty: options.repetition_penalty,
+                    seed: options.seed,
+                    stop: &options.stop_sequences,
+                    response_format: options.structured_output.unwrap_or(false).then_some(
+                        VllmResponseFormat {
+                            kind: "json_object",
+                        },
+                    ),
+                    reasoning_effort: options.reasoning_level.as_deref(),
+                }),
+            api_key,
+        );
+        let response = tokio::select! {
+            _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
+            response = request.send() => response?,
+        };
+        let response: VllmChatResponse = Self::checked(response).await?.json().await?;
+        cancellation.check()?;
+        let content = response
+            .choices
+            .into_iter()
+            .next()
+            .map(|choice| choice.message.content)
+            .ok_or_else(|| {
+                RuntimeError::Remote("vLLM returned no chat completion choices".to_owned())
+            })?;
+        if !content.is_empty() {
+            reporter.report(ChatProgress::Content(content));
+        }
+        reporter.report(ChatProgress::Done);
+        Ok(())
+    }
+
+    pub async fn embeddings(
+        &self,
+        model: &str,
+        input: &str,
+        api_key: Option<&str>,
+    ) -> Result<Vec<f32>, RuntimeError> {
+        let request = self.authenticated(
+            self.client
+                .post(self.api_url("v1/embeddings")?)
+                .json(&VllmEmbeddingRequest { model, input }),
+            api_key,
+        );
+        let response: VllmEmbeddingResponse =
+            Self::checked(request.send().await?).await?.json().await?;
+        response
+            .data
+            .into_iter()
+            .next()
+            .map(|embedding| embedding.embedding)
+            .ok_or_else(|| RuntimeError::Remote("vLLM returned no embedding data".to_owned()))
+    }
+
+    pub fn endpoint(&self) -> RuntimeEndpoint {
+        self.endpoint.clone()
+    }
+}
+
+#[derive(Deserialize)]
+struct VllmModelList {
+    #[serde(default)]
+    data: Vec<VllmModel>,
+}
+
+#[derive(Deserialize)]
+struct VllmModel {
+    id: String,
+}
+
+#[derive(Serialize)]
+struct VllmChatRequest<'a> {
+    model: &'a str,
+    messages: &'a [ChatMessage],
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repetition_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<i64>,
+    #[serde(skip_serializing_if = "slice_is_empty")]
+    stop: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<VllmResponseFormat<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct VllmResponseFormat<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
+}
+
+#[derive(Deserialize)]
+struct VllmChatResponse {
+    #[serde(default)]
+    choices: Vec<VllmChatChoice>,
+}
+
+#[derive(Deserialize)]
+struct VllmChatChoice {
+    message: VllmChatMessage,
+}
+
+#[derive(Deserialize)]
+struct VllmChatMessage {
+    #[serde(default)]
+    content: String,
+}
+
+#[derive(Serialize)]
+struct VllmEmbeddingRequest<'a> {
+    model: &'a str,
+    input: &'a str,
+}
+
+#[derive(Deserialize)]
+struct VllmEmbeddingResponse {
+    #[serde(default)]
+    data: Vec<VllmEmbedding>,
+}
+
+#[derive(Deserialize)]
+struct VllmEmbedding {
+    #[serde(default)]
+    embedding: Vec<f32>,
 }
 
 fn report_pull_line(line: &[u8], progress: &dyn ProgressReporter) -> Result<(), RuntimeError> {
@@ -1351,6 +1781,36 @@ fn hide_console_window(_command: &mut Command) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+
+    fn serve_json_once(status: &str, body: &str) -> (String, std::thread::JoinHandle<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap_or_else(|error| panic!("test server should bind: {error}"));
+        let address = listener
+            .local_addr()
+            .unwrap_or_else(|error| panic!("test server should have an address: {error}"));
+        let status = status.to_owned();
+        let body = body.to_owned();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener
+                .accept()
+                .unwrap_or_else(|error| panic!("test server should accept a request: {error}"));
+            let mut request = vec![0_u8; 16 * 1024];
+            let read = socket
+                .read(&mut request)
+                .unwrap_or_else(|error| panic!("test server should read a request: {error}"));
+            request.truncate(read);
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket
+                .write_all(response.as_bytes())
+                .unwrap_or_else(|error| panic!("test server should write a response: {error}"));
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        (format!("http://{address}"), server)
+    }
 
     #[test]
     fn artifact_name_must_be_a_single_component() {
@@ -1448,6 +1908,62 @@ mod tests {
                 "keep_alive": -1
             })
         );
+    }
+
+    #[test]
+    fn ollama_chat_options_serialize_request_time_defaults() {
+        let options = ChatOptions {
+            temperature: Some(0.25),
+            max_output_tokens: Some(256),
+            top_p: Some(0.9),
+            stop_sequences: vec!["END".to_owned()],
+            structured_output: Some(true),
+            keep_alive: Some("10m".to_owned()),
+            ..ChatOptions::default()
+        };
+        let messages = messages_with_system_prompt(
+            &[ChatMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+            Some("Be concise"),
+        );
+        let serialized = serde_json::to_value(ChatRequest {
+            model: "qwen:latest",
+            messages: &messages,
+            stream: true,
+            keep_alive: options.keep_alive.as_deref().unwrap_or("-1"),
+            format: options
+                .structured_output
+                .and_then(|enabled| enabled.then_some("json")),
+            options: (&options).into(),
+        })
+        .unwrap_or_else(|error| panic!("chat request should serialize: {error}"));
+
+        assert_eq!(serialized["messages"][0]["role"], "system");
+        assert_eq!(serialized["messages"][0]["content"], "Be concise");
+        assert_eq!(serialized["keep_alive"], "10m");
+        assert_eq!(serialized["format"], "json");
+        assert_eq!(serialized["options"]["num_predict"], 256);
+        assert_eq!(serialized["options"]["stop"][0], "END");
+    }
+
+    #[test]
+    fn derived_ollama_request_keeps_parameters_out_of_the_model_name() {
+        let mut parameters = serde_json::Map::new();
+        parameters.insert("temperature".to_owned(), serde_json::json!(0.2));
+        let serialized = serde_json::to_value(CreateRequest {
+            model: "lumen-qwen",
+            from: "qwen:latest",
+            system: Some("Be concise"),
+            parameters,
+            stream: false,
+        })
+        .unwrap_or_else(|error| panic!("create request should serialize: {error}"));
+
+        assert_eq!(serialized["model"], "lumen-qwen");
+        assert_eq!(serialized["from"], "qwen:latest");
+        assert_eq!(serialized["parameters"]["temperature"], 0.2);
     }
 
     #[test]
@@ -1562,5 +2078,134 @@ mod tests {
             runtime.installed_models().await,
             Ok(models) if models.is_empty()
         ));
+    }
+
+    #[tokio::test]
+    async fn vllm_discovers_models_with_bearer_authentication() {
+        let (endpoint, server) = serve_json_once("200 OK", r#"{"data":[{"id":"Qwen/Qwen3-8B"}]}"#);
+        let runtime = VllmRuntime::new(
+            &format!("{endpoint}/v1"),
+            true,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap_or_else(|error| panic!("test vLLM client should build: {error}"));
+
+        let models = runtime
+            .models(Some("test-secret"))
+            .await
+            .unwrap_or_else(|error| panic!("model discovery should succeed: {error}"));
+        let request = server
+            .join()
+            .unwrap_or_else(|_| panic!("test server should finish"));
+
+        assert_eq!(models, ["Qwen/Qwen3-8B"]);
+        assert!(
+            request.starts_with("GET /v1/models HTTP/1.1"),
+            "unexpected request: {request:?}"
+        );
+        assert!(!request.starts_with("GET /v1/v1/"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer test-secret"));
+    }
+
+    #[tokio::test]
+    async fn vllm_reports_rejected_credentials_without_exposing_them() {
+        let (endpoint, server) =
+            serve_json_once("401 Unauthorized", r#"{"detail":"Unauthorized"}"#);
+        let runtime = VllmRuntime::new(
+            &endpoint,
+            true,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap_or_else(|error| panic!("test vLLM client should build: {error}"));
+
+        let result = runtime.models(Some("do-not-log-this")).await;
+        let _request = server
+            .join()
+            .unwrap_or_else(|_| panic!("test server should finish"));
+
+        assert!(matches!(result, Err(RuntimeError::AuthenticationRejected)));
+        let message = result
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(!message.contains("do-not-log-this"));
+    }
+
+    #[tokio::test]
+    async fn vllm_chat_reports_content_and_completion() {
+        let (endpoint, server) = serve_json_once(
+            "200 OK",
+            r#"{"choices":[{"message":{"role":"assistant","content":"Hello from vLLM"}}]}"#,
+        );
+        let runtime = VllmRuntime::new(
+            &endpoint,
+            true,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap_or_else(|error| panic!("test vLLM client should build: {error}"));
+        let events = std::sync::Mutex::new(Vec::new());
+        let reporter = |event| {
+            if let Ok(mut values) = events.lock() {
+                values.push(event);
+            }
+        };
+
+        let result = runtime
+            .chat(
+                "Qwen/Qwen3-8B",
+                &[ChatMessage {
+                    role: "user".to_owned(),
+                    content: "Hello".to_owned(),
+                }],
+                None,
+                &reporter,
+                &CancellationToken::new(),
+            )
+            .await;
+        let request = server
+            .join()
+            .unwrap_or_else(|_| panic!("test server should finish"));
+
+        assert!(result.is_ok());
+        assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        assert_eq!(
+            events
+                .lock()
+                .map(|values| values.clone())
+                .unwrap_or_default(),
+            [
+                ChatProgress::Content("Hello from vLLM".to_owned()),
+                ChatProgress::Done
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn vllm_embeddings_use_the_openai_compatible_endpoint() {
+        let (endpoint, server) =
+            serve_json_once("200 OK", r#"{"data":[{"embedding":[0.25,-0.5,1.0]}]}"#);
+        let runtime = VllmRuntime::new(
+            &endpoint,
+            true,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap_or_else(|error| panic!("test vLLM client should build: {error}"));
+
+        let embedding = runtime
+            .embeddings("BAAI/bge-m3", "hello", None)
+            .await
+            .unwrap_or_else(|error| panic!("embedding should succeed: {error}"));
+        let request = server
+            .join()
+            .unwrap_or_else(|_| panic!("test server should finish"));
+
+        assert_eq!(embedding, [0.25, -0.5, 1.0]);
+        assert!(request.starts_with("POST /v1/embeddings HTTP/1.1"));
     }
 }

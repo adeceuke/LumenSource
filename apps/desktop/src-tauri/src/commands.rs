@@ -1,8 +1,10 @@
 use crate::bridge::{
     CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, InstallOptions,
     MachineUsageSnapshot, PerformanceSnapshot, PersistedModelEntry, PreflightReport,
-    Recommendation, RemoteCredentialStatus, RuntimeStatus, SharedCoreAdapter,
+    Recommendation, RemoteCredentialStatus, RuntimeDiagnostics, RuntimeMigrationOption,
+    RuntimeMigrationReport, RuntimeStatus, SharedCoreAdapter,
 };
+use crate::managed_vllm::ManagedVllmSupport;
 use lumen_source_runtime::ChatMessage;
 use serde::Deserialize;
 use tauri::{ipc::Channel, AppHandle, State};
@@ -10,8 +12,9 @@ use zeroize::Zeroizing;
 
 use crate::remote::{RemoteConnectionReport, RemoteTargetConfig, RemoteTargetProfile};
 use crate::settings::{
-    validate_settings as validate_application_settings, ApplicationSettings,
-    OllamaConnectionReport, RuntimeSecretKind, SettingsSaveReport, SettingsValidationError,
+    validate_settings as validate_application_settings, ApplicationSettings, ExternalVllmConfig,
+    ModelSettings, ModelSettingsSaveReport, OllamaConnectionReport, RuntimeSecretKind,
+    SettingsSaveReport, SettingsValidationError, VllmConnectionReport,
 };
 
 #[tauri::command]
@@ -85,6 +88,101 @@ pub async fn save_runtime_secret(kind: RuntimeSecretKind, secret: String) -> Res
 #[tauri::command]
 pub async fn delete_runtime_secret(kind: RuntimeSecretKind) -> Result<(), String> {
     crate::credential_store::delete_runtime_secret(kind).await
+}
+
+#[tauri::command]
+pub async fn test_vllm_connection(
+    core: State<'_, SharedCoreAdapter>,
+    config: ExternalVllmConfig,
+    api_key: Option<String>,
+    entry_id: Option<String>,
+) -> Result<VllmConnectionReport, String> {
+    Ok(core
+        .test_vllm_connection(
+            config,
+            api_key.filter(|key| !key.is_empty()).map(Zeroizing::new),
+            entry_id.as_deref(),
+        )
+        .await)
+}
+
+#[tauri::command]
+pub async fn save_vllm_model(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: Option<String>,
+    display_name: String,
+    config: ExternalVllmConfig,
+    api_key: Option<String>,
+    clear_api_key: bool,
+) -> Result<PersistedModelEntry, String> {
+    core.save_vllm_model(
+        entry_id,
+        display_name,
+        config,
+        api_key.filter(|key| !key.is_empty()).map(Zeroizing::new),
+        clear_api_key,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn vllm_credential_status(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+) -> Result<bool, String> {
+    core.vllm_credential_status(&entry_id).await
+}
+
+#[tauri::command]
+pub async fn save_model_settings(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+    settings: ModelSettings,
+    apply_restart: bool,
+) -> Result<ModelSettingsSaveReport, String> {
+    core.save_model_settings(&entry_id, settings, apply_restart)
+        .await
+}
+
+#[tauri::command]
+pub async fn managed_vllm_support(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<ManagedVllmSupport, String> {
+    Ok(core.managed_vllm_support().await)
+}
+
+#[tauri::command]
+pub async fn runtime_migration_options(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+) -> Result<Vec<RuntimeMigrationOption>, String> {
+    core.runtime_migration_options(&entry_id).await
+}
+
+#[tauri::command]
+pub async fn reinstall_with_runtime(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+    target_runtime: String,
+) -> Result<RuntimeMigrationReport, String> {
+    core.reinstall_with_runtime(&entry_id, &target_runtime)
+        .await
+}
+
+#[tauri::command]
+pub async fn runtime_diagnostics(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+) -> Result<RuntimeDiagnostics, String> {
+    core.runtime_diagnostics(&entry_id).await
+}
+
+#[tauri::command]
+pub async fn delete_managed_vllm_caches(
+    core: State<'_, SharedCoreAdapter>,
+    confirmed: bool,
+) -> Result<(), String> {
+    core.delete_managed_vllm_caches(confirmed).await
 }
 
 #[derive(Deserialize)]
@@ -242,11 +340,13 @@ pub async fn cancel_install(core: State<'_, SharedCoreAdapter>) -> Result<bool, 
 #[tauri::command]
 pub async fn start_runtime(
     core: State<'_, SharedCoreAdapter>,
+    entry_id: Option<String>,
     model_id: String,
     target_id: Option<String>,
     password: Option<String>,
 ) -> Result<RuntimeStatus, String> {
     core.start(
+        entry_id.as_deref(),
         model_id,
         normalize_target_id(target_id),
         password.map(Zeroizing::new),
@@ -257,11 +357,13 @@ pub async fn start_runtime(
 #[tauri::command]
 pub async fn stop_runtime(
     core: State<'_, SharedCoreAdapter>,
+    entry_id: Option<String>,
     model_id: String,
     target_id: Option<String>,
     password: Option<String>,
 ) -> Result<RuntimeStatus, String> {
     core.stop(
+        entry_id.as_deref(),
         model_id,
         normalize_target_id(target_id),
         password.map(Zeroizing::new),
@@ -277,11 +379,13 @@ pub async fn runtime_status(core: State<'_, SharedCoreAdapter>) -> Result<Runtim
 #[tauri::command]
 pub async fn model_performance(
     core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
     model_id: String,
     runtime_model_id: String,
     target_id: Option<String>,
 ) -> Result<PerformanceSnapshot, String> {
     core.performance(
+        &entry_id,
         &model_id,
         &runtime_model_id,
         &normalize_target_id(target_id),
@@ -300,11 +404,13 @@ pub async fn endpoint_details(
 #[tauri::command]
 pub async fn model_endpoint_details(
     core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
     model_id: String,
     runtime_model_id: String,
     target_id: Option<String>,
 ) -> Result<EndpointDetails, String> {
     core.model_endpoint(
+        &entry_id,
         &model_id,
         &runtime_model_id,
         &normalize_target_id(target_id),
@@ -315,6 +421,7 @@ pub async fn model_endpoint_details(
 #[tauri::command]
 pub async fn chat_with_model(
     core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
     model_id: String,
     runtime_model_id: String,
     target_id: Option<String>,
@@ -325,6 +432,7 @@ pub async fn chat_with_model(
         let _ = on_event.send(event);
     };
     core.chat(
+        &entry_id,
         &model_id,
         &runtime_model_id,
         &normalize_target_id(target_id),

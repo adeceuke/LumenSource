@@ -263,22 +263,36 @@ export function RenameDialog({ inputRef, value, onChange, onKeyDown, onCancel, o
 }
 
 interface RemoveDialogProps {
+  model?: RunningModelEntry;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }
 
-export function RemoveDialog({ busy, onCancel, onConfirm }: RemoveDialogProps) {
+export function RemoveDialog({ model, busy, onCancel, onConfirm }: RemoveDialogProps) {
+  const external = model?.runtimeCapabilities.lifecycle === "external";
+  const managedVllm = model?.runtimeId === "vllm"
+    && model.runtimeCapabilities.lifecycle === "managed";
+  const title = external
+    ? text.dialogs.removeExternalTitle
+    : managedVllm
+      ? text.dialogs.removeManagedVllmTitle
+      : text.dialogs.removeTitle;
+  const description = external
+    ? text.dialogs.removeExternalDescription
+    : managedVllm
+      ? text.dialogs.removeManagedVllmDescription
+      : text.dialogs.removeDescription;
   return (
     <div className="modal-backdrop" onClick={() => {
       if (!busy) onCancel();
     }}>
       <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-        <h3>{text.dialogs.removeTitle}</h3>
-        <p>{text.dialogs.removeDescription}</p>
+        <h3>{title}</h3>
+        <p>{description}</p>
         <div className="modal-actions">
           <button className="secondary-button" type="button" disabled={busy} onClick={onCancel}>{text.common.cancel}</button>
-          <button className="primary-button" type="button" disabled={busy} onClick={onConfirm}>{busy ? text.dialogs.removing : text.dialogs.removeModel}</button>
+          <button className="primary-button" type="button" disabled={busy} onClick={onConfirm}>{busy ? text.dialogs.removing : external ? text.dialogs.removeConnection : text.dialogs.removeModel}</button>
         </div>
       </div>
     </div>

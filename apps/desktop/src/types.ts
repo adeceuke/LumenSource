@@ -207,7 +207,10 @@ export interface RunningModelEntry {
   name: string;
   modelId: string;
   modelName: string;
+  runtimeId: "ollama" | "vllm" | "dummy-runtime";
   runtimeModelId?: string;
+  runtimeCapabilities: RuntimeCapabilities;
+  modelSettings?: ModelSettings;
   version: string;
   location: "local" | "remote";
   targetId: string;
@@ -259,7 +262,141 @@ export interface ApplicationSettings {
     allowedOrigins: string[];
     debugLogging: boolean;
   };
-  vllm: Record<string, never>;
+  vllm: {
+    huggingFaceCacheDirectory?: string;
+    gpuSelection?: string;
+    gpuMemoryUtilization: number;
+    maxContextLength?: number;
+    maxConcurrentSequences: number;
+    prefixCaching: boolean;
+    weightDtype: string;
+    quantization?: string;
+    kvCacheDtype: string;
+    cpuOffloadGib: number;
+    tensorParallelSize: number;
+    pipelineParallelSize: number;
+    bindAddress: string;
+    managedPortStart: number;
+    managedPortEnd: number;
+    pinnedRuntimeVersion: string;
+  };
+}
+
+export interface RuntimeCapabilities {
+  managedModelStorage: boolean;
+  multipleModels: boolean;
+  chat: boolean;
+  embeddings: boolean;
+  pooling: boolean;
+  modelStartStop: boolean;
+  globalConfiguration: boolean;
+  perModelConfiguration: boolean;
+  artifactAcquisition: boolean;
+  remoteConnection: boolean;
+  lifecycle?: "managed" | "external" | "simulated";
+}
+
+export interface ModelSettings {
+  runtimeManagementMode?: "managed" | "external";
+  inferenceTask?: "chat" | "embeddings";
+  endpoint?: string;
+  verifyTls: boolean;
+  connectionTimeoutSeconds: number;
+  requestTimeoutSeconds: number;
+  systemPrompt?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  repetitionPenalty?: number;
+  seed?: number;
+  stopSequences: string[];
+  structuredOutput?: boolean;
+  reasoningLevel?: "low" | "medium" | "high";
+  contextLength?: number;
+  keepAlive?: string;
+  loadOnStartup?: boolean;
+  preferredAccelerator?: string;
+  ollamaDerivedModelName?: string;
+  ollamaPersistentParameters: boolean;
+  vllmModelRevision?: string;
+  vllmTokenizerRevision?: string;
+  vllmServedModelName?: string;
+  vllmTask?: string;
+  vllmRunner?: string;
+  vllmWeightDtype?: string;
+  vllmQuantization?: string;
+  vllmGpuMemoryUtilization?: number;
+  vllmMaxConcurrentSequences?: number;
+  vllmPrefixCaching?: boolean;
+  vllmKvCacheDtype?: string;
+  vllmCpuOffloadGib?: number;
+  vllmTensorParallelSize?: number;
+  vllmPipelineParallelSize?: number;
+  managedContainerEngine?: string;
+  managedContainerName?: string;
+  managedPort?: number;
+}
+
+export interface ModelSettingsSaveReport {
+  model: RunningModelEntry;
+  restartRequired: boolean;
+  restarted: boolean;
+  message: string;
+}
+
+export interface ManagedVllmSupport {
+  supported: boolean;
+  platform: string;
+  containerEngine?: string;
+  nvidiaAvailable: boolean;
+  message: string;
+}
+
+export interface RuntimeMigrationOption {
+  runtimeId: RuntimeId;
+  variantId?: string;
+  available: boolean;
+  reason: string;
+}
+
+export interface RuntimeMigrationReport {
+  replacement: RunningModelEntry;
+  sourceEntryId: string;
+  sourceCanBeRemoved: boolean;
+  message: string;
+}
+
+export interface RuntimeDiagnostics {
+  runtimeId: string;
+  version: string;
+  health: string;
+  lifecycle: string;
+  endpoint?: string;
+  effectiveContextLength?: number;
+  effectiveKeepAlive?: string;
+  managedContainerEngine?: string;
+  managedContainerName?: string;
+  managedPort?: number;
+  recentLogs: string[];
+}
+
+export interface ExternalVllmConfig {
+  endpoint: string;
+  servedModel: string;
+  inferenceTask: "chat" | "embeddings";
+  verifyTls: boolean;
+  connectionTimeoutSeconds: number;
+  requestTimeoutSeconds: number;
+}
+
+export interface VllmConnectionReport {
+  healthy: boolean;
+  authenticated: boolean;
+  endpoint: string;
+  models: string[];
+  message: string;
 }
 
 export interface SettingsValidationError {

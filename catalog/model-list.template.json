@@ -70,7 +70,13 @@
           "runtime": {
             "engine": "ollama",
             "model_ref": "example-model:8b-q4_K_M",
-            "digest": null
+            "digest": null,
+            "hugging_face_model_id": null,
+            "model_revision": null,
+            "tokenizer_revision": null,
+            "task": "generate",
+            "runner": null,
+            "compatibility": ["ollama"]
           },
           "parameters_billion": 8.0,
           "quantization": "Q4_K_M",

@@ -60,7 +60,7 @@ The request has this shape:
       "reportId": "b7e5708d-50dc-4fd8-80fa-d9477211778b",
       "periodStart": "2026-07-20",
       "periodEnd": "2026-07-26",
-      "appVersion": "0.4.0",
+      "appVersion": "0.5.0",
       "platform": "linux",
       "architecture": "x86_64",
       "catalog": {
