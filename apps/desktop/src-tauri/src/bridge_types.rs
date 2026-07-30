@@ -22,6 +22,8 @@ pub struct PersistedModelEntry {
     pub runtime_capabilities: RuntimeCapabilities,
     #[serde(default)]
     pub model_settings: Option<ModelSettings>,
+    #[serde(default)]
+    pub installation_validation: Option<InstallationValidationReport>,
     pub version: String,
     pub location: String,
     #[serde(default = "local_target_id")]
@@ -67,6 +69,32 @@ pub struct PerformanceProfileReport {
     pub available_memory_bytes: u64,
     pub fits_detected_memory: bool,
     pub warnings: Vec<String>,
+    pub hardware_summary: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallationValidationReport {
+    pub passed: bool,
+    pub capability: String,
+    pub runtime_id: String,
+    pub runtime_model_id: String,
+    pub message: String,
+    pub accelerator: Option<String>,
+    pub hardware_summary: Option<String>,
+    pub effective_context_length: Option<u32>,
+    pub validated_at: String,
+    pub running: bool,
+    pub settings: ModelSettings,
+    pub checks: Vec<InstallationValidationCheck>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallationValidationCheck {
+    pub id: String,
+    pub status: String,
+    pub detail: String,
 }
 
 fn default_managed() -> bool {
@@ -214,6 +242,8 @@ pub struct RuntimeMigrationOption {
     pub variant_id: Option<String>,
     pub available: bool,
     pub reason: String,
+    pub requires_hugging_face_token: bool,
+    pub token_saved: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -291,6 +321,9 @@ pub struct Recommendation {
     pub size_bytes: u64,
     pub context_window: u32,
     pub runtime_digest: Option<String>,
+    pub labels: Vec<String>,
+    pub estimated_loaded_memory_min_bytes: u64,
+    pub estimated_loaded_memory_max_bytes: u64,
     pub fit: String,
     pub reasons: Vec<String>,
     pub recommended: bool,

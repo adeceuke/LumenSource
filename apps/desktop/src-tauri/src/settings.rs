@@ -64,6 +64,8 @@ pub struct ApplicationSettings {
     pub schema_version: u32,
     pub default_runtime: RuntimeId,
     pub default_target_id: String,
+    pub default_use_intent: String,
+    pub default_performance_profile: PerformanceProfile,
     pub start_after_install: bool,
     pub auto_start_managed_runtimes: bool,
     pub storage: StorageSettings,
@@ -78,6 +80,8 @@ impl Default for ApplicationSettings {
             schema_version: SETTINGS_SCHEMA_VERSION,
             default_runtime: RuntimeId::Ollama,
             default_target_id: "local".to_owned(),
+            default_use_intent: "chat".to_owned(),
+            default_performance_profile: PerformanceProfile::Balanced,
             start_after_install: true,
             auto_start_managed_runtimes: true,
             storage: StorageSettings::default(),
@@ -477,6 +481,16 @@ pub fn validate_settings(settings: &ApplicationSettings) -> Vec<SettingsValidati
                 "Unsupported settings version {}. This app supports version {SETTINGS_SCHEMA_VERSION}.",
                 settings.schema_version
             ),
+        );
+    }
+    if !matches!(
+        settings.default_use_intent.as_str(),
+        "chat" | "code" | "creative" | "research"
+    ) {
+        push_error(
+            &mut errors,
+            "defaultUseIntent",
+            "Choose a supported default use case.",
         );
     }
     validate_http_url(&mut errors, "ollama.endpoint", &settings.ollama.endpoint);
@@ -929,6 +943,11 @@ mod tests {
     fn absent_settings_use_ollama_and_safe_local_defaults() {
         let settings = ApplicationSettings::default();
         assert_eq!(settings.default_runtime, RuntimeId::Ollama);
+        assert_eq!(settings.default_use_intent, "chat");
+        assert_eq!(
+            settings.default_performance_profile,
+            PerformanceProfile::Balanced
+        );
         assert!(!settings.ollama.exposes_network());
         assert!(validate_settings(&settings).is_empty());
     }

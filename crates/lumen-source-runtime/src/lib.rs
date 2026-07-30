@@ -730,19 +730,19 @@ impl OllamaRuntime {
     /// Loads an embedding-only model and keeps it resident without routing it
     /// through Ollama's unsupported generation endpoint.
     pub async fn start_embedding(&self, model: &str) -> Result<(), RuntimeError> {
-        self.set_embedding_keep_alive(model, -1).await
+        self.embedding_dimensions(model, -1).await.map(|_| ())
     }
 
     /// Unloads an embedding-only model through the same API that loaded it.
     pub async fn stop_embedding(&self, model: &str) -> Result<(), RuntimeError> {
-        self.set_embedding_keep_alive(model, 0).await
+        self.embedding_dimensions(model, 0).await.map(|_| ())
     }
 
-    async fn set_embedding_keep_alive(
+    pub async fn embedding_dimensions(
         &self,
         model: &str,
         keep_alive: i64,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<usize, RuntimeError> {
         let response = self
             .client
             .post(self.api_url("api/embed")?)
@@ -753,8 +753,13 @@ impl OllamaRuntime {
             })
             .send()
             .await?;
-        Self::checked(response).await?;
-        Ok(())
+        let response: OllamaEmbeddingResponse = Self::checked(response).await?.json().await?;
+        response
+            .embeddings
+            .first()
+            .map(Vec::len)
+            .filter(|dimensions| *dimensions > 0)
+            .ok_or_else(|| RuntimeError::Remote("Ollama returned no embedding vector".to_owned()))
     }
 
     pub async fn model_allocation(
@@ -883,6 +888,12 @@ struct EmbedRequest<'a> {
     model: &'a str,
     input: &'a str,
     keep_alive: i64,
+}
+
+#[derive(Deserialize)]
+struct OllamaEmbeddingResponse {
+    #[serde(default)]
+    embeddings: Vec<Vec<f32>>,
 }
 
 #[derive(Deserialize)]
@@ -1912,6 +1923,17 @@ mod tests {
                 "keep_alive": -1
             })
         );
+    }
+
+    #[test]
+    fn ollama_embedding_response_reports_vector_dimensions() {
+        let Ok(response) = serde_json::from_value::<OllamaEmbeddingResponse>(
+            serde_json::json!({ "embeddings": [[0.25, -0.5, 1.0]] }),
+        ) else {
+            panic!("embedding response should deserialize");
+        };
+
+        assert_eq!(response.embeddings.first().map(Vec::len), Some(3));
     }
 
     #[test]

@@ -85,6 +85,13 @@ struct ActiveChat {
     cancellation: CancellationToken,
 }
 
+#[derive(Clone)]
+struct RecentInstall {
+    variant_id: String,
+    target_id: String,
+    was_already_installed: bool,
+}
+
 #[derive(Default)]
 struct PullItemTracker {
     digests: Vec<String>,
@@ -113,6 +120,7 @@ pub struct SharedCoreAdapter {
     state_write: Mutex<()>,
     active_install: Mutex<Option<ActiveInstall>>,
     active_chat: Mutex<Option<ActiveChat>>,
+    recent_install: RwLock<Option<RecentInstall>>,
     managed_ports: Mutex<BTreeSet<u16>>,
     remote_session: RwLock<Option<Arc<RemoteSession>>>,
     state_path: PathBuf,
@@ -182,6 +190,7 @@ impl SharedCoreAdapter {
             state_write: Mutex::new(()),
             active_install: Mutex::new(None),
             active_chat: Mutex::new(None),
+            recent_install: RwLock::new(None),
             managed_ports: Mutex::new(managed_ports),
             remote_session: RwLock::new(None),
             state_path,
@@ -436,6 +445,113 @@ impl SharedCoreAdapter {
                     .to_owned(),
             );
         }
+        let stored_validation_key = if api_key.is_none() && !clear_api_key {
+            credential_store::load_runtime_secret_for_account(
+                RuntimeSecretKind::VllmApiKey,
+                id.clone(),
+            )
+            .await?
+        } else {
+            None
+        };
+        let validation_key = if clear_api_key {
+            None
+        } else {
+            api_key
+                .as_deref()
+                .map(String::as_str)
+                .or_else(|| stored_validation_key.as_deref().map(String::as_str))
+        };
+        let runtime = vllm_runtime(&config).map_err(|error| error.to_string())?;
+        let settings = config.model_settings();
+        let mut checks = vec![
+            validation_check("runtime", "pass", "The external vLLM API is healthy."),
+            validation_check(
+                "identity",
+                "pass",
+                "vLLM reported the configured served-model identity.",
+            ),
+        ];
+        if config.inference_task == ModelInferenceTask::Embeddings {
+            let embedding = runtime
+                .embeddings(
+                    &config.served_model,
+                    "LumenSource validation",
+                    validation_key,
+                )
+                .await
+                .map_err(|error| format!("The vLLM embedding validation failed: {error}"))?;
+            if embedding.is_empty() {
+                return Err("vLLM returned an empty embedding vector.".to_owned());
+            }
+            checks.push(validation_check(
+                "inference",
+                "pass",
+                &format!(
+                    "vLLM returned a non-empty {}-dimension embedding.",
+                    embedding.len()
+                ),
+            ));
+        } else {
+            let response_bytes = StdMutex::new(0_usize);
+            let reporter = |progress| {
+                if let ChatProgress::Content(content) = progress {
+                    if let Ok(mut total) = response_bytes.lock() {
+                        *total = total.saturating_add(content.trim().len());
+                    }
+                }
+            };
+            let cancellation = CancellationToken::new();
+            let mut options = chat_options(&settings);
+            options.temperature = Some(0.0);
+            options.max_output_tokens = Some(8);
+            runtime
+                .chat_with_options(
+                    &config.served_model,
+                    &[ChatMessage {
+                        role: "user".to_owned(),
+                        content: "Reply with OK.".to_owned(),
+                    }],
+                    validation_key,
+                    &options,
+                    &reporter,
+                    &cancellation,
+                )
+                .await
+                .map_err(|error| format!("The vLLM chat validation failed: {error}"))?;
+            if response_bytes
+                .lock()
+                .map(|total| *total)
+                .unwrap_or_default()
+                == 0
+            {
+                return Err("vLLM returned an empty validation response.".to_owned());
+            }
+            checks.push(validation_check(
+                "inference",
+                "pass",
+                "vLLM returned a non-empty deterministic validation response.",
+            ));
+        }
+        checks.push(validation_check(
+            "configuration",
+            "warning",
+            "This external service controls context and accelerator settings outside Lumen Source.",
+        ));
+        let validation = InstallationValidationReport {
+            passed: true,
+            capability: format!("{:?}", config.inference_task).to_ascii_lowercase(),
+            runtime_id: VLLM_RUNTIME.to_owned(),
+            runtime_model_id: config.served_model.clone(),
+            message: "The external vLLM model produced a valid response and is ready.".to_owned(),
+            accelerator: None,
+            hardware_summary: None,
+            effective_context_length: None,
+            validated_at: chrono::Utc::now().to_rfc3339(),
+            running: true,
+            settings: settings.clone(),
+            checks,
+        };
         if clear_api_key {
             credential_store::delete_runtime_secret_for_account(
                 RuntimeSecretKind::VllmApiKey,
@@ -473,7 +589,8 @@ impl SharedCoreAdapter {
                 &self.runtime_registry,
                 config.inference_task,
             ),
-            model_settings: Some(config.model_settings()),
+            model_settings: Some(settings),
+            installation_validation: Some(validation),
             version: "External service".to_owned(),
             location: "local".to_owned(),
             target_id: "local".to_owned(),
@@ -856,6 +973,16 @@ impl SharedCoreAdapter {
         } else {
             None
         };
+        let requires_hugging_face_token = equivalent.is_some_and(|variant| variant.gated);
+        let token_saved = if requires_hugging_face_token {
+            credential_store::runtime_secret_is_saved_for_account(
+                RuntimeSecretKind::HuggingFaceToken,
+                "default".to_owned(),
+            )
+            .await?
+        } else {
+            false
+        };
         let (available, reason) = match equivalent {
             None => (
                 false,
@@ -890,6 +1017,8 @@ impl SharedCoreAdapter {
             variant_id: equivalent.map(|variant| variant.id.clone()),
             available,
             reason,
+            requires_hugging_face_token,
+            token_saved,
         }])
     }
 
@@ -973,6 +1102,7 @@ impl SharedCoreAdapter {
                         catalog_model,
                     ),
                     model_settings: Some(ModelSettings::default()),
+                    installation_validation: None,
                     version: catalog
                         .runtimes
                         .iter()
@@ -1051,11 +1181,18 @@ impl SharedCoreAdapter {
         } else {
             ModelInferenceTask::Chat
         };
-        let settings = ModelSettings {
+        let profile = source
+            .model_settings
+            .as_ref()
+            .and_then(|settings| settings.performance_profile)
+            .unwrap_or_default();
+        let hardware = self.hardware_for_target("local").await?;
+        let mut settings = build_performance_profile_report(variant, &hardware, profile).settings;
+        settings = ModelSettings {
+            performance_profile: Some(profile),
             runtime_management_mode: Some(crate::settings::RuntimeManagementMode::Managed),
             inference_task: Some(inference_task),
             endpoint: Some(format!("http://127.0.0.1:{port}")),
-            context_length: variant.context_window_tokens,
             vllm_model_revision: variant.model_revision.clone(),
             vllm_tokenizer_revision: variant.tokenizer_revision.clone(),
             vllm_served_model_name: Some(served_name.clone()),
@@ -1064,7 +1201,7 @@ impl SharedCoreAdapter {
             vllm_quantization: variant.quantization.clone(),
             managed_container_engine: Some(engine.as_str().to_owned()),
             managed_port: Some(port),
-            ..ModelSettings::default()
+            ..settings
         };
         let spec = ManagedVllmSpec {
             entry_id: entry_id.clone(),
@@ -1080,12 +1217,134 @@ impl SharedCoreAdapter {
             "default".to_owned(),
         )
         .await?;
+        if variant.gated && token.is_none() {
+            self.managed_ports.lock().await.remove(&port);
+            return Err(
+                "This gated Hugging Face model requires a token. Enter one in the model migration section and try again."
+                    .to_owned(),
+            );
+        }
         if let Err(error) = managed_vllm::launch(engine, &spec, token.as_ref()).await {
             self.managed_ports.lock().await.remove(&port);
             return Err(error);
         }
-        let mut settings = settings;
+        let validation = async {
+            let runtime = VllmRuntime::new(
+                &format!("http://127.0.0.1:{port}"),
+                true,
+                std::time::Duration::from_secs(5),
+                std::time::Duration::from_secs(settings.request_timeout_seconds.into()),
+            )
+            .map_err(|error| error.to_string())?;
+            let models = runtime.models(None).await.map_err(|error| error.to_string())?;
+            if !models.iter().any(|model| model == &served_name) {
+                return Err("vLLM did not report the configured served-model identity.".to_owned());
+            }
+            let mut checks = vec![
+                validation_check("runtime", "pass", "The managed vLLM API is healthy."),
+                validation_check(
+                    "identity",
+                    "pass",
+                    "vLLM reported the configured served-model identity.",
+                ),
+            ];
+            if inference_task == ModelInferenceTask::Embeddings {
+                let embedding = runtime
+                    .embeddings(&served_name, "LumenSource validation", None)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if embedding.is_empty() {
+                    return Err("vLLM returned an empty embedding vector.".to_owned());
+                }
+                checks.push(validation_check(
+                    "inference",
+                    "pass",
+                    &format!(
+                        "vLLM returned a non-empty {}-dimension embedding.",
+                        embedding.len()
+                    ),
+                ));
+            } else {
+                let response_bytes = StdMutex::new(0_usize);
+                let reporter = |progress| {
+                    if let ChatProgress::Content(content) = progress {
+                        if let Ok(mut total) = response_bytes.lock() {
+                            *total = total.saturating_add(content.trim().len());
+                        }
+                    }
+                };
+                let cancellation = CancellationToken::new();
+                let mut options = chat_options(&settings);
+                options.temperature = Some(0.0);
+                options.max_output_tokens = Some(8);
+                runtime
+                    .chat_with_options(
+                        &served_name,
+                        &[ChatMessage {
+                            role: "user".to_owned(),
+                            content: "Reply with OK.".to_owned(),
+                        }],
+                        None,
+                        &options,
+                        &reporter,
+                        &cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if response_bytes
+                    .lock()
+                    .map(|total| *total)
+                    .unwrap_or_default()
+                    == 0
+                {
+                    return Err("vLLM returned an empty validation response.".to_owned());
+                }
+                checks.push(validation_check(
+                    "inference",
+                    "pass",
+                    "vLLM returned a non-empty deterministic validation response.",
+                ));
+            }
+            checks.push(validation_check(
+                "configuration",
+                "warning",
+                "The vLLM API does not expose its effective context allocation; the pinned launch arguments were accepted because the server became ready.",
+            ));
+            checks.push(validation_check(
+                "accelerator",
+                "warning",
+                "The managed container was launched with NVIDIA GPU access; vLLM does not expose per-model allocation through this API.",
+            ));
+            Ok::<_, String>(InstallationValidationReport {
+                passed: true,
+                capability: format!("{inference_task:?}").to_ascii_lowercase(),
+                runtime_id: VLLM_RUNTIME.to_owned(),
+                runtime_model_id: served_name.clone(),
+                message: "The managed vLLM model produced a valid response and is ready."
+                    .to_owned(),
+                accelerator: Some("gpu".to_owned()),
+                hardware_summary: Some(hardware_summary(&hardware)),
+                effective_context_length: settings.context_length,
+                validated_at: chrono::Utc::now().to_rfc3339(),
+                running: true,
+                settings: settings.clone(),
+                checks,
+            })
+        }
+        .await;
+        let validation = match validation {
+            Ok(validation) => validation,
+            Err(error) => {
+                let _ = managed_vllm::remove_container(engine, &spec.container_name()).await;
+                self.managed_ports.lock().await.remove(&port);
+                return Err(format!(
+                    "The managed vLLM server started, but inference validation failed: {error}"
+                ));
+            }
+        };
         settings.managed_container_name = Some(spec.container_name());
+        let mut validation = validation;
+        validation.settings = settings.clone();
         let entry = PersistedModelEntry {
             id: entry_id,
             name: source.name.clone(),
@@ -1095,6 +1354,7 @@ impl SharedCoreAdapter {
             runtime_model_id: Some(served_name),
             runtime_capabilities: managed_vllm_capabilities(&self.runtime_registry, inference_task),
             model_settings: Some(settings),
+            installation_validation: Some(validation),
             version: defaults.pinned_runtime_version,
             location: "local".to_owned(),
             target_id: "local".to_owned(),
@@ -1562,6 +1822,9 @@ impl SharedCoreAdapter {
                 size_bytes: variant_size_bytes(variant),
                 context_window: variant.context_window_tokens.unwrap_or(32_768),
                 runtime_digest: variant.runtime_digest.clone(),
+                labels: recommendation_labels(model, variant, true),
+                estimated_loaded_memory_min_bytes: estimated_loaded_memory(variant).0,
+                estimated_loaded_memory_max_bytes: estimated_loaded_memory(variant).1,
                 fit: if item.score >= 60.0 {
                     "ideal"
                 } else if item.score >= 35.0 {
@@ -1602,6 +1865,9 @@ impl SharedCoreAdapter {
                 size_bytes: variant_size_bytes(variant),
                 context_window: variant.context_window_tokens.unwrap_or(32_768),
                 runtime_digest: variant.runtime_digest.clone(),
+                labels: recommendation_labels(model, variant, false),
+                estimated_loaded_memory_min_bytes: estimated_loaded_memory(variant).0,
+                estimated_loaded_memory_max_bytes: estimated_loaded_memory(variant).1,
                 fit: "incompatible".to_owned(),
                 reasons: item.reasons,
                 recommended: false,
@@ -1797,8 +2063,14 @@ impl SharedCoreAdapter {
             options.license_acknowledged,
         )
         .await?;
-        self.performance_profile(&variant_id, &target_id, options.performance_profile)
+        let profile = self
+            .performance_profile(&variant_id, &target_id, options.performance_profile)
             .await?;
+        if !profile.fits_detected_memory {
+            return Err(profile.warnings.first().cloned().unwrap_or_else(|| {
+                "The selected performance profile exceeds the detected memory budget.".to_owned()
+            }));
+        }
         let telemetry_model_id = {
             let catalog = self.catalog_clone().await?;
             let (model, _) = find_variant(&catalog, &variant_id)?;
@@ -1906,6 +2178,7 @@ impl SharedCoreAdapter {
         ensure_supported_runtime(variant)?;
         cancellation.check().map_err(|error| error.to_string())?;
         let runtime_ref = variant.runtime_ref.clone();
+        let was_already_installed;
         let total = variant_size_bytes(variant);
         let total_items = variant.download_item_count;
         app.emit(
@@ -1948,6 +2221,11 @@ impl SharedCoreAdapter {
             ));
         }
         if variant.runtime == DUMMY_RUNTIME {
+            was_already_installed = self
+                .dummy_runtime
+                .installed_models()
+                .await
+                .is_ok_and(|models| models.iter().any(|model| model.name == runtime_ref));
             self.dummy_runtime
                 .pull_model_cancellable(&runtime_ref, &reporter, cancellation)
                 .await
@@ -2012,12 +2290,22 @@ impl SharedCoreAdapter {
                 .map_err(|error| error.to_string())?;
 
             cancellation.check().map_err(|error| error.to_string())?;
+            was_already_installed = self.runtime.installed_models().await.is_ok_and(|models| {
+                models
+                    .iter()
+                    .any(|model| same_ollama_reference(&model.name, &runtime_ref))
+            });
             self.runtime
                 .pull_model_cancellable(&runtime_ref, &reporter, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
         } else {
             let runtime = self.runtime_for_target(target_id).await?;
+            was_already_installed = runtime.installed_models().await.is_ok_and(|models| {
+                models
+                    .iter()
+                    .any(|model| same_ollama_reference(&model.name, &runtime_ref))
+            });
             runtime
                 .pull_model_cancellable(&runtime_ref, &reporter, cancellation)
                 .await
@@ -2026,6 +2314,11 @@ impl SharedCoreAdapter {
         cancellation.check().map_err(|error| error.to_string())?;
         *self.installed_model.write().await = Some(runtime_ref);
         *self.selected_runtime.write().await = Some(variant.runtime.clone());
+        *self.recent_install.write().await = Some(RecentInstall {
+            variant_id: variant_id.clone(),
+            target_id: target_id.to_owned(),
+            was_already_installed,
+        });
         self.persist_state().await?;
         app.emit(
             "install-progress",
@@ -2307,6 +2600,380 @@ impl SharedCoreAdapter {
                 message: Some("Ollama is serving a model".to_owned()),
             },
         })
+    }
+
+    pub async fn validate_installation(
+        &self,
+        variant_id: &str,
+        target_id: &str,
+        profile: PerformanceProfile,
+        leave_running: bool,
+    ) -> Result<InstallationValidationReport, String> {
+        let catalog = self.catalog_clone().await?;
+        let (model, variant) = find_variant(&catalog, variant_id)?;
+        ensure_supported_runtime(variant)?;
+        let profile_report = self
+            .performance_profile(variant_id, target_id, profile)
+            .await?;
+        let validation_hardware = profile_report.hardware_summary.clone();
+        let settings = profile_report.settings;
+        let capability = if model_is_embedding_only(model) {
+            "embeddings"
+        } else {
+            "chat"
+        }
+        .to_owned();
+        let mut checks = Vec::new();
+
+        if variant.runtime == DUMMY_RUNTIME {
+            self.dummy_runtime
+                .start(&variant.runtime_ref)
+                .await
+                .map_err(|error| error.to_string())?;
+            checks.push(validation_check(
+                "runtime",
+                "pass",
+                "The simulated test runtime is healthy.",
+            ));
+            checks.push(validation_check(
+                "identity",
+                "pass",
+                "The simulated runtime contains the selected test model.",
+            ));
+            checks.push(validation_check(
+                "inference",
+                "pass",
+                "The simulated lifecycle validation completed.",
+            ));
+            if !leave_running {
+                self.dummy_runtime
+                    .stop(&variant.runtime_ref)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+            return Ok(InstallationValidationReport {
+                passed: true,
+                capability: "simulation".to_owned(),
+                runtime_id: DUMMY_RUNTIME.to_owned(),
+                runtime_model_id: variant.runtime_ref.clone(),
+                message: "The test-runtime lifecycle was validated.".to_owned(),
+                accelerator: None,
+                hardware_summary: Some(validation_hardware),
+                effective_context_length: settings.context_length,
+                validated_at: chrono::Utc::now().to_rfc3339(),
+                running: leave_running,
+                settings,
+                checks,
+            });
+        }
+
+        if variant.runtime != OLLAMA_RUNTIME {
+            return Err(format!(
+                "Post-install validation is not implemented for the {} runtime.",
+                variant.runtime
+            ));
+        }
+        let runtime = self.runtime_for_target(target_id).await?;
+        if let Err(error) = runtime.health().await {
+            checks.push(validation_check(
+                "runtime",
+                "fail",
+                &format!("Ollama did not pass its health check: {error}"),
+            ));
+            return Ok(failed_validation_report(
+                variant,
+                capability,
+                settings,
+                checks,
+                "Ollama is unavailable, so the model could not be validated.",
+            ));
+        }
+        checks.push(validation_check(
+            "runtime",
+            "pass",
+            "Ollama responded to its health check.",
+        ));
+
+        let installed = match runtime.installed_models().await {
+            Ok(installed) => installed,
+            Err(error) => {
+                checks.push(validation_check(
+                    "identity",
+                    "fail",
+                    &format!("The installed-model list could not be read: {error}"),
+                ));
+                return Ok(failed_validation_report(
+                    variant,
+                    capability,
+                    settings,
+                    checks,
+                    "The runtime model identity could not be verified.",
+                ));
+            }
+        };
+        if !installed
+            .iter()
+            .any(|installed| same_ollama_reference(&installed.name, &variant.runtime_ref))
+        {
+            checks.push(validation_check(
+                "identity",
+                "fail",
+                "Ollama did not report the catalog-pinned model reference after installation.",
+            ));
+            return Ok(failed_validation_report(
+                variant,
+                capability,
+                settings,
+                checks,
+                "The installed model identity did not match the selected catalog model.",
+            ));
+        }
+        checks.push(validation_check(
+            "identity",
+            "pass",
+            "Ollama reported the expected model identity.",
+        ));
+
+        let inference_result = if model_is_embedding_only(model) {
+            runtime
+                .embedding_dimensions(&variant.runtime_ref, -1)
+                .await
+                .map(|dimensions| {
+                    checks.push(validation_check(
+                        "inference",
+                        "pass",
+                        &format!("Ollama returned a non-empty {dimensions}-dimension embedding."),
+                    ));
+                })
+        } else {
+            let response_bytes = StdMutex::new(0_usize);
+            let reporter = |progress| {
+                if let ChatProgress::Content(content) = progress {
+                    if let Ok(mut total) = response_bytes.lock() {
+                        *total = total.saturating_add(content.trim().len());
+                    }
+                }
+            };
+            let mut options = chat_options(&settings);
+            options.temperature = Some(0.0);
+            options.max_output_tokens = Some(8);
+            options.keep_alive = Some("-1".to_owned());
+            let cancellation = CancellationToken::new();
+            runtime
+                .chat_with_options_cancellable(
+                    &variant.runtime_ref,
+                    &[ChatMessage {
+                        role: "user".to_owned(),
+                        content: "Reply with OK.".to_owned(),
+                    }],
+                    &options,
+                    &reporter,
+                    &cancellation,
+                )
+                .await
+                .and_then(|()| {
+                    let response_bytes = response_bytes
+                        .lock()
+                        .map(|total| *total)
+                        .unwrap_or_default();
+                    if response_bytes == 0 {
+                        Err(RuntimeError::Remote(
+                            "Ollama returned an empty validation response".to_owned(),
+                        ))
+                    } else {
+                        checks.push(validation_check(
+                            "inference",
+                            "pass",
+                            "Ollama returned a non-empty deterministic validation response.",
+                        ));
+                        Ok(())
+                    }
+                })
+        };
+
+        if let Err(error) = inference_result {
+            checks.push(validation_check(
+                "inference",
+                "fail",
+                &format!("The validation request failed: {error}"),
+            ));
+            let _ = if model_is_embedding_only(model) {
+                runtime.stop_embedding(&variant.runtime_ref).await
+            } else {
+                runtime.stop(&variant.runtime_ref).await
+            };
+            return Ok(failed_validation_report(
+                variant,
+                capability,
+                settings,
+                checks,
+                "The model was downloaded, but it did not produce a valid response.",
+            ));
+        }
+
+        let allocation = runtime
+            .model_allocation(&variant.runtime_ref)
+            .await
+            .unwrap_or(None);
+        let accelerator = allocation.as_ref().map(|allocation| {
+            if allocation.vram_memory_bytes > 0
+                && allocation.total_memory_bytes > allocation.vram_memory_bytes
+            {
+                "mixed"
+            } else if allocation.vram_memory_bytes > 0 {
+                "gpu"
+            } else {
+                "cpu"
+            }
+            .to_owned()
+        });
+        let effective_context_length = allocation
+            .as_ref()
+            .and_then(|allocation| allocation.context_length)
+            .and_then(|context| u32::try_from(context).ok());
+        if let Some(context) = effective_context_length {
+            let status = if settings.context_length == Some(context) {
+                "pass"
+            } else {
+                "warning"
+            };
+            checks.push(validation_check(
+                "configuration",
+                status,
+                &format!(
+                    "Ollama reports a {context}-token context allocation; Lumen Source requested {}.",
+                    settings
+                        .context_length
+                        .map_or_else(|| "the runtime default".to_owned(), |value| value.to_string())
+                ),
+            ));
+        } else {
+            checks.push(validation_check(
+                "configuration",
+                "warning",
+                "Ollama did not expose the effective context allocation. Inference still passed.",
+            ));
+        }
+        checks.push(validation_check(
+            "accelerator",
+            if accelerator.is_some() {
+                "pass"
+            } else {
+                "warning"
+            },
+            accelerator.as_deref().map_or(
+                "Ollama did not expose CPU/GPU allocation metrics; this does not affect readiness.",
+                |value| match value {
+                    "gpu" => "Ollama reports that the model is allocated on the GPU.",
+                    "mixed" => "Ollama reports a mixed GPU and system-memory allocation.",
+                    _ => "Ollama reports a system-memory/CPU allocation.",
+                },
+            ),
+        ));
+
+        if !leave_running {
+            let stop_result = if model_is_embedding_only(model) {
+                runtime.stop_embedding(&variant.runtime_ref).await
+            } else {
+                runtime.stop(&variant.runtime_ref).await
+            };
+            if let Err(error) = stop_result {
+                checks.push(validation_check(
+                    "unload",
+                    "warning",
+                    &format!("Validation passed, but the temporary model load could not be released: {error}"),
+                ));
+            }
+        }
+
+        Ok(InstallationValidationReport {
+            passed: true,
+            capability,
+            runtime_id: OLLAMA_RUNTIME.to_owned(),
+            runtime_model_id: variant.runtime_ref.clone(),
+            message: "The installed model produced a valid response and is ready.".to_owned(),
+            accelerator,
+            hardware_summary: Some(validation_hardware),
+            effective_context_length,
+            validated_at: chrono::Utc::now().to_rfc3339(),
+            running: leave_running,
+            settings,
+            checks,
+        })
+    }
+
+    pub async fn remove_incomplete_install(
+        &self,
+        variant_id: &str,
+        target_id: &str,
+        confirmed: bool,
+    ) -> Result<(), String> {
+        if !confirmed {
+            return Err("Confirm removal of the incomplete installation.".to_owned());
+        }
+        let recent = self
+            .recent_install
+            .read()
+            .await
+            .clone()
+            .filter(|install| {
+                install.variant_id == variant_id && install.target_id == target_id
+            })
+            .ok_or_else(|| {
+                "Lumen Source can only remove the model downloaded by the current installation attempt."
+                    .to_owned()
+            })?;
+        if recent.was_already_installed {
+            return Err(
+                "This model existed before the current attempt, so Lumen Source will not delete it."
+                    .to_owned(),
+            );
+        }
+        if self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .any(|entry| entry.model_id == variant_id && entry.target_id == target_id)
+        {
+            return Err(
+                "The model is already part of the library and cannot be removed as incomplete."
+                    .to_owned(),
+            );
+        }
+        let catalog = self.catalog_clone().await?;
+        let (_, variant) = find_variant(&catalog, variant_id)?;
+        match variant.runtime.as_str() {
+            DUMMY_RUNTIME => self
+                .dummy_runtime
+                .delete_model(&variant.runtime_ref)
+                .await
+                .map_err(|error| error.to_string())?,
+            OLLAMA_RUNTIME => self
+                .runtime_for_target(target_id)
+                .await?
+                .delete_model(&variant.runtime_ref)
+                .await
+                .map_err(|error| error.to_string())?,
+            runtime => {
+                return Err(format!(
+                    "Incomplete-install cleanup is not supported for {runtime}."
+                ))
+            }
+        }
+        if self
+            .installed_model
+            .read()
+            .await
+            .as_deref()
+            .is_some_and(|installed| same_ollama_reference(installed, &variant.runtime_ref))
+        {
+            *self.installed_model.write().await = None;
+            *self.selected_runtime.write().await = None;
+        }
+        *self.recent_install.write().await = None;
+        self.persist_state().await
     }
 
     pub async fn performance(
@@ -3359,12 +4026,32 @@ fn build_performance_profile_report(
     profile: PerformanceProfile,
 ) -> PerformanceProfileReport {
     let minimum_memory_bytes = (variant.requirements.min_ram_gb * GIB).ceil() as u64;
-    let fits_detected_memory = hardware.total_ram_bytes >= minimum_memory_bytes;
+    let has_capacity = hardware.total_ram_bytes >= minimum_memory_bytes;
+    let has_available_memory = hardware.available_ram_bytes >= minimum_memory_bytes;
+    let fits_detected_memory =
+        has_capacity && (profile == PerformanceProfile::Custom || has_available_memory);
     let accelerator = hardware
         .accelerators
         .first()
         .map(|device| accelerator_backend(device.kind).to_owned())
         .unwrap_or_else(|| "cpu".to_owned());
+    let detected_vram_gib = hardware
+        .accelerators
+        .iter()
+        .filter_map(|device| device.total_vram_bytes)
+        .sum::<u64>() as f64
+        / GIB;
+    let required_vram_gib = variant.requirements.min_vram_gb.unwrap_or_default();
+    let vram_shortfall_gib = (required_vram_gib - detected_vram_gib).max(0.0);
+    let detected_gpu_count = hardware
+        .accelerators
+        .iter()
+        .filter(|device| {
+            device.kind == lumen_source_hardware::AcceleratorKind::Nvidia
+                && device.total_vram_bytes.is_some()
+        })
+        .count()
+        .clamp(1, usize::from(u16::MAX)) as u16;
     let maximum_context = variant.context_window_tokens;
     let (context_limit, concurrent_requests, gpu_memory_utilization, summary) = match profile {
         PerformanceProfile::Safe => (
@@ -3411,16 +4098,32 @@ fn build_performance_profile_report(
         settings.vllm_gpu_memory_utilization = Some(gpu_memory_utilization);
         settings.vllm_max_concurrent_sequences = Some(concurrent_requests);
         settings.vllm_prefix_caching = Some(profile != PerformanceProfile::Safe);
-        settings.vllm_tensor_parallel_size = Some(1);
+        settings.vllm_cpu_offload_gib = Some(match profile {
+            PerformanceProfile::Safe => vram_shortfall_gib.ceil() as f32,
+            PerformanceProfile::Balanced => vram_shortfall_gib as f32,
+            PerformanceProfile::Fast | PerformanceProfile::Custom => 0.0,
+        });
+        settings.vllm_tensor_parallel_size = Some(detected_gpu_count);
         settings.vllm_pipeline_parallel_size = Some(1);
     }
 
     let mut warnings = Vec::new();
-    if !fits_detected_memory {
+    if !has_capacity {
         warnings.push(format!(
             "This model needs at least {:.1} GiB of system memory, but the machine has {:.1} GiB.",
             variant.requirements.min_ram_gb,
             hardware.total_ram_bytes as f64 / GIB
+        ));
+    } else if !has_available_memory {
+        let action = if profile == PerformanceProfile::Custom {
+            "Custom is proceeding explicitly; close other applications before starting the model."
+        } else {
+            "Close other applications or choose Custom to proceed with an explicit warning."
+        };
+        warnings.push(format!(
+            "This model needs about {:.1} GiB free, but only {:.1} GiB is currently available. {action}",
+            variant.requirements.min_ram_gb,
+            hardware.available_ram_bytes as f64 / GIB
         ));
     } else if profile == PerformanceProfile::Fast
         && hardware.available_ram_bytes < minimum_memory_bytes.saturating_mul(3) / 2
@@ -3451,6 +4154,52 @@ fn build_performance_profile_report(
         available_memory_bytes: hardware.available_ram_bytes,
         fits_detected_memory,
         warnings,
+        hardware_summary: hardware_summary(hardware),
+    }
+}
+
+fn hardware_summary(hardware: &HardwareFacts) -> String {
+    let accelerator = hardware
+        .accelerators
+        .first()
+        .map(|device| device.name.as_str())
+        .unwrap_or("CPU only");
+    format!(
+        "{} {} · {:.1} GiB RAM · {accelerator}",
+        hardware.os.family,
+        hardware.os.architecture,
+        hardware.total_ram_bytes as f64 / GIB
+    )
+}
+
+fn validation_check(id: &str, status: &str, detail: &str) -> InstallationValidationCheck {
+    InstallationValidationCheck {
+        id: id.to_owned(),
+        status: status.to_owned(),
+        detail: detail.to_owned(),
+    }
+}
+
+fn failed_validation_report(
+    variant: &ModelVariant,
+    capability: String,
+    settings: ModelSettings,
+    checks: Vec<InstallationValidationCheck>,
+    message: &str,
+) -> InstallationValidationReport {
+    InstallationValidationReport {
+        passed: false,
+        capability,
+        runtime_id: variant.runtime.clone(),
+        runtime_model_id: variant.runtime_ref.clone(),
+        message: message.to_owned(),
+        accelerator: None,
+        hardware_summary: None,
+        effective_context_length: None,
+        validated_at: chrono::Utc::now().to_rfc3339(),
+        running: false,
+        settings,
+        checks,
     }
 }
 
@@ -3538,6 +4287,54 @@ fn variant_size_bytes(variant: &ModelVariant) -> u64 {
         .as_ref()
         .and_then(|artifact| artifact.size_bytes)
         .unwrap_or((variant.requirements.min_storage_gb * GIB) as u64)
+}
+
+fn estimated_loaded_memory(variant: &ModelVariant) -> (u64, u64) {
+    let minimum = (variant.requirements.min_ram_gb * GIB).ceil() as u64;
+    let context_reserve = variant
+        .context_window_tokens
+        .map_or(512 * 1024 * 1024, |tokens| {
+            u64::from(tokens.min(32_768)).saturating_mul(64 * 1024)
+        });
+    (minimum, minimum.saturating_add(context_reserve))
+}
+
+fn recommendation_labels(
+    model: &ModelEntry,
+    variant: &ModelVariant,
+    compatible: bool,
+) -> Vec<String> {
+    let mut labels = Vec::new();
+    if compatible && variant.requirements.min_ram_gb <= 16.0 && variant.parameters_b <= 8.0 {
+        labels.push("Beginner friendly".to_owned());
+    }
+    if variant.parameters_b <= 8.0 {
+        labels.push("Fast".to_owned());
+    } else if variant.parameters_b >= 14.0 {
+        labels.push("High quality".to_owned());
+    }
+    if model
+        .capabilities
+        .iter()
+        .any(|capability| capability.contains("reason"))
+    {
+        labels.push("Reasoning".to_owned());
+    }
+    if model
+        .capabilities
+        .iter()
+        .any(|capability| capability == "embeddings")
+    {
+        labels.push("Embeddings".to_owned());
+    }
+    if model
+        .capabilities
+        .iter()
+        .any(|capability| capability.contains("vision") || capability.contains("image"))
+    {
+        labels.push("Vision".to_owned());
+    }
+    labels
 }
 
 fn check(id: &str, status: &str, message_key: &str, detail: Option<&str>) -> PreflightCheck {
@@ -3947,6 +4744,7 @@ mod tests {
             runtime_model_id: Some("qwen2.5-coder:14b".to_owned()),
             runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
             model_settings: None,
+            installation_validation: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -4001,6 +4799,7 @@ mod tests {
             runtime_model_id: Some("dummy-test-model:latest".to_owned()),
             runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
+            installation_validation: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -4047,6 +4846,7 @@ mod tests {
             runtime_model_id: Some("dummy-test-model:latest".to_owned()),
             runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
+            installation_validation: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -4074,6 +4874,7 @@ mod tests {
             runtime_model_id: Some("qwen2.5-coder:14b".to_owned()),
             runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
             model_settings: None,
+            installation_validation: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),

@@ -70,6 +70,8 @@ pub fn run() {
             commands::run_preflight,
             commands::performance_profile,
             commands::install_model,
+            commands::validate_installed_model,
+            commands::remove_incomplete_install,
             commands::cancel_install,
             commands::start_runtime,
             commands::stop_runtime,

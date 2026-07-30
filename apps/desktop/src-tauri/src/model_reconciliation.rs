@@ -128,6 +128,9 @@ pub(crate) fn reconcile_models(
                     model_settings: previous
                         .as_ref()
                         .and_then(|entry| entry.model_settings.clone()),
+                    installation_validation: previous
+                        .as_ref()
+                        .and_then(|entry| entry.installation_validation.clone()),
                     version: runtime_version,
                     location: "local".to_owned(),
                     target_id: local_target_id(),
@@ -188,6 +191,9 @@ pub(crate) fn reconcile_models(
                     model_settings: previous
                         .as_ref()
                         .and_then(|entry| entry.model_settings.clone()),
+                    installation_validation: previous
+                        .as_ref()
+                        .and_then(|entry| entry.installation_validation.clone()),
                     version: "External Ollama model".to_owned(),
                     location: "local".to_owned(),
                     target_id: local_target_id(),
@@ -297,6 +303,7 @@ fn upsert_dummy_models(
             runtime_model_id: Some(installed_model.name.clone()),
             runtime_capabilities: capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
+            installation_validation: None,
             version,
             location: "local".to_owned(),
             target_id: local_target_id(),

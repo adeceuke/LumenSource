@@ -10,6 +10,7 @@ import type {
   HardwareProfile,
   InstallProgress,
   InstallRequest,
+  InstallationValidationReport,
   MachineUsageSnapshot,
   ManagedVllmSupport,
   ModelSettings,
@@ -119,6 +120,19 @@ export const desktopCommands = {
   }),
   install: (request: InstallRequest) =>
     invoke<void>("install_model", { request }),
+  validateInstalledModel: (
+    modelId: string,
+    targetId: string,
+    profile: PerformanceProfile,
+    leaveRunning: boolean,
+  ) => invoke<InstallationValidationReport>("validate_installed_model", {
+    modelId,
+    targetId,
+    profile,
+    leaveRunning,
+  }),
+  removeIncompleteInstall: (modelId: string, targetId: string, confirmed: boolean) =>
+    invoke<void>("remove_incomplete_install", { modelId, targetId, confirmed }),
   cancelInstall: () => invoke<boolean>("cancel_install"),
   onInstallProgress: (
     handler: (progress: InstallProgress) => void,

@@ -69,6 +69,9 @@ export interface Recommendation {
   sizeBytes: number;
   contextWindow: number;
   runtimeDigest?: string;
+  labels: string[];
+  estimatedLoadedMemoryMinBytes: number;
+  estimatedLoadedMemoryMaxBytes: number;
   fit: "ideal" | "good" | "limited" | "incompatible";
   reasons: string[];
   recommended: boolean;
@@ -167,6 +170,28 @@ export interface PerformanceProfileReport {
   availableMemoryBytes: number;
   fitsDetectedMemory: boolean;
   warnings: string[];
+  hardwareSummary: string;
+}
+
+export interface InstallationValidationCheck {
+  id: string;
+  status: "pass" | "warning" | "fail";
+  detail: string;
+}
+
+export interface InstallationValidationReport {
+  passed: boolean;
+  capability: string;
+  runtimeId: string;
+  runtimeModelId: string;
+  message: string;
+  accelerator?: string;
+  hardwareSummary?: string;
+  effectiveContextLength?: number;
+  validatedAt: string;
+  running: boolean;
+  settings: ModelSettings;
+  checks: InstallationValidationCheck[];
 }
 
 export interface InstallProgress {
@@ -226,6 +251,7 @@ export interface RunningModelEntry {
   runtimeModelId?: string;
   runtimeCapabilities: RuntimeCapabilities;
   modelSettings?: ModelSettings;
+  installationValidation?: InstallationValidationReport;
   version: string;
   location: "local" | "remote";
   targetId: string;
@@ -253,6 +279,8 @@ export interface ApplicationSettings {
   schemaVersion: number;
   defaultRuntime: RuntimeId;
   defaultTargetId: string;
+  defaultUseIntent: UseIntent;
+  defaultPerformanceProfile: PerformanceProfile;
   startAfterInstall: boolean;
   autoStartManagedRuntimes: boolean;
   storage: {
@@ -376,6 +404,8 @@ export interface RuntimeMigrationOption {
   variantId?: string;
   available: boolean;
   reason: string;
+  requiresHuggingFaceToken: boolean;
+  tokenSaved: boolean;
 }
 
 export interface RuntimeMigrationReport {

@@ -13,6 +13,7 @@ import type {
   EndpointDetails,
   HardwareProfile,
   InstallProgress,
+  InstallationValidationReport,
   PerformanceProfile,
   PerformanceProfileReport,
   PreflightReport,
@@ -32,10 +33,13 @@ interface UseModelWizardOptions {
   setModels: Dispatch<SetStateAction<RunningModelEntry[]>>;
   setError: Dispatch<SetStateAction<string | undefined>>;
   onOpen: () => void;
+  onOpenInstalledModel: (entryId: string) => void;
   copiedField?: string;
   copyText: (value: string, key: string) => void | Promise<void>;
   defaultStartAfterInstall: boolean;
   defaultTargetId: string;
+  defaultUseIntent: UseIntent;
+  defaultPerformanceProfile: PerformanceProfile;
 }
 
 interface RemoteTargetDialogState {
@@ -68,10 +72,13 @@ export function useModelWizard({
   setModels,
   setError,
   onOpen,
+  onOpenInstalledModel,
   copiedField,
   copyText,
   defaultStartAfterInstall,
   defaultTargetId,
+  defaultUseIntent,
+  defaultPerformanceProfile,
 }: UseModelWizardOptions): ModelWizardState {
   const [open, setOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState<WizardStep>("location");
@@ -91,7 +98,7 @@ export function useModelWizard({
   const [cancelBusy, setCancelBusy] = useState(false);
   const [startAfterInstall, setStartAfterInstall] = useState(defaultStartAfterInstall);
   const [installRuntime, setInstallRuntime] = useState(false);
-  const [useCase, setUseCase] = useState<UseIntent>("chat");
+  const [useCase, setUseCase] = useState<UseIntent>(defaultUseIntent);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -102,7 +109,9 @@ export function useModelWizard({
   }>();
   const [preflight, setPreflight] = useState<PreflightReport>();
   const [preflightLoading, setPreflightLoading] = useState(false);
-  const [performanceProfile, setPerformanceProfile] = useState<PerformanceProfile>("balanced");
+  const [performanceProfile, setPerformanceProfile] = useState<PerformanceProfile>(
+    defaultPerformanceProfile,
+  );
   const [profileReport, setProfileReport] = useState<PerformanceProfileReport>();
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string>();
@@ -110,6 +119,9 @@ export function useModelWizard({
   const [licenseAcknowledged, setLicenseAcknowledged] = useState(false);
   const [separateLicenseReference, setSeparateLicenseReference] = useState("");
   const [installProgress, setInstallProgress] = useState<InstallProgress>();
+  const [validationReport, setValidationReport] = useState<InstallationValidationReport>();
+  const [validationDetailsOpen, setValidationDetailsOpen] = useState(false);
+  const [installedEntryId, setInstalledEntryId] = useState<string>();
   const [endpoint, setEndpoint] = useState<EndpointDetails>();
   const [busy, setBusy] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -252,6 +264,9 @@ export function useModelWizard({
     setLicenseAcknowledged(false);
     setSeparateLicenseReference("");
     setInstallRuntime(false);
+    setValidationReport(undefined);
+    setValidationDetailsOpen(false);
+    setInstalledEntryId(undefined);
   }, [selectedModelId]);
 
   const reset = () => {
@@ -265,7 +280,7 @@ export function useModelWizard({
     setRemoteTargetDialogOpen(false);
     setRemoteTargetDialogError(undefined);
     setRemoteConfig(emptyRemoteTarget());
-    setUseCase("chat");
+    setUseCase(defaultUseIntent);
     setDownloadBusy(false);
     setInstallCancellable(false);
     setCancelBusy(false);
@@ -277,7 +292,7 @@ export function useModelWizard({
     setModelPickerPosition(undefined);
     setPreflight(undefined);
     setPreflightLoading(false);
-    setPerformanceProfile("balanced");
+    setPerformanceProfile(defaultPerformanceProfile);
     setProfileReport(undefined);
     setProfileLoading(false);
     setProfileError(undefined);
@@ -285,6 +300,8 @@ export function useModelWizard({
     setLicenseAcknowledged(false);
     setSeparateLicenseReference("");
     setInstallProgress(undefined);
+    setValidationReport(undefined);
+    setValidationDetailsOpen(false);
     setEndpoint(undefined);
     setError(undefined);
     setConfirmClose(false);
@@ -484,8 +501,9 @@ export function useModelWizard({
   const addInstalledModel = (
     selected: Recommendation,
     runtimeModelId: string,
-    running: boolean,
+    validation: InstallationValidationReport,
   ) => {
+    const entryId = `${selected.modelId}-${crypto.randomUUID()}`;
     setModels((current) => {
       const targetId = wizardTargetId ?? "local";
       const sharedRuntimeAlreadyRunning = current.some((model) => (
@@ -493,21 +511,22 @@ export function useModelWizard({
         && model.runtimeModelId === runtimeModelId
         && model.running
       ));
-      const effectiveRunning = running || sharedRuntimeAlreadyRunning;
-      const message = running
+      const effectiveRunning = validation.running || sharedRuntimeAlreadyRunning;
+      const message = validation.running
         ? text.lifecycle.installedAndStarted
         : sharedRuntimeAlreadyRunning
           ? text.lifecycle.installedSharedRuntime
           : text.lifecycle.installedNotStarted;
       const entry: RunningModelEntry = {
-        id: `${selected.modelId}-${crypto.randomUUID()}`,
+        id: entryId,
         name: selected.name,
         modelId: selected.modelId,
         modelName: selected.name,
         runtimeId: selected.runtimeId as RunningModelEntry["runtimeId"],
         runtimeModelId,
         runtimeCapabilities: runtimeCapabilities(selected.runtimeId),
-        modelSettings: profileReport?.settings,
+        modelSettings: validation.settings,
+        installationValidation: validation,
         version: selected.version,
         location: wizardLocation,
         targetId,
@@ -539,6 +558,99 @@ export function useModelWizard({
           : model
       ))];
     });
+    setInstalledEntryId(entryId);
+  };
+
+  const openInstalledModel = () => {
+    if (!installedEntryId) return;
+    const entryId = installedEntryId;
+    setOpen(false);
+    reset();
+    onOpenInstalledModel(entryId);
+  };
+
+  const validateDownloadedModel = async (
+    selected: Recommendation,
+    profile: PerformanceProfile,
+  ) => {
+    setDownloadBusy(true);
+    setInstallCancellable(false);
+    setBusy(true);
+    setError(undefined);
+    setValidationReport(undefined);
+    setValidationDetailsOpen(false);
+    setInstallProgress((current) => ({
+      modelId: current?.modelId ?? selected.modelId,
+      phase: "installing",
+      completedBytes: current?.totalBytes ?? selected.sizeBytes,
+      totalBytes: current?.totalBytes ?? selected.sizeBytes,
+      messageKey: "validating",
+    }));
+    try {
+      const report = await desktopCommands.validateInstalledModel(
+        selected.modelId,
+        wizardTargetId ?? "local",
+        profile,
+        startAfterInstall,
+      );
+      setValidationReport(report);
+      if (!report.passed) return;
+      const details = await desktopCommands.endpoint(wizardTargetId ?? "local");
+      setEndpoint(details);
+      addInstalledModel(selected, report.runtimeModelId || details.model, report);
+      setWizardStep("ready");
+    } catch (validationError) {
+      setError(localizedError(validationError));
+    } finally {
+      setDownloadBusy(false);
+      setBusy(false);
+    }
+  };
+
+  const retryValidation = async () => {
+    if (!selectedRecommendation || downloadBusy) return;
+    await validateDownloadedModel(selectedRecommendation, performanceProfile);
+  };
+
+  const useSaferSettings = async () => {
+    if (!selectedRecommendation || downloadBusy) return;
+    setPerformanceProfile("safe");
+    try {
+      const safeReport = await desktopCommands.performanceProfile(
+        selectedRecommendation.modelId,
+        wizardTargetId ?? "local",
+        "safe",
+      );
+      setProfileReport(safeReport);
+      await validateDownloadedModel(selectedRecommendation, "safe");
+    } catch (safeError) {
+      setError(localizedError(safeError));
+    }
+  };
+
+  const removeIncompleteInstall = async () => {
+    if (
+      !selectedRecommendation
+      || downloadBusy
+      || !window.confirm(text.wizard.validation.removeConfirmation)
+    ) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await desktopCommands.removeIncompleteInstall(
+        selectedRecommendation.modelId,
+        wizardTargetId ?? "local",
+        true,
+      );
+      setValidationReport(undefined);
+      setValidationDetailsOpen(false);
+      setInstallProgress(undefined);
+      setWizardStep("suggestion");
+    } catch (removeError) {
+      setError(localizedError(removeError));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const startInstall = async () => {
@@ -576,21 +688,7 @@ export function useModelWizard({
         installRuntime: runtimeInstallRequired && installRuntime,
       });
       setInstallCancellable(false);
-      if (startAfterInstall) {
-        setInstallProgress((current) => current && ({
-          ...current,
-          phase: "installing",
-          messageKey: "starting",
-        }));
-        await desktopCommands.start(
-          selectedRecommendation.modelId,
-          wizardTargetId ?? "local",
-        );
-      }
-      const details = await desktopCommands.endpoint(wizardTargetId ?? "local");
-      setEndpoint(details);
-      addInstalledModel(selectedRecommendation, details.model, startAfterInstall);
-      setWizardStep("ready");
+      await validateDownloadedModel(selectedRecommendation, performanceProfile);
     } catch (installError) {
       const message = localizedError(installError);
       if (isInstallCancellationMessage(message)) {
@@ -667,6 +765,8 @@ export function useModelWizard({
       installRuntime,
       runtimeInstallRequired,
       installProgress,
+      validationReport,
+      validationDetailsOpen,
       selectedIsDummy,
       endpoint,
       copiedField,
@@ -687,6 +787,7 @@ export function useModelWizard({
       setSeparateLicenseReference,
       setStartAfterInstall,
       setInstallRuntime,
+      setValidationDetailsOpen,
       cancelWizard,
       openRemoteTargetDialog,
       checkRemoteTarget,
@@ -694,8 +795,12 @@ export function useModelWizard({
       goToPreviousStep,
       openPublisherUrl,
       requestInstallCancellation,
+      retryValidation,
+      useSaferSettings,
+      removeIncompleteInstall,
       startInstall,
       confirmWizardClose,
+      openInstalledModel,
       copyText,
     },
   };

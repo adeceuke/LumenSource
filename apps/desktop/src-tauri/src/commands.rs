@@ -1,8 +1,9 @@
 use crate::bridge::{
     CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, InstallOptions,
-    MachineUsageSnapshot, PerformanceProfileReport, PerformanceSnapshot, PersistedModelEntry,
-    PreflightReport, Recommendation, RemoteCredentialStatus, RuntimeDiagnostics,
-    RuntimeMigrationOption, RuntimeMigrationReport, RuntimeStatus, SharedCoreAdapter,
+    InstallationValidationReport, MachineUsageSnapshot, PerformanceProfileReport,
+    PerformanceSnapshot, PersistedModelEntry, PreflightReport, Recommendation,
+    RemoteCredentialStatus, RuntimeDiagnostics, RuntimeMigrationOption, RuntimeMigrationReport,
+    RuntimeStatus, SharedCoreAdapter,
 };
 use crate::managed_vllm::ManagedVllmSupport;
 use lumen_source_runtime::ChatMessage;
@@ -344,6 +345,34 @@ pub async fn install_model(
         },
     )
     .await
+}
+
+#[tauri::command]
+pub async fn validate_installed_model(
+    core: State<'_, SharedCoreAdapter>,
+    model_id: String,
+    target_id: Option<String>,
+    profile: crate::settings::PerformanceProfile,
+    leave_running: bool,
+) -> Result<InstallationValidationReport, String> {
+    core.validate_installation(
+        &model_id,
+        &normalize_target_id(target_id),
+        profile,
+        leave_running,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn remove_incomplete_install(
+    core: State<'_, SharedCoreAdapter>,
+    model_id: String,
+    target_id: Option<String>,
+    confirmed: bool,
+) -> Result<(), String> {
+    core.remove_incomplete_install(&model_id, &normalize_target_id(target_id), confirmed)
+        .await
 }
 
 #[tauri::command]

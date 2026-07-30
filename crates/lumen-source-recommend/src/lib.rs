@@ -400,6 +400,7 @@ mod tests {
             hugging_face_model_id: None,
             model_revision: None,
             tokenizer_revision: None,
+            gated: false,
             task: None,
             runner: None,
             runtime_compatibility: vec!["ollama".to_owned()],

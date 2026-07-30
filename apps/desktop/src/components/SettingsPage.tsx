@@ -272,6 +272,32 @@ export function SettingsPage({
             </select>
             {fieldError("defaultTargetId")}
           </label>
+          <label>
+            <span>{text.settings.general.defaultUseCase}</span>
+            <select
+              value={draft.defaultUseIntent}
+              onChange={(event) => update((next) => { next.defaultUseIntent = event.target.value as ApplicationSettings["defaultUseIntent"]; })}
+            >
+              <option value="chat">{text.wizard.intent.chatTitle}</option>
+              <option value="code">{text.wizard.intent.codeTitle}</option>
+              <option value="creative">{text.wizard.intent.creativeTitle}</option>
+              <option value="research">{text.wizard.intent.researchTitle}</option>
+            </select>
+            <small>{text.settings.general.installDefaultsHint}</small>
+          </label>
+          <label>
+            <span>{text.settings.general.defaultPerformance}</span>
+            <select
+              value={draft.defaultPerformanceProfile}
+              onChange={(event) => update((next) => { next.defaultPerformanceProfile = event.target.value as ApplicationSettings["defaultPerformanceProfile"]; })}
+            >
+              <option value="safe">{text.wizard.profile.safeTitle}</option>
+              <option value="balanced">{text.wizard.profile.balancedTitle}</option>
+              <option value="fast">{text.wizard.profile.fastTitle}</option>
+              <option value="custom">{text.wizard.profile.customTitle}</option>
+            </select>
+            <small>{text.settings.general.installDefaultsHint}</small>
+          </label>
           <label className="check-setting">
             <input
               type="checkbox"

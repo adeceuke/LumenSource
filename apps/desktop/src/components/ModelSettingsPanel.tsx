@@ -81,6 +81,7 @@ export function ModelSettingsPanel({
   const [diagnostics, setDiagnostics] = useState<RuntimeDiagnostics>();
   const [migrationOptions, setMigrationOptions] = useState<RuntimeMigrationOption[]>([]);
   const [migrating, setMigrating] = useState(false);
+  const [huggingFaceToken, setHuggingFaceToken] = useState("");
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(baseline),
     [baseline, draft],
@@ -137,7 +138,16 @@ export function ModelSettingsPanel({
     setError(undefined);
     setNotice(undefined);
     try {
+      if (option.requiresHuggingFaceToken && !option.tokenSaved) {
+        const token = huggingFaceToken.trim();
+        if (!token) {
+          setError(text.modelSettings.gatedTokenRequired);
+          return;
+        }
+        await desktopCommands.saveRuntimeSecret("huggingFaceToken", token);
+      }
       const report = await desktopCommands.reinstallWithRuntime(model.id, option.runtimeId);
+      setHuggingFaceToken("");
       setNotice(report.message);
       onSaved(report.replacement);
       setMigrationOptions((current) => current.map((candidate) => (
@@ -176,6 +186,20 @@ export function ModelSettingsPanel({
           <strong>{text.modelSettings.performanceProfile}:</strong>{" "}
           {text.modelSettings.performanceProfileValue(draft.performanceProfile)}
         </p>
+      )}
+
+      {model.installationValidation && (
+        <fieldset className="model-settings-group">
+          <legend>{text.modelSettings.installationValidation}</legend>
+          <p>{model.installationValidation.message}</p>
+          <dl className="runtime-diagnostics">
+            <div><dt>{text.modelSettings.validatedAt}</dt><dd>{new Date(model.installationValidation.validatedAt).toLocaleString()}</dd></div>
+            <div><dt>{text.modelSettings.validationCapability}</dt><dd>{model.installationValidation.capability}</dd></div>
+            <div><dt>{text.modelSettings.validationAllocation}</dt><dd>{model.installationValidation.accelerator ?? text.common.unavailable}</dd></div>
+            <div><dt>{text.modelSettings.validationHardware}</dt><dd>{model.installationValidation.hardwareSummary ?? text.common.unavailable}</dd></div>
+            <div><dt>{text.modelSettings.effectiveContext}</dt><dd>{model.installationValidation.effectiveContextLength?.toLocaleString(text.locale) ?? text.common.unavailable}</dd></div>
+          </dl>
+        </fieldset>
       )}
 
       <fieldset className="model-settings-group">
@@ -359,11 +383,32 @@ export function ModelSettingsPanel({
           <p>{text.modelSettings.migrationHint}</p>
           {migrationOptions.map((option) => (
             <div className="runtime-migration-option" key={option.runtimeId}>
-              <span>{option.reason}</span>
+              <div>
+                <span>{option.reason}</span>
+                {option.requiresHuggingFaceToken && !option.tokenSaved && (
+                  <label className="gated-model-token">
+                    <span>{text.modelSettings.gatedToken}</span>
+                    <input
+                      type="password"
+                      value={huggingFaceToken}
+                      autoComplete="off"
+                      onChange={(event) => setHuggingFaceToken(event.target.value)}
+                    />
+                    <small>{text.modelSettings.gatedTokenHint}</small>
+                  </label>
+                )}
+                {option.requiresHuggingFaceToken && option.tokenSaved && (
+                  <small>{text.modelSettings.gatedTokenSaved}</small>
+                )}
+              </div>
               <button
                 className="secondary-button"
                 type="button"
-                disabled={!option.available || migrating}
+                disabled={!option.available || migrating || (
+                  option.requiresHuggingFaceToken
+                  && !option.tokenSaved
+                  && !huggingFaceToken.trim()
+                )}
                 onClick={() => void reinstall(option)}
               >
                 {migrating ? text.modelSettings.reinstalling : text.modelSettings.reinstallWith(option.runtimeId)}

@@ -417,6 +417,11 @@
           "minLength": 1,
           "description": "Pinned immutable tokenizer revision when it differs from the model revision."
         },
+        "gated": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether downloading this model requires an authenticated Hugging Face account and token."
+        },
         "task": {
           "type": ["string", "null"],
           "minLength": 1,

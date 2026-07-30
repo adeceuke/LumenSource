@@ -84,10 +84,17 @@ function App() {
     setModels: setRunningModels,
     setError,
     onOpen: () => setDetailModelId(undefined),
+    onOpenInstalledModel: (entryId) => {
+      setSection("models");
+      setDetailModelId(entryId);
+      setDetailTab("settings");
+    },
     copiedField,
     copyText,
     defaultStartAfterInstall: settings?.startAfterInstall ?? true,
     defaultTargetId: settings?.defaultTargetId ?? "local",
+    defaultUseIntent: settings?.defaultUseIntent ?? "chat",
+    defaultPerformanceProfile: settings?.defaultPerformanceProfile ?? "balanced",
   });
 
   useEffect(() => {

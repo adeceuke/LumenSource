@@ -152,6 +152,8 @@ pub struct ModelVariant {
     pub model_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer_revision: Option<String>,
+    #[serde(default)]
+    pub gated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,6 +262,8 @@ struct ModelListRuntime {
     model_revision: Option<String>,
     #[serde(default)]
     tokenizer_revision: Option<String>,
+    #[serde(default)]
+    gated: bool,
     #[serde(default)]
     task: Option<String>,
     #[serde(default)]
@@ -390,6 +394,7 @@ impl ModelListVariant {
             hugging_face_model_id: self.runtime.hugging_face_model_id,
             model_revision: self.runtime.model_revision,
             tokenizer_revision: self.runtime.tokenizer_revision,
+            gated: self.runtime.gated,
             task: self.runtime.task,
             runner: self.runtime.runner,
             runtime_compatibility: self.runtime.compatibility,
@@ -565,7 +570,7 @@ mod tests {
     fn parses_generated_model_list_as_a_catalog() {
         let catalog = Catalog::from_slice(MODEL_LIST).unwrap();
 
-        assert_eq!(catalog.catalog_version, "2026.07.22.6");
+        assert_eq!(catalog.catalog_version, "2026.07.30.1");
         assert_eq!(catalog.models.len(), 36);
         assert_eq!(
             catalog
@@ -573,7 +578,7 @@ mod tests {
                 .iter()
                 .map(|model| model.variants.len())
                 .sum::<usize>(),
-            90
+            91
         );
         assert_eq!(catalog.models[0].variants[0].runtime_ref, "bge-m3:567m");
         assert_eq!(catalog.models[0].provider.as_deref(), Some("BAAI"));
@@ -591,6 +596,21 @@ mod tests {
         );
         assert_eq!(catalog.models[0].license.profile_id.as_deref(), Some("mit"));
         assert_eq!(catalog.models[0].license.commercial_use, "permitted");
+        let Some(vllm) = catalog
+            .models
+            .iter()
+            .flat_map(|model| &model.variants)
+            .find(|variant| variant.id == "qwen-qwen2.5-0.5b-vllm-f16")
+        else {
+            panic!("the pinned vLLM acceptance variant should be present");
+        };
+        assert_eq!(vllm.runtime, "vllm");
+        assert_eq!(
+            vllm.model_revision.as_deref(),
+            Some("7ae557604adf67be50417f59c2c2f167def9a775")
+        );
+        assert_eq!(vllm.model_revision, vllm.tokenizer_revision);
+        assert!(!vllm.gated);
         let ollama = &catalog.runtimes[0];
         assert_eq!(ollama.install.strategy.0, "archive");
         assert_eq!(ollama.install.version, "0.32.1");

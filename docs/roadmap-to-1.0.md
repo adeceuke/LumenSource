@@ -39,19 +39,19 @@ that has actually answered a validation request.
 - [x] Use one **Add model** workflow regardless of how many models are already
       installed.
 - [x] Preserve the same steps and safety checks on every invocation.
-- [ ] Preselect saved target, runtime, use case, and performance profile without
+- [x] Preselect saved target, runtime, use case, and performance profile without
       hiding or bypassing them.
 - [x] Let the user change those selections for each installation.
 - [ ] Make the Back, Cancel, retry, and interrupted-install behavior consistent
       at every step.
-- [ ] Return to the model library or open the installed model after completion,
+- [x] Return to the model library or open the installed model after completion,
       using an explicit user choice rather than first-run behavior.
 
 ### Beginner performance profiles
 
 - [x] Add **Safe**, **Balanced**, **Fast**, and **Custom** profiles.
 - [x] Make **Balanced** the default.
-- [ ] Derive context length, concurrency, GPU-memory allocation, offloading,
+- [x] Derive context length, concurrency, GPU-memory allocation, offloading,
       and preferred accelerator from detected hardware and catalog limits.
 - [x] Show a short outcome-oriented explanation for each profile.
 - [x] Keep calculated runtime values visible in the model Settings tab.
@@ -63,31 +63,31 @@ that has actually answered a validation request.
 
 ### Post-install validation
 
-- [ ] Send a small deterministic chat, completion, or embedding request suited
+- [x] Send a small deterministic chat, completion, or embedding request suited
       to the model's declared capabilities.
-- [ ] Verify runtime health, served model identity, endpoint behavior, and
+- [x] Verify runtime health, served model identity, endpoint behavior, and
       authentication.
-- [ ] Confirm that the configured context and accelerator settings were
+- [x] Confirm that the configured context and accelerator settings were
       accepted where the runtime exposes that information.
-- [ ] Report whether the model is running on CPU, GPU, or a mixed allocation
+- [x] Report whether the model is running on CPU, GPU, or a mixed allocation
       without treating unavailable metrics as failure.
-- [ ] Redact the validation prompt and response from lifecycle logs and
+- [x] Redact the validation prompt and response from lifecycle logs and
       telemetry.
-- [ ] Offer **Retry**, **Use safer settings**, **Open diagnostics**, and
+- [x] Offer **Retry**, **Use safer settings**, **Open diagnostics**, and
       **Remove incomplete installation** when validation fails.
-- [ ] Mark a model Ready only after validation succeeds.
+- [x] Mark a model Ready only after validation succeeds.
 
 ### Catalog readiness
 
 - [ ] Publish real equivalent Ollama and vLLM variants for a small,
       acceptance-tested model set.
-- [ ] Pin model and tokenizer revisions for managed vLLM entries.
-- [ ] Identify gated models before installation and request a Hugging Face
+- [x] Pin model and tokenizer revisions for managed vLLM entries.
+- [x] Identify gated models before installation and request a Hugging Face
       token only when required.
-- [ ] Add plain-language labels such as **Beginner friendly**, **Fast**,
+- [x] Add plain-language labels such as **Beginner friendly**, **Fast**,
       **High quality**, **Reasoning**, **Embeddings**, and **Vision**.
-- [ ] Include an estimated loaded-memory range in addition to download size.
-- [ ] Record which hardware configurations have passed an actual inference
+- [x] Include an estimated loaded-memory range in addition to download size.
+- [x] Record which hardware configurations have passed an actual inference
       validation for each supported runtime family.
 
 ### 0.6 acceptance criteria
@@ -95,12 +95,27 @@ that has actually answered a validation request.
 - [x] The first and tenth model use the same installation workflow.
 - [x] A user can install a recommended model without understanding runtime
       engine settings.
-- [ ] Every successful installation ends with a verified inference or embedding
+- [x] Every successful installation ends with a verified inference or embedding
       response.
-- [ ] A failed validation provides at least one safe recovery action.
-- [ ] Safe and Balanced configurations do not knowingly exceed detected memory.
+- [x] A failed validation provides at least one safe recovery action.
+- [x] Safe and Balanced configurations do not knowingly exceed detected memory.
 - [ ] Windows Ollama and Linux Ollama pass clean-machine installation tests.
 - [ ] At least one managed-vLLM catalog variant passes the Linux NVIDIA flow.
+
+### Remaining 0.6 release evidence
+
+The implementation is complete and passes the automated Windows check suite.
+The unchecked clean-machine and managed-vLLM acceptance items require physical
+runtime environments and remain release evidence rather than unfinished
+application code:
+
+- Run an Ollama chat or embedding installation on clean Windows and Linux
+  machines, covering validation success and safer-profile recovery.
+- Run the pinned Qwen 2.5 0.5B vLLM variant on Linux with an NVIDIA GPU and
+  container GPU support, then record the persisted validation report.
+- Exercise cancellation at each assistant stage and restart during a download;
+  restart recovery itself is intentionally tracked under 0.7 interrupted
+  operations.
 
 ## 0.7: Inventory, storage, import, and interrupted-operation recovery
 

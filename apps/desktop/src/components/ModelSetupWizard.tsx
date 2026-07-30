@@ -15,6 +15,7 @@ import type {
   EndpointDetails,
   HardwareProfile,
   InstallProgress,
+  InstallationValidationReport,
   PerformanceProfile,
   PerformanceProfileReport,
   PreflightReport,
@@ -76,6 +77,8 @@ export interface ModelSetupWizardProps {
   installRuntime: boolean;
   runtimeInstallRequired: boolean;
   installProgress?: InstallProgress;
+  validationReport?: InstallationValidationReport;
+  validationDetailsOpen: boolean;
   selectedIsDummy: boolean;
   endpoint?: EndpointDetails;
   copiedField?: string;
@@ -96,6 +99,7 @@ export interface ModelSetupWizardProps {
   setSeparateLicenseReference: Dispatch<SetStateAction<string>>;
   setStartAfterInstall: Dispatch<SetStateAction<boolean>>;
   setInstallRuntime: Dispatch<SetStateAction<boolean>>;
+  setValidationDetailsOpen: Dispatch<SetStateAction<boolean>>;
   cancelWizard: () => void;
   openRemoteTargetDialog: () => void;
   checkRemoteTarget: () => void | Promise<void>;
@@ -103,8 +107,12 @@ export interface ModelSetupWizardProps {
   goToPreviousStep: () => void;
   openPublisherUrl: (url: string) => void | Promise<void>;
   requestInstallCancellation: () => void | Promise<void>;
+  retryValidation: () => void | Promise<void>;
+  useSaferSettings: () => void | Promise<void>;
+  removeIncompleteInstall: () => void | Promise<void>;
   startInstall: () => void | Promise<void>;
   confirmWizardClose: () => void;
+  openInstalledModel: () => void;
   copyText: (value: string, key: string) => void | Promise<void>;
 }
 
@@ -147,6 +155,8 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     installRuntime,
     runtimeInstallRequired,
     installProgress,
+    validationReport,
+    validationDetailsOpen,
     selectedIsDummy,
     endpoint,
     copiedField,
@@ -167,6 +177,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     setSeparateLicenseReference,
     setStartAfterInstall,
     setInstallRuntime,
+    setValidationDetailsOpen,
     cancelWizard,
     openRemoteTargetDialog,
     checkRemoteTarget,
@@ -174,8 +185,12 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     goToPreviousStep,
     openPublisherUrl,
     requestInstallCancellation,
+    retryValidation,
+    useSaferSettings,
+    removeIncompleteInstall,
     startInstall,
     confirmWizardClose,
+    openInstalledModel,
     copyText,
   } = props;
 
@@ -384,6 +399,36 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                         </button>
                       )}
                     </div>
+                    {validationReport && !validationReport.passed && (
+                      <section className="validation-recovery" aria-live="polite">
+                        <h3>{text.wizard.validation.failedTitle}</h3>
+                        <p>{validationReport.message}</p>
+                        <div className="validation-actions">
+                          <button className="secondary-button" type="button" disabled={downloadBusy} onClick={() => void retryValidation()}>
+                            {text.wizard.validation.retry}
+                          </button>
+                          <button className="secondary-button" type="button" disabled={downloadBusy || performanceProfile === "safe"} onClick={() => void useSaferSettings()}>
+                            {text.wizard.validation.safer}
+                          </button>
+                          <button className="secondary-button" type="button" onClick={() => setValidationDetailsOpen((open) => !open)}>
+                            {validationDetailsOpen ? text.wizard.validation.hideDiagnostics : text.wizard.validation.openDiagnostics}
+                          </button>
+                          <button className="danger-button" type="button" disabled={downloadBusy} onClick={() => void removeIncompleteInstall()}>
+                            {text.wizard.validation.removeIncomplete}
+                          </button>
+                        </div>
+                        {validationDetailsOpen && (
+                          <div className="validation-checks">
+                            {validationReport.checks.map((check) => (
+                              <div className={`validation-check ${check.status}`} key={check.id}>
+                                <strong>{check.id}</strong>
+                                <span>{check.detail}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    )}
                     <div className="actions">
                       <button className="back-button" type="button" onClick={goToPreviousStep}>
                         {text.common.back}
@@ -542,6 +587,11 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                           <strong>{selectedRecommendation.provider}</strong>
                         </div>
                         <h3>{selectedRecommendation.name}</h3>
+                        {selectedRecommendation.labels.length > 0 && (
+                          <div className="model-labels">
+                            {selectedRecommendation.labels.map((label) => <span key={label}>{label}</span>)}
+                          </div>
+                        )}
                         <div className="model-version">
                           <span>{text.wizard.suggestion.version}</span>
                           <code>{selectedRecommendation.modelId}</code>
@@ -551,6 +601,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                           <span><b>{formatBytes(selectedRecommendation.sizeBytes)}</b>{text.wizard.suggestion.storage}</span>
                           <span><b>{selectedRecommendation.contextWindow.toLocaleString(text.locale)}</b>{text.wizard.suggestion.context}</span>
                           <span><b>{selectedRecommendation.version}</b>{text.wizard.suggestion.runtime}</span>
+                          <span><b>{formatBytes(selectedRecommendation.estimatedLoadedMemoryMinBytes)} - {formatBytes(selectedRecommendation.estimatedLoadedMemoryMaxBytes)}</b>{text.wizard.suggestion.loadedMemory}</span>
                         </div>
                         <h4>{selectedRecommendation.compatible ? text.wizard.suggestion.why : text.wizard.suggestion.compatibilityIssues}</h4>
                         <ul className="ranking-reasons">
@@ -812,7 +863,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                           {text.common.back}
                         </button>
                       )}
-                      <button className="primary-button" type="button" onClick={startInstall} disabled={downloadBusy || !preflight?.canInstall || (runtimeInstallRequired && !installRuntime)}>
+                      <button className="primary-button" type="button" onClick={startInstall} disabled={downloadBusy || Boolean(validationReport && !validationReport.passed) || !preflight?.canInstall || (runtimeInstallRequired && !installRuntime)}>
                         {downloadBusy ? text.wizard.install.installing : startAfterInstall ? text.wizard.install.installAndStart : text.wizard.install.install}
                       </button>
                     </div>
@@ -827,6 +878,20 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                         : text.wizard.ready.localRunning
                       : text.wizard.ready.notLoaded}</p>
                     <div className="success-mark">✓</div>
+                    {validationReport?.passed && (
+                      <div className="validation-success">
+                        <strong>{text.wizard.validation.passedTitle}</strong>
+                        <span>{validationReport.message}</span>
+                        <small>
+                          {validationReport.accelerator
+                            ? text.wizard.validation.allocation(validationReport.accelerator)
+                            : text.wizard.validation.metricsUnavailable}
+                          {validationReport.effectiveContextLength
+                            ? ` · ${text.wizard.validation.context(validationReport.effectiveContextLength)}`
+                            : ""}
+                        </small>
+                      </div>
+                    )}
                     <div className={`runtime-hero ${startAfterInstall ? "" : "stopped"}`}>
                       <div><span className="pulse" /> {selectedIsDummy
                         ? startAfterInstall ? text.wizard.ready.testActive : text.wizard.ready.testInstalled
@@ -857,7 +922,8 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                       </div>
                     </div>
                     <div className="actions">
-                      <button className="primary-button" type="button" onClick={confirmWizardClose}>{text.common.finish}</button>
+                      <button className="secondary-button" type="button" onClick={confirmWizardClose}>{text.wizard.ready.returnToLibrary}</button>
+                      <button className="primary-button" type="button" onClick={openInstalledModel}>{text.wizard.ready.openModel}</button>
                     </div>
                   </div>
                 )}

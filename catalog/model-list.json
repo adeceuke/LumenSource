@@ -1,8 +1,8 @@
 {
   "$schema": "./model-list.schema.json",
   "schema_version": "2",
-  "catalog_version": "2026.07.22.6",
-  "generated_at": "2026-07-22T12:16:32Z",
+  "catalog_version": "2026.07.30.1",
+  "generated_at": "2026-07-30T00:00:00Z",
   "generator": {
     "name": "lumensource-catalog",
     "version": "2.0.0"
@@ -6103,6 +6103,65 @@
               "url": "https://docs.ollama.com/quickstart",
               "retrieved_at": "2026-07-22T12:16:32Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ]
+        },
+        {
+          "id": "qwen-qwen2.5-0.5b-vllm-f16",
+          "display_name": "494M BF16 (vLLM)",
+          "runtime": {
+            "engine": "vllm",
+            "model_ref": "qwen2.5-0.5b-instruct",
+            "digest": null,
+            "hugging_face_model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+            "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+            "tokenizer_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+            "gated": false,
+            "task": "generate",
+            "runner": "generate",
+            "compatibility": [
+              "vllm-0.23"
+            ]
+          },
+          "parameters_billion": 0.494,
+          "quantization": null,
+          "context_window_tokens": 32768,
+          "model_size_bytes": 1000000000,
+          "download_item_count": 1,
+          "size_is_estimate": true,
+          "requirements": {
+            "minimum_system_ram_bytes": 8589934592,
+            "recommended_system_ram_bytes": 17179869184,
+            "minimum_vram_bytes": 2147483648,
+            "recommended_vram_bytes": 4294967296,
+            "minimum_free_storage_bytes": 3221225472,
+            "supported_os": [
+              "linux"
+            ],
+            "supported_architectures": [
+              "x86_64"
+            ],
+            "accelerators": [
+              "cuda"
+            ],
+            "notes": "Managed vLLM requires Linux, an NVIDIA GPU, and a configured GPU container runtime. Memory guidance includes runtime and KV-cache headroom."
+          },
+          "recommended_for": [
+            "general",
+            "programming",
+            "tool-use",
+            "translation"
+          ],
+          "sources": [
+            {
+              "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/tree/7ae557604adf67be50417f59c2c2f167def9a775",
+              "retrieved_at": "2026-07-30T00:00:00Z",
+              "notes": "Immutable model and tokenizer revision, BF16 weights, model size, architecture, context length, license, and official vLLM serving example."
+            },
+            {
+              "url": "https://docs.vllm.ai/en/latest/models/supported_models/",
+              "retrieved_at": "2026-07-30T00:00:00Z",
+              "notes": "Official vLLM support documentation for the Qwen2ForCausalLM architecture."
             }
           ]
         },
