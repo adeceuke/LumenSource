@@ -313,14 +313,14 @@ runtime or workflow during the stabilization cycle.
 
 ### Release freeze
 
-- [ ] Freeze new runtime and orchestration features at the 1.0 release
+- [x] Freeze new runtime and orchestration features at the 1.0 release
       candidate.
 - [ ] Resolve all data-loss, secret-exposure, installation, update, rollback,
       and model-removal defects.
 - [ ] Resolve documented critical accessibility failures.
-- [ ] Publish the final supported operating system, architecture, accelerator,
+- [x] Publish the final supported operating system, architecture, accelerator,
       runtime, and remote-target matrix.
-- [ ] Publish known limitations without describing untested combinations as
+- [x] Publish known limitations without describing untested combinations as
       supported.
 
 ### End-to-end acceptance
@@ -349,15 +349,29 @@ runtime or workflow during the stabilization cycle.
 
 ### 1.0 completion criteria
 
-- [ ] Every advertised workflow has a repeatable clean-machine acceptance test.
+- [x] Every advertised workflow has a repeatable clean-machine acceptance test.
 - [ ] No critical or high-severity release-blocking issue remains open.
-- [ ] All persisted schemas have tested migration and rollback paths.
+- [x] All persisted schemas have tested migration and rollback paths.
 - [ ] The full Windows and Linux build, test, package, and installer workflows
       pass from clean environments.
-- [ ] User documentation covers installation, model selection, storage,
+- [x] User documentation covers installation, model selection, storage,
       updates, sharing, recovery, privacy, and uninstallation.
 - [ ] A non-expert can complete the primary workflow without using a terminal or
       knowing which runtime flags to select.
+
+### 1.0 campaign status
+
+The 1.0 implementation is feature-frozen. The support matrix, known
+limitations, end-user guide, release checklist, and case-by-case clean-machine
+campaign are published in `docs/`. Windows and Ubuntu acceptance scripts run
+the automated suite and create environment-specific evidence reports.
+
+Unchecked items are deliberately the results of the upcoming campaign: signed
+package execution, clean installation/upgrade/repair/uninstall, real Ollama and
+managed-vLLM inference, external/remote recovery, resource pressure,
+accessibility/scaling/contrast, non-expert comprehension, and final defect
+triage. The version identifies the 1.0 candidate implementation; it does not
+pre-approve those results.
 
 ## Explicitly deferred until after 1.0
 

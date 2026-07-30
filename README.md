@@ -64,7 +64,10 @@ See [development setup](docs/development.md), [platform support](docs/platform-s
 [roadmap to 1.0](docs/roadmap-to-1.0.md) tracks the planned stabilization and
 beginner-focused management releases. Release operators should also read
 [API sharing and security](docs/sharing-and-security.md) and
-[release packaging and data retention](docs/release-packaging.md).
+[release packaging and data retention](docs/release-packaging.md). The
+[1.0 user guide](docs/user-guide.md), [support matrix](docs/support-matrix.md),
+and [acceptance campaign](docs/acceptance-1.0.md) define the stabilization
+boundary.
 
 ## Current local workflow
 

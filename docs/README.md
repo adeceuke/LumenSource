@@ -16,6 +16,17 @@ The Markdown documentation describes the current implementation:
   delivery plan for settings, configurable Ollama, vLLM, and model overrides
 - [`roadmap-to-1.0.md`](roadmap-to-1.0.md) — planned 0.6 through 1.0 releases,
   with one consistent model-installation workflow and release acceptance gates
+- [`user-guide.md`](user-guide.md) — installation, model management, storage,
+  updates, sharing, recovery, privacy, and uninstallation
+- [`support-matrix.md`](support-matrix.md) — exact 1.0 candidate boundaries
+- [`known-limitations.md`](known-limitations.md) — unsupported and best-effort
+  combinations
+- [`acceptance-1.0.md`](acceptance-1.0.md) — repeatable clean-machine campaign
+- [`release-checklist.md`](release-checklist.md) — final release decision gates
+- [`sharing-and-security.md`](sharing-and-security.md) — authenticated gateway,
+  firewall boundary, and TLS deployment
+- [`release-packaging.md`](release-packaging.md) — signed/verified packages and
+  data retention
 
 The product and architecture source documents are stored at the repository
 root:

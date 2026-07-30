@@ -1020,6 +1020,34 @@ mod tests {
     }
 
     #[test]
+    fn every_previous_settings_schema_migrates_to_secure_1_0_defaults() {
+        for schema_version in 1..SETTINGS_SCHEMA_VERSION {
+            let settings = ApplicationSettings {
+                schema_version,
+                sharing: SharingSettings {
+                    enabled: true,
+                    allow_other_devices: true,
+                    ..SharingSettings::default()
+                },
+                ollama: OllamaSettings {
+                    bind_address: "0.0.0.0:11434".to_owned(),
+                    allowed_origins: vec!["*".to_owned()],
+                    ..OllamaSettings::default()
+                },
+                ..ApplicationSettings::default()
+            };
+
+            let migrated = migrate_settings(settings);
+
+            assert_eq!(migrated.schema_version, SETTINGS_SCHEMA_VERSION);
+            assert!(!migrated.sharing.enabled);
+            assert!(!migrated.ollama.exposes_network());
+            assert!(migrated.ollama.allowed_origins.is_empty());
+            assert!(validate_settings(&migrated).is_empty());
+        }
+    }
+
+    #[test]
     fn schema_one_storage_default_migrates_to_the_active_ollama_directory() {
         let settings = ApplicationSettings {
             schema_version: 1,

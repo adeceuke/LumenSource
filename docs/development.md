@@ -39,8 +39,9 @@ track native runtime dependencies.
 
 ## Supported development host
 
-The v0.1 reference platform is Ubuntu 24.04 LTS on x86_64. Run the checked-in
-installer on a development machine when a fully native toolchain is desired:
+Ubuntu 24.04 LTS and Windows 11 on x86_64 are the 1.0 candidate development and
+package-validation hosts. Run the checked-in installer on Ubuntu when a fully
+native toolchain is desired:
 
 ```shell
 scripts/setup-ubuntu-24.04.sh
@@ -116,8 +117,20 @@ sudo apt install \
 ```
 
 The exact package names differ on other distributions. Other operating systems
-are architectural targets but are not v0.1 release targets; see
+are not 1.0 release targets; see
 [platform support](platform-support.md).
+
+## Release and acceptance
+
+Development packages can be built with `container.ps1 package` or
+`container.sh package`. Stable Windows packages must instead pass
+`scripts/package-release.ps1` with the release Authenticode identity. Linux
+release candidates use `scripts/package-release.sh`.
+
+Before manual clean-machine testing, run `scripts/acceptance.ps1` on Windows or
+`scripts/acceptance.sh` on Ubuntu. Each command runs the automated suite and
+creates an environment-specific evidence template. The exact manual cases and
+release decision are in [the 1.0 acceptance campaign](acceptance-1.0.md).
 
 ## Checks
 

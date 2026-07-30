@@ -574,7 +574,19 @@ impl SharedCoreAdapter {
                     .join(" ")
             ));
         }
+        let restored_installed_model = backup.state.installed_model.clone();
+        let restored_selected_runtime = backup.state.selected_runtime.clone();
+        let restored_ports = backup
+            .state
+            .models
+            .iter()
+            .filter_map(|model| model.model_settings.as_ref()?.managed_port)
+            .collect::<BTreeSet<_>>();
         *self.state.write().await = backup.state;
+        *self.installed_model.write().await = restored_installed_model;
+        *self.selected_runtime.write().await = restored_selected_runtime;
+        *self.managed_ports.lock().await = restored_ports;
+        *self.remote_session.write().await = None;
         self.flush_state().await?;
         let settings = self.state.read().await.settings.clone();
         self.runtime
@@ -617,12 +629,20 @@ impl SharedCoreAdapter {
         {
             let mut state = self.state.write().await;
             state.settings = settings.clone();
+            state.runtime_executable = None;
+            state.selected_runtime = None;
             state.interrupted_install = None;
             state.queued_operations.clear();
             if clear_inventory {
                 state.models.clear();
                 state.installed_model = None;
             }
+        }
+        *self.selected_runtime.write().await = None;
+        *self.remote_session.write().await = None;
+        if clear_inventory {
+            *self.installed_model.write().await = None;
+            self.managed_ports.lock().await.clear();
         }
         self.flush_state().await?;
         self.telemetry.set_enabled(false).await?;
@@ -7030,5 +7050,23 @@ mod tests {
         assert!(redacted.contains("4096"));
         assert!(!redacted.contains("private-host"));
         assert!(!redacted.contains("private prompt"));
+    }
+
+    #[test]
+    fn user_state_backup_contains_no_credential_values() {
+        let backup = StateBackup {
+            schema_version: 1,
+            exported_at: "2026-01-01T00:00:00Z".to_owned(),
+            credentials_included: false,
+            state: PersistedState::default(),
+        };
+        let Ok(serialized) = serde_json::to_string(&backup) else {
+            panic!("state backup should serialize");
+        };
+
+        assert!(serialized.contains("\"credentialsIncluded\":false"));
+        assert!(!serialized.contains("\"password\""));
+        assert!(!serialized.contains("\"apiKey\""));
+        assert!(!serialized.contains("\"secret\""));
     }
 }

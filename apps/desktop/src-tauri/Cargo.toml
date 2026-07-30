@@ -1,6 +1,6 @@
 [package]
 name = "lumen-source-desktop"
-version = "0.9.0"
+version = "1.0.0"
 edition = "2021"
 publish = false
 
@@ -17,11 +17,11 @@ base64 = "0.22.1"
 chrono = { version = "0.4.42", default-features = false, features = ["clock"] }
 dirs = "6.0.0"
 keyring = "4.1.5"
-lumen-source-catalog = { version = "0.9.0", path = "../../../crates/lumen-source-catalog" }
-lumen-source-hardware = { version = "0.9.0", path = "../../../crates/lumen-source-hardware" }
-lumen-source-host = { version = "0.9.0", path = "../../../crates/lumen-source-host" }
-lumen-source-recommend = { version = "0.9.0", path = "../../../crates/lumen-source-recommend" }
-lumen-source-runtime = { version = "0.9.0", path = "../../../crates/lumen-source-runtime" }
+lumen-source-catalog = { version = "1.0.0", path = "../../../crates/lumen-source-catalog" }
+lumen-source-hardware = { version = "1.0.0", path = "../../../crates/lumen-source-hardware" }
+lumen-source-host = { version = "1.0.0", path = "../../../crates/lumen-source-host" }
+lumen-source-recommend = { version = "1.0.0", path = "../../../crates/lumen-source-recommend" }
+lumen-source-runtime = { version = "1.0.0", path = "../../../crates/lumen-source-runtime" }
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"

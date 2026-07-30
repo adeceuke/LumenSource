@@ -9,8 +9,8 @@ workspace = true
 
 [dependencies]
 async-trait = "0.1.91"
-lumen-source-hardware = { version = "0.9.0", path = "../lumen-source-hardware" }
-lumen-source-runtime = { version = "0.9.0", path = "../lumen-source-runtime" }
+lumen-source-hardware = { version = "1.0.0", path = "../lumen-source-hardware" }
+lumen-source-runtime = { version = "1.0.0", path = "../lumen-source-runtime" }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.19"
 

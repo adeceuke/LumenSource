@@ -1,8 +1,17 @@
 # Current implementation
 
-This page describes the behavior currently implemented in the v0.1 desktop
-application. Ubuntu 24.04 LTS on x86_64 is the release and acceptance-test
-target.
+This page describes the desktop implementation leading into the 1.0 acceptance
+campaign. Windows 11 x86_64 and Ubuntu 24.04 LTS x86_64 are the candidate local
+targets; the exact boundary and evidence status are maintained in
+[the support matrix](support-matrix.md).
+
+The original sections below preserve detailed subsystem behavior. The current
+cross-feature workflows—including consistent installation, Ollama and managed
+vLLM settings, validation, storage ownership, interrupted-operation recovery,
+safe updates and rollback, resource orchestration, authenticated API sharing,
+diagnostic redaction, state backup/restore, and safe reset—are summarized in
+the [user guide](user-guide.md) and tracked in the
+[roadmap](roadmap-to-1.0.md).
 
 ## Guided installation wizard
 
