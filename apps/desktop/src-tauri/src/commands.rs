@@ -1,8 +1,8 @@
 use crate::bridge::{
     CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, InstallOptions,
-    MachineUsageSnapshot, PerformanceSnapshot, PersistedModelEntry, PreflightReport,
-    Recommendation, RemoteCredentialStatus, RuntimeDiagnostics, RuntimeMigrationOption,
-    RuntimeMigrationReport, RuntimeStatus, SharedCoreAdapter,
+    MachineUsageSnapshot, PerformanceProfileReport, PerformanceSnapshot, PersistedModelEntry,
+    PreflightReport, Recommendation, RemoteCredentialStatus, RuntimeDiagnostics,
+    RuntimeMigrationOption, RuntimeMigrationReport, RuntimeStatus, SharedCoreAdapter,
 };
 use crate::managed_vllm::ManagedVllmSupport;
 use lumen_source_runtime::ChatMessage;
@@ -191,6 +191,8 @@ pub struct InstallRequest {
     model_id: String,
     #[serde(default)]
     target_id: Option<String>,
+    #[serde(default)]
+    performance_profile: crate::settings::PerformanceProfile,
     license_basis: String,
     #[serde(default)]
     license_reference: Option<String>,
@@ -313,6 +315,17 @@ pub async fn run_preflight(
 }
 
 #[tauri::command]
+pub async fn performance_profile(
+    core: State<'_, SharedCoreAdapter>,
+    model_id: String,
+    target_id: Option<String>,
+    profile: crate::settings::PerformanceProfile,
+) -> Result<PerformanceProfileReport, String> {
+    core.performance_profile(&model_id, &normalize_target_id(target_id), profile)
+        .await
+}
+
+#[tauri::command]
 pub async fn install_model(
     app: AppHandle,
     core: State<'_, SharedCoreAdapter>,
@@ -323,6 +336,7 @@ pub async fn install_model(
         request.model_id,
         normalize_target_id(request.target_id),
         InstallOptions {
+            performance_profile: request.performance_profile,
             license_basis: request.license_basis,
             license_reference: request.license_reference,
             license_acknowledged: request.license_acknowledged,

@@ -60,7 +60,9 @@ MSI/NSIS installer.
 
 See [development setup](docs/development.md), [platform support](docs/platform-support.md),
 [remote host planning](docs/remote-hosts.md), and
-[current implementation](docs/current-implementation.md) for details.
+[current implementation](docs/current-implementation.md) for details. The
+[roadmap to 1.0](docs/roadmap-to-1.0.md) tracks the planned stabilization and
+beginner-focused management releases.
 
 ## Current local workflow
 

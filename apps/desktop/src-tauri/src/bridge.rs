@@ -40,8 +40,8 @@ use crate::runtime_registry::{
 use crate::settings::{
     migrate_settings, validate_external_vllm_config, validate_model_settings, validate_settings,
     ApplicationSettings, ExternalVllmConfig, ModelInferenceTask, ModelSettings,
-    ModelSettingsSaveReport, OllamaConnectionReport, RuntimeSecretKind, SettingsSaveReport,
-    VllmConnectionReport,
+    ModelSettingsSaveReport, OllamaConnectionReport, PerformanceProfile, RuntimeSecretKind,
+    SettingsSaveReport, VllmConnectionReport,
 };
 use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
 
@@ -120,6 +120,7 @@ pub struct SharedCoreAdapter {
 }
 
 pub struct InstallOptions {
+    pub performance_profile: PerformanceProfile,
     pub license_basis: String,
     pub license_reference: Option<String>,
     pub license_acknowledged: bool,
@@ -1796,6 +1797,8 @@ impl SharedCoreAdapter {
             options.license_acknowledged,
         )
         .await?;
+        self.performance_profile(&variant_id, &target_id, options.performance_profile)
+            .await?;
         let telemetry_model_id = {
             let catalog = self.catalog_clone().await?;
             let (model, _) = find_variant(&catalog, &variant_id)?;
@@ -1835,6 +1838,21 @@ impl SharedCoreAdapter {
             failure: result.as_ref().err().map(|error| failure_category(error)),
         });
         result
+    }
+
+    pub async fn performance_profile(
+        &self,
+        variant_id: &str,
+        target_id: &str,
+        profile: PerformanceProfile,
+    ) -> Result<PerformanceProfileReport, String> {
+        let catalog = self.catalog_clone().await?;
+        let (_, variant) = find_variant(&catalog, variant_id)?;
+        ensure_supported_runtime(variant)?;
+        let hardware = self.hardware_for_target(target_id).await?;
+        Ok(build_performance_profile_report(
+            variant, &hardware, profile,
+        ))
     }
 
     async fn validate_license_authorization(
@@ -3092,6 +3110,7 @@ fn vllm_config_for_entry(entry: &PersistedModelEntry) -> Option<ExternalVllmConf
 fn chat_options(settings: &crate::settings::ModelSettings) -> ChatOptions {
     ChatOptions {
         system_prompt: settings.system_prompt.clone(),
+        context_length: settings.context_length,
         temperature: settings.temperature,
         max_output_tokens: settings.max_output_tokens,
         top_p: settings.top_p,
@@ -3334,6 +3353,107 @@ fn find_variant<'a>(
         .ok_or_else(|| format!("Model variant `{variant_id}` is not in the active catalog"))
 }
 
+fn build_performance_profile_report(
+    variant: &ModelVariant,
+    hardware: &HardwareFacts,
+    profile: PerformanceProfile,
+) -> PerformanceProfileReport {
+    let minimum_memory_bytes = (variant.requirements.min_ram_gb * GIB).ceil() as u64;
+    let fits_detected_memory = hardware.total_ram_bytes >= minimum_memory_bytes;
+    let accelerator = hardware
+        .accelerators
+        .first()
+        .map(|device| accelerator_backend(device.kind).to_owned())
+        .unwrap_or_else(|| "cpu".to_owned());
+    let maximum_context = variant.context_window_tokens;
+    let (context_limit, concurrent_requests, gpu_memory_utilization, summary) = match profile {
+        PerformanceProfile::Safe => (
+            2_048,
+            1,
+            0.65,
+            "Uses a smaller context and one request at a time to leave more memory available.",
+        ),
+        PerformanceProfile::Balanced => (
+            4_096,
+            2,
+            0.80,
+            "Balances response quality, speed, and memory use for this machine.",
+        ),
+        PerformanceProfile::Fast => (
+            if hardware.total_ram_bytes >= minimum_memory_bytes.saturating_mul(2) {
+                16_384
+            } else {
+                8_192
+            },
+            4,
+            0.90,
+            "Uses more memory and concurrency to prioritize throughput.",
+        ),
+        PerformanceProfile::Custom => (
+            0,
+            0,
+            0.0,
+            "Keeps runtime defaults so you can tune the detailed model settings yourself.",
+        ),
+    };
+    let context_length = if profile == PerformanceProfile::Custom {
+        None
+    } else {
+        Some(maximum_context.map_or(context_limit, |maximum| maximum.min(context_limit)))
+    };
+    let mut settings = ModelSettings {
+        performance_profile: Some(profile),
+        context_length,
+        preferred_accelerator: (profile != PerformanceProfile::Custom).then(|| accelerator.clone()),
+        ..ModelSettings::default()
+    };
+    if variant.runtime == VLLM_RUNTIME && profile != PerformanceProfile::Custom {
+        settings.vllm_gpu_memory_utilization = Some(gpu_memory_utilization);
+        settings.vllm_max_concurrent_sequences = Some(concurrent_requests);
+        settings.vllm_prefix_caching = Some(profile != PerformanceProfile::Safe);
+        settings.vllm_tensor_parallel_size = Some(1);
+        settings.vllm_pipeline_parallel_size = Some(1);
+    }
+
+    let mut warnings = Vec::new();
+    if !fits_detected_memory {
+        warnings.push(format!(
+            "This model needs at least {:.1} GiB of system memory, but the machine has {:.1} GiB.",
+            variant.requirements.min_ram_gb,
+            hardware.total_ram_bytes as f64 / GIB
+        ));
+    } else if profile == PerformanceProfile::Fast
+        && hardware.available_ram_bytes < minimum_memory_bytes.saturating_mul(3) / 2
+    {
+        warnings.push(
+            "Fast may compete with other applications for memory. Balanced is the safer choice."
+                .to_owned(),
+        );
+    }
+    if accelerator == "cpu" && profile == PerformanceProfile::Fast {
+        warnings.push(
+            "No supported GPU was detected, so Fast may not improve response speed.".to_owned(),
+        );
+    }
+
+    PerformanceProfileReport {
+        profile,
+        settings,
+        summary: summary.to_owned(),
+        accelerator: if profile == PerformanceProfile::Custom {
+            "runtime default".to_owned()
+        } else {
+            accelerator
+        },
+        context_length,
+        concurrent_requests,
+        minimum_memory_bytes,
+        available_memory_bytes: hardware.available_ram_bytes,
+        fits_detected_memory,
+        warnings,
+    }
+}
+
 fn ensure_supported_runtime(variant: &ModelVariant) -> Result<(), String> {
     let registry = RuntimeRegistry::default();
     if registry.supports(&variant.runtime)
@@ -3565,6 +3685,9 @@ fn model_supports_chat(model: &ModelEntry) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lumen_source_hardware::{
+        AcceleratorFacts, AcceleratorKind, CpuFacts, MemoryFacts, OsFacts, StorageFacts,
+    };
     use lumen_source_runtime::InstalledModel;
 
     #[test]
@@ -3620,6 +3743,67 @@ mod tests {
         assert_eq!(intent_use_case("creative"), Ok("general"));
         assert_eq!(intent_use_case("research"), Ok("rag"));
         assert!(intent_use_case("unsupported").is_err());
+    }
+
+    #[test]
+    fn performance_profiles_are_hardware_aware_and_persist_their_identity() {
+        let Ok(catalog) = Catalog::from_slice(BUNDLED_CATALOG) else {
+            panic!("bundled model list should parse");
+        };
+        let Some(variant) = catalog
+            .models
+            .iter()
+            .flat_map(|model| &model.variants)
+            .next()
+        else {
+            panic!("bundled catalog should contain a model variant");
+        };
+        let gib = 1024_u64.pow(3);
+        let hardware = HardwareFacts {
+            os: OsFacts {
+                family: "windows".to_owned(),
+                distribution: None,
+                version: None,
+                architecture: "x86_64".to_owned(),
+            },
+            cpu: CpuFacts {
+                model: Some("Test CPU".to_owned()),
+                architecture: "x86_64".to_owned(),
+                logical_cores: 16,
+                physical_cores: Some(8),
+                frequency_mhz: None,
+            },
+            memory: MemoryFacts::default(),
+            total_ram_bytes: 32 * gib,
+            available_ram_bytes: 24 * gib,
+            storage: StorageFacts {
+                mount_point: PathBuf::from("C:\\"),
+                total_bytes: 512 * gib,
+                available_bytes: 256 * gib,
+            },
+            accelerators: vec![AcceleratorFacts {
+                kind: AcceleratorKind::Nvidia,
+                name: "Test GPU".to_owned(),
+                total_vram_bytes: Some(12 * gib),
+                driver_version: None,
+            }],
+        };
+
+        let safe = build_performance_profile_report(variant, &hardware, PerformanceProfile::Safe);
+        let balanced =
+            build_performance_profile_report(variant, &hardware, PerformanceProfile::Balanced);
+
+        assert_eq!(
+            safe.settings.performance_profile,
+            Some(PerformanceProfile::Safe)
+        );
+        assert_eq!(
+            balanced.settings.performance_profile,
+            Some(PerformanceProfile::Balanced)
+        );
+        assert_eq!(balanced.accelerator, "cuda");
+        assert!(safe.context_length <= balanced.context_length);
+        assert!(safe.concurrent_requests < balanced.concurrent_requests);
     }
 
     #[cfg(debug_assertions)]

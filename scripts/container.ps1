@@ -58,7 +58,10 @@ try {
                 "warnings"
             )
             Invoke-Native cargo @ClippyArguments
-            Invoke-Native cargo test --workspace
+            # The Tauri binary has no tests. Running its generated zero-test
+            # executable can be rejected by managed Windows Application
+            # Control policies, while every project test lives in a library.
+            Invoke-Native cargo test --workspace --lib
             Push-Location $DesktopRoot
             try {
                 Invoke-Native npm ci

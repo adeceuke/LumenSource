@@ -14,6 +14,8 @@ The Markdown documentation describes the current implementation:
   semantics, and the server ingestion contract
 - [`runtime-settings-plan.md`](runtime-settings-plan.md) — three-step tracked
   delivery plan for settings, configurable Ollama, vLLM, and model overrides
+- [`roadmap-to-1.0.md`](roadmap-to-1.0.md) — planned 0.6 through 1.0 releases,
+  with one consistent model-installation workflow and release acceptance gates
 
 The product and architecture source documents are stored at the repository
 root:

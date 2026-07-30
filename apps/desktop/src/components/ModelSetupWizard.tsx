@@ -15,6 +15,8 @@ import type {
   EndpointDetails,
   HardwareProfile,
   InstallProgress,
+  PerformanceProfile,
+  PerformanceProfileReport,
   PreflightReport,
   Recommendation,
   RemoteConnectionReport,
@@ -29,10 +31,12 @@ const WIZARD_STEPS: WizardStep[] = [
   "hardware",
   "intent",
   "suggestion",
+  "profile",
   "license",
   "download",
   "ready",
 ];
+const PERFORMANCE_PROFILES: PerformanceProfile[] = ["safe", "balanced", "fast", "custom"];
 
 export interface ModelSetupWizardProps {
   wizardStep: WizardStep;
@@ -57,6 +61,10 @@ export interface ModelSetupWizardProps {
   modelPickerPosition?: { top: number; left: number; width: number };
   preflight?: PreflightReport;
   preflightLoading: boolean;
+  performanceProfile: PerformanceProfile;
+  profileReport?: PerformanceProfileReport;
+  profileLoading: boolean;
+  profileError?: string;
   licenseBasis: "catalog" | "separate";
   licenseAcknowledged: boolean;
   separateLicenseReference: string;
@@ -82,6 +90,7 @@ export interface ModelSetupWizardProps {
   setSelectedModelId: Dispatch<SetStateAction<string>>;
   setModelPickerOpen: Dispatch<SetStateAction<boolean>>;
   setModelPickerPosition: Dispatch<SetStateAction<{ top: number; left: number; width: number } | undefined>>;
+  setPerformanceProfile: Dispatch<SetStateAction<PerformanceProfile>>;
   setLicenseBasis: Dispatch<SetStateAction<"catalog" | "separate">>;
   setLicenseAcknowledged: Dispatch<SetStateAction<boolean>>;
   setSeparateLicenseReference: Dispatch<SetStateAction<string>>;
@@ -123,6 +132,10 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     modelPickerPosition,
     preflight,
     preflightLoading,
+    performanceProfile,
+    profileReport,
+    profileLoading,
+    profileError,
     licenseBasis,
     licenseAcknowledged,
     separateLicenseReference,
@@ -148,6 +161,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     setSelectedModelId,
     setModelPickerOpen,
     setModelPickerPosition,
+    setPerformanceProfile,
     setLicenseBasis,
     setLicenseAcknowledged,
     setSeparateLicenseReference,
@@ -574,6 +588,62 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                       </button>
                       <button className="primary-button" type="button" onClick={goToNextStep} disabled={!selectedModelId || preflightLoading || !preflight?.canInstall}>
                         {preflightLoading ? text.wizard.suggestion.checkingRequirements : preflight?.canInstall ? text.wizard.suggestion.continueToLicense : text.wizard.suggestion.requirementsNotMet}
+                      </button>
+                    </div>
+                  </div>
+                ) : wizardStep === "profile" ? (
+                  <div className="wizard-body">
+                    <p>{text.wizard.profile.intro}</p>
+                    <div className="profile-picker">
+                      {PERFORMANCE_PROFILES.map((profile) => {
+                        const title = text.wizard.profile[`${profile}Title`];
+                        const description = text.wizard.profile[`${profile}Description`];
+                        return (
+                          <button
+                            className={`profile-option ${performanceProfile === profile ? "selected" : ""}`}
+                            type="button"
+                            key={profile}
+                            aria-pressed={performanceProfile === profile}
+                            onClick={() => setPerformanceProfile(profile)}
+                          >
+                            <span>
+                              <strong>{title}</strong>
+                              {profile === "balanced" && <em>{text.wizard.profile.recommended}</em>}
+                            </span>
+                            <small>{description}</small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <section className="profile-report" aria-live="polite">
+                      {profileLoading ? (
+                        <div className="requirements-loading"><span className="model-control-spinner" /> {text.wizard.profile.calculating}</div>
+                      ) : profileError ? (
+                        <p className="profile-warning">{profileError}</p>
+                      ) : profileReport ? (
+                        <>
+                          <h3>{text.wizard.profile.calculated}</h3>
+                          <p>{profileReport.summary}</p>
+                          <dl>
+                            <div><dt>{text.wizard.profile.accelerator}</dt><dd>{profileReport.accelerator}</dd></div>
+                            <div><dt>{text.wizard.profile.context}</dt><dd>{profileReport.contextLength?.toLocaleString(text.locale) ?? text.wizard.profile.runtimeDefault}</dd></div>
+                            <div><dt>{text.wizard.profile.concurrency}</dt><dd>{profileReport.concurrentRequests || text.wizard.profile.runtimeDefault}</dd></div>
+                            <div><dt>{text.wizard.profile.availableMemory}</dt><dd>{formatBytes(profileReport.availableMemoryBytes)}</dd></div>
+                            <div><dt>{text.wizard.profile.minimumMemory}</dt><dd>{formatBytes(profileReport.minimumMemoryBytes)}</dd></div>
+                          </dl>
+                          {profileReport.warnings.map((warning) => <p className="profile-warning" key={warning}>{warning}</p>)}
+                        </>
+                      ) : null}
+                    </section>
+                    <div className="actions">
+                      <button className="back-button" type="button" onClick={goToPreviousStep}>{text.common.back}</button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={goToNextStep}
+                        disabled={profileLoading || !profileReport?.fitsDetectedMemory}
+                      >
+                        {text.wizard.profile.continue}
                       </button>
                     </div>
                   </div>

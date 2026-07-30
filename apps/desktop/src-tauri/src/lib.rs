@@ -68,6 +68,7 @@ pub fn run() {
             commands::refresh_catalog,
             commands::get_recommendations,
             commands::run_preflight,
+            commands::performance_profile,
             commands::install_model,
             commands::cancel_install,
             commands::start_runtime,

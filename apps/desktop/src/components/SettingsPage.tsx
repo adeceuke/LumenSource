@@ -575,7 +575,7 @@ export function SettingsPage({
           <h2 id="settings-about">{text.settings.about.title}</h2>
           <p>{text.settings.about.description}</p>
         </div>
-        <dl><div><dt>{text.settings.about.version}</dt><dd>0.5.0</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
+        <dl><div><dt>{text.settings.about.version}</dt><dd>0.6.0</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
       </section>
     </div>
   );

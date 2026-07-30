@@ -13,6 +13,8 @@ import type {
   EndpointDetails,
   HardwareProfile,
   InstallProgress,
+  PerformanceProfile,
+  PerformanceProfileReport,
   PreflightReport,
   Recommendation,
   RemoteConnectionReport,
@@ -100,6 +102,10 @@ export function useModelWizard({
   }>();
   const [preflight, setPreflight] = useState<PreflightReport>();
   const [preflightLoading, setPreflightLoading] = useState(false);
+  const [performanceProfile, setPerformanceProfile] = useState<PerformanceProfile>("balanced");
+  const [profileReport, setProfileReport] = useState<PerformanceProfileReport>();
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string>();
   const [licenseBasis, setLicenseBasis] = useState<"catalog" | "separate">("catalog");
   const [licenseAcknowledged, setLicenseAcknowledged] = useState(false);
   const [separateLicenseReference, setSeparateLicenseReference] = useState("");
@@ -217,6 +223,31 @@ export function useModelWizard({
   }, [wizardStep, selectedModelId, wizardTargetId, setError]);
 
   useEffect(() => {
+    if (wizardStep !== "profile" || !selectedModelId || !wizardTargetId) return;
+    let disposed = false;
+    setProfileReport(undefined);
+    setProfileError(undefined);
+    setProfileLoading(true);
+    void desktopCommands.performanceProfile(
+      selectedModelId,
+      wizardTargetId,
+      performanceProfile,
+    )
+      .then((report) => {
+        if (!disposed) setProfileReport(report);
+      })
+      .catch((profileLoadError: unknown) => {
+        if (!disposed) setProfileError(localizedError(profileLoadError));
+      })
+      .finally(() => {
+        if (!disposed) setProfileLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [wizardStep, selectedModelId, wizardTargetId, performanceProfile]);
+
+  useEffect(() => {
     setLicenseBasis("catalog");
     setLicenseAcknowledged(false);
     setSeparateLicenseReference("");
@@ -246,6 +277,10 @@ export function useModelWizard({
     setModelPickerPosition(undefined);
     setPreflight(undefined);
     setPreflightLoading(false);
+    setPerformanceProfile("balanced");
+    setProfileReport(undefined);
+    setProfileLoading(false);
+    setProfileError(undefined);
     setLicenseBasis("catalog");
     setLicenseAcknowledged(false);
     setSeparateLicenseReference("");
@@ -421,6 +456,9 @@ export function useModelWizard({
       }
     } else if (wizardStep === "suggestion") {
       if (!selectedModelId || !preflight?.canInstall || preflightLoading) return;
+      setWizardStep("profile");
+    } else if (wizardStep === "profile") {
+      if (!profileReport || profileLoading || !profileReport.fitsDetectedMemory) return;
       setWizardStep("license");
     } else if (wizardStep === "license" && licenseReviewComplete) {
       setWizardStep("download");
@@ -434,8 +472,10 @@ export function useModelWizard({
       setWizardStep("hardware");
     } else if (wizardStep === "suggestion") {
       setWizardStep("intent");
-    } else if (wizardStep === "license") {
+    } else if (wizardStep === "profile") {
       setWizardStep("suggestion");
+    } else if (wizardStep === "license") {
+      setWizardStep("profile");
     } else if (wizardStep === "download" && !downloadBusy) {
       setWizardStep("license");
     }
@@ -467,6 +507,7 @@ export function useModelWizard({
         runtimeId: selected.runtimeId as RunningModelEntry["runtimeId"],
         runtimeModelId,
         runtimeCapabilities: runtimeCapabilities(selected.runtimeId),
+        modelSettings: profileReport?.settings,
         version: selected.version,
         location: wizardLocation,
         targetId,
@@ -526,6 +567,7 @@ export function useModelWizard({
       await desktopCommands.install({
         modelId: selectedRecommendation.modelId,
         targetId: wizardTargetId ?? "local",
+        performanceProfile,
         licenseBasis,
         licenseReference: licenseBasis === "separate"
           ? separateLicenseReference.trim()
@@ -610,6 +652,10 @@ export function useModelWizard({
       modelPickerPosition,
       preflight,
       preflightLoading,
+      performanceProfile,
+      profileReport,
+      profileLoading,
+      profileError,
       licenseBasis,
       licenseAcknowledged,
       separateLicenseReference,
@@ -635,6 +681,7 @@ export function useModelWizard({
       setSelectedModelId,
       setModelPickerOpen,
       setModelPickerPosition,
+      setPerformanceProfile,
       setLicenseBasis,
       setLicenseAcknowledged,
       setSeparateLicenseReference,

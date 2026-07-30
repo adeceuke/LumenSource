@@ -15,6 +15,8 @@ import type {
   ModelSettings,
   ModelSettingsSaveReport,
   OllamaConnectionReport,
+  PerformanceProfile,
+  PerformanceProfileReport,
   PerformanceSnapshot,
   PreflightReport,
   Recommendation,
@@ -106,6 +108,15 @@ export const desktopCommands = {
     invoke<Recommendation[]>("get_recommendations", { intent, targetId }),
   preflight: (modelId: string, targetId: string) =>
     invoke<PreflightReport>("run_preflight", { modelId, targetId }),
+  performanceProfile: (
+    modelId: string,
+    targetId: string,
+    profile: PerformanceProfile,
+  ) => invoke<PerformanceProfileReport>("performance_profile", {
+    modelId,
+    targetId,
+    profile,
+  }),
   install: (request: InstallRequest) =>
     invoke<void>("install_model", { request }),
   cancelInstall: () => invoke<boolean>("cancel_install"),

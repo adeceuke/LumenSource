@@ -5,7 +5,7 @@ use lumen_source_hardware::{AcceleratorKind, HardwareFacts, UsageSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::runtime_registry::RuntimeCapabilities;
-use crate::settings::ModelSettings;
+use crate::settings::{ModelSettings, PerformanceProfile};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +52,21 @@ pub struct PersistedModelEntry {
     #[serde(default)]
     pub license_catalog_version: Option<String>,
     pub logs: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceProfileReport {
+    pub profile: PerformanceProfile,
+    pub settings: ModelSettings,
+    pub summary: String,
+    pub accelerator: String,
+    pub context_length: Option<u32>,
+    pub concurrent_requests: u32,
+    pub minimum_memory_bytes: u64,
+    pub available_memory_bytes: u64,
+    pub fits_detected_memory: bool,
+    pub warnings: Vec<String>,
 }
 
 fn default_managed() -> bool {

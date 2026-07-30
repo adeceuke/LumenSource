@@ -102,6 +102,7 @@ pub struct ChatMessage {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct ChatOptions {
     pub system_prompt: Option<String>,
+    pub context_length: Option<u32>,
     pub temperature: Option<f32>,
     pub max_output_tokens: Option<u32>,
     pub top_p: Option<f32>,
@@ -819,6 +820,8 @@ struct ChatRequest<'a> {
 #[derive(Serialize)]
 struct OllamaChatOptions<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
+    num_ctx: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     num_predict: Option<u32>,
@@ -839,6 +842,7 @@ struct OllamaChatOptions<'a> {
 impl<'a> From<&'a ChatOptions> for OllamaChatOptions<'a> {
     fn from(options: &'a ChatOptions) -> Self {
         Self {
+            num_ctx: options.context_length,
             temperature: options.temperature,
             num_predict: options.max_output_tokens,
             top_p: options.top_p,
@@ -1913,6 +1917,7 @@ mod tests {
     #[test]
     fn ollama_chat_options_serialize_request_time_defaults() {
         let options = ChatOptions {
+            context_length: Some(4_096),
             temperature: Some(0.25),
             max_output_tokens: Some(256),
             top_p: Some(0.9),
@@ -1944,6 +1949,7 @@ mod tests {
         assert_eq!(serialized["messages"][0]["content"], "Be concise");
         assert_eq!(serialized["keep_alive"], "10m");
         assert_eq!(serialized["format"], "json");
+        assert_eq!(serialized["options"]["num_ctx"], 4_096);
         assert_eq!(serialized["options"]["num_predict"], 256);
         assert_eq!(serialized["options"]["stop"][0], "END");
     }

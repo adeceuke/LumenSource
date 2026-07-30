@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::runtime_registry::RuntimeId;
 
-pub const SETTINGS_SCHEMA_VERSION: u32 = 4;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +30,16 @@ pub enum ReasoningLevel {
     Low,
     Medium,
     High,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PerformanceProfile {
+    Safe,
+    #[default]
+    Balanced,
+    Fast,
+    Custom,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -258,6 +268,7 @@ impl Default for VllmSettings {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ModelSettings {
+    pub performance_profile: Option<PerformanceProfile>,
     pub runtime_management_mode: Option<RuntimeManagementMode>,
     pub inference_task: Option<ModelInferenceTask>,
     pub endpoint: Option<String>,
@@ -303,6 +314,7 @@ pub struct ModelSettings {
 impl Default for ModelSettings {
     fn default() -> Self {
         Self {
+            performance_profile: None,
             runtime_management_mode: None,
             inference_task: None,
             endpoint: None,

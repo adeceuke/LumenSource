@@ -34,6 +34,7 @@ function cloneSettings(model: RunningModelEntry): ModelSettings {
 function clearOverrides(current: ModelSettings): ModelSettings {
   return {
     ...defaultModelSettings(),
+    performanceProfile: current.performanceProfile,
     runtimeManagementMode: current.runtimeManagementMode,
     inferenceTask: current.inferenceTask,
     endpoint: current.endpoint,
@@ -169,6 +170,13 @@ export function ModelSettingsPanel({
           {dirty ? text.modelSettings.unsaved : text.modelSettings.saved}
         </span>
       </div>
+
+      {draft.performanceProfile && (
+        <p className="model-profile-summary">
+          <strong>{text.modelSettings.performanceProfile}:</strong>{" "}
+          {text.modelSettings.performanceProfileValue(draft.performanceProfile)}
+        </p>
+      )}
 
       <fieldset className="model-settings-group">
         <legend>{text.modelSettings.chatDefaults}</legend>

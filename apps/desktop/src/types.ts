@@ -3,6 +3,7 @@ export type WizardStep =
   | "hardware"
   | "intent"
   | "suggestion"
+  | "profile"
   | "license"
   | "download"
   | "ready";
@@ -148,10 +149,24 @@ export interface RemoteCredentialStatus {
 export interface InstallRequest {
   modelId: string;
   targetId: string;
+  performanceProfile: PerformanceProfile;
   licenseBasis: "catalog" | "separate";
   licenseReference?: string;
   licenseAcknowledged: boolean;
   installRuntime: boolean;
+}
+
+export interface PerformanceProfileReport {
+  profile: PerformanceProfile;
+  settings: ModelSettings;
+  summary: string;
+  accelerator: string;
+  contextLength?: number;
+  concurrentRequests: number;
+  minimumMemoryBytes: number;
+  availableMemoryBytes: number;
+  fitsDetectedMemory: boolean;
+  warnings: string[];
 }
 
 export interface InstallProgress {
@@ -231,6 +246,7 @@ export interface RunningModelEntry {
 }
 
 export type RuntimeId = "ollama" | "vllm";
+export type PerformanceProfile = "safe" | "balanced" | "fast" | "custom";
 export type RuntimeSecretKind = "vllmApiKey" | "huggingFaceToken";
 
 export interface ApplicationSettings {
@@ -297,6 +313,7 @@ export interface RuntimeCapabilities {
 }
 
 export interface ModelSettings {
+  performanceProfile?: PerformanceProfile;
   runtimeManagementMode?: "managed" | "external";
   inferenceTask?: "chat" | "embeddings";
   endpoint?: string;
