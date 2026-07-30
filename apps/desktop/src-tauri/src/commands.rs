@@ -220,6 +220,56 @@ pub async fn model_settings_memory_warning(
 }
 
 #[tauri::command]
+pub async fn model_update_plan(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+) -> Result<crate::bridge::ModelUpdatePlan, String> {
+    core.model_update_plan(&entry_id).await
+}
+
+#[tauri::command]
+pub async fn apply_model_update(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+    license_acknowledged: bool,
+) -> Result<PersistedModelEntry, String> {
+    core.apply_model_update(&entry_id, license_acknowledged)
+        .await
+}
+
+#[tauri::command]
+pub async fn rollback_model_update(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+) -> Result<PersistedModelEntry, String> {
+    core.rollback_model_update(&entry_id).await
+}
+
+#[tauri::command]
+pub async fn resource_start_plan(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+) -> Result<crate::bridge::ResourceStartPlan, String> {
+    core.resource_start_plan(&entry_id).await
+}
+
+#[tauri::command]
+pub async fn queued_operations(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<Vec<crate::bridge::QueuedOperation>, String> {
+    Ok(core.queued_operations().await)
+}
+
+#[tauri::command]
+pub async fn dismiss_queued_operation(
+    core: State<'_, SharedCoreAdapter>,
+    model_id: String,
+    action: String,
+) -> Result<(), String> {
+    core.dismiss_queued_operation(&model_id, &action).await
+}
+
+#[tauri::command]
 pub async fn managed_vllm_support(
     core: State<'_, SharedCoreAdapter>,
 ) -> Result<ManagedVllmSupport, String> {
@@ -461,7 +511,10 @@ pub async fn start_runtime(
     model_id: String,
     target_id: Option<String>,
     password: Option<String>,
+    stop_conflicts: Option<bool>,
 ) -> Result<RuntimeStatus, String> {
+    core.prepare_start(entry_id.as_deref(), stop_conflicts.unwrap_or(false))
+        .await?;
     core.start(
         entry_id.as_deref(),
         model_id,

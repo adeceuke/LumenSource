@@ -762,6 +762,19 @@ impl OllamaRuntime {
             .ok_or_else(|| RuntimeError::Remote("Ollama returned no embedding vector".to_owned()))
     }
 
+    pub async fn copy_model(&self, source: &str, destination: &str) -> Result<(), RuntimeError> {
+        let response = self
+            .client
+            .post(self.api_url("api/copy")?)
+            .json(&CopyRequest {
+                source,
+                destination,
+            })
+            .send()
+            .await?;
+        Self::checked(response).await.map(|_| ())
+    }
+
     pub async fn model_allocation(
         &self,
         model: &str,
@@ -790,6 +803,12 @@ struct PullRequest<'a> {
 #[derive(Serialize)]
 struct DeleteRequest<'a> {
     model: &'a str,
+}
+
+#[derive(Serialize)]
+struct CopyRequest<'a> {
+    source: &'a str,
+    destination: &'a str,
 }
 
 #[derive(Serialize)]
@@ -1903,6 +1922,24 @@ mod tests {
         };
 
         assert_eq!(serialized, serde_json::json!({ "model": "qwen2.5:latest" }));
+    }
+
+    #[test]
+    fn ollama_copy_request_preserves_source_and_rollback_destination() {
+        let Ok(serialized) = serde_json::to_value(CopyRequest {
+            source: "qwen2.5:latest",
+            destination: "lumensource-rollback-qwen2-5:latest",
+        }) else {
+            panic!("copy request should serialize");
+        };
+
+        assert_eq!(
+            serialized,
+            serde_json::json!({
+                "source": "qwen2.5:latest",
+                "destination": "lumensource-rollback-qwen2-5:latest"
+            })
+        );
     }
 
     #[test]

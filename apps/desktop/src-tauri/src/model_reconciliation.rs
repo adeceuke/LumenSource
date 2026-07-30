@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use lumen_source_catalog::Catalog;
 use lumen_source_runtime::InstalledModel;
 
@@ -33,8 +35,15 @@ pub(crate) fn reconcile_models(
     dummy_installed: &[InstalledModel],
     running: &[String],
 ) -> Vec<PersistedModelEntry> {
+    let rollback_references = persisted
+        .iter()
+        .filter_map(|entry| entry.rollback.as_ref()?.rollback_artifact_id.clone())
+        .collect::<BTreeSet<_>>();
     let mut result = Vec::with_capacity(installed.len());
-    for installed_model in installed {
+    for installed_model in installed
+        .into_iter()
+        .filter(|model| !rollback_references.contains(&model.name))
+    {
         let direct_catalog_match = catalog.models.iter().find_map(|model| {
             model
                 .variants
@@ -135,6 +144,7 @@ pub(crate) fn reconcile_models(
                     discovered: previous.is_none(),
                     pinned: previous.as_ref().is_some_and(|entry| entry.pinned),
                     last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+                    rollback: previous.as_ref().and_then(|entry| entry.rollback.clone()),
                     version: runtime_version,
                     location: "local".to_owned(),
                     target_id: local_target_id(),
@@ -202,6 +212,7 @@ pub(crate) fn reconcile_models(
                     discovered: true,
                     pinned: previous.as_ref().is_some_and(|entry| entry.pinned),
                     last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+                    rollback: previous.as_ref().and_then(|entry| entry.rollback.clone()),
                     version: "External Ollama model".to_owned(),
                     location: "local".to_owned(),
                     target_id: local_target_id(),
@@ -326,6 +337,7 @@ fn upsert_dummy_models(
             discovered: true,
             pinned: false,
             last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+            rollback: None,
             version,
             location: "local".to_owned(),
             target_id: local_target_id(),

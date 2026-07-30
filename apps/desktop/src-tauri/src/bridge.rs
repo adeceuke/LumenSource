@@ -19,7 +19,7 @@ use lumen_source_runtime::{
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -91,6 +91,8 @@ struct PersistedState {
     models: Vec<PersistedModelEntry>,
     #[serde(default)]
     interrupted_install: Option<InterruptedInstall>,
+    #[serde(default)]
+    queued_operations: Vec<QueuedOperation>,
 }
 
 struct ActiveInstall {
@@ -112,15 +114,18 @@ struct RecentInstall {
 
 struct ModelOperationGuard {
     operations: Arc<Mutex<BTreeSet<String>>>,
+    notify: Arc<Notify>,
     key: String,
 }
 
 impl Drop for ModelOperationGuard {
     fn drop(&mut self) {
         let operations = Arc::clone(&self.operations);
+        let notify = Arc::clone(&self.notify);
         let key = self.key.clone();
         tokio::spawn(async move {
             operations.lock().await.remove(&key);
+            notify.notify_one();
         });
     }
 }
@@ -156,6 +161,7 @@ pub struct SharedCoreAdapter {
     recent_install: RwLock<Option<RecentInstall>>,
     managed_ports: Mutex<BTreeSet<u16>>,
     model_operations: Arc<Mutex<BTreeSet<String>>>,
+    operation_notify: Arc<Notify>,
     remote_session: RwLock<Option<Arc<RemoteSession>>>,
     state_path: PathBuf,
     telemetry: Telemetry,
@@ -181,6 +187,9 @@ impl SharedCoreAdapter {
             .and_then(|bytes| serde_json::from_slice::<PersistedState>(&bytes).ok())
             .unwrap_or_default();
         persisted.settings = migrate_settings(persisted.settings);
+        for queued in &mut persisted.queued_operations {
+            queued.needs_retry = true;
+        }
         if persisted.settings.ollama.executable_path.is_none() {
             persisted.settings.ollama.executable_path = persisted.runtime_executable.clone();
         }
@@ -228,6 +237,7 @@ impl SharedCoreAdapter {
             recent_install: RwLock::new(None),
             managed_ports: Mutex::new(managed_ports),
             model_operations: Arc::new(Mutex::new(BTreeSet::new())),
+            operation_notify: Arc::new(Notify::new()),
             remote_session: RwLock::new(None),
             state_path,
             telemetry,
@@ -287,17 +297,59 @@ impl SharedCoreAdapter {
         action: &str,
     ) -> Result<ModelOperationGuard, String> {
         let key = model_key.trim().to_owned();
-        let mut operations = self.model_operations.lock().await;
-        if !operations.insert(key.clone()) {
-            return Err(format!(
-                "Another start, stop, update, remove, or cache operation is already active for {model_key}. Wait for it to finish before trying to {action}."
-            ));
+        loop {
+            let notification = self.operation_notify.notified();
+            let acquired = self.model_operations.lock().await.insert(key.clone());
+            if acquired {
+                {
+                    let mut state = self.state.write().await;
+                    state
+                        .queued_operations
+                        .retain(|queued| queued.model_id != key || queued.action != action);
+                }
+                let guard = ModelOperationGuard {
+                    operations: Arc::clone(&self.model_operations),
+                    notify: Arc::clone(&self.operation_notify),
+                    key,
+                };
+                self.flush_state().await?;
+                return Ok(guard);
+            }
+            {
+                let mut state = self.state.write().await;
+                if !state
+                    .queued_operations
+                    .iter()
+                    .any(|queued| queued.model_id == key && queued.action == action)
+                {
+                    state.queued_operations.push(QueuedOperation {
+                        model_id: key.clone(),
+                        action: action.to_owned(),
+                        queued_at: chrono::Utc::now().to_rfc3339(),
+                        needs_retry: false,
+                    });
+                }
+            }
+            self.flush_state().await?;
+            notification.await;
         }
-        drop(operations);
-        Ok(ModelOperationGuard {
-            operations: Arc::clone(&self.model_operations),
-            key,
-        })
+    }
+
+    pub async fn queued_operations(&self) -> Vec<QueuedOperation> {
+        self.state.read().await.queued_operations.clone()
+    }
+
+    pub async fn dismiss_queued_operation(
+        &self,
+        model_id: &str,
+        action: &str,
+    ) -> Result<(), String> {
+        self.state
+            .write()
+            .await
+            .queued_operations
+            .retain(|queued| queued.model_id != model_id || queued.action != action);
+        self.flush_state().await
     }
 
     pub async fn interrupted_install(&self) -> Option<InterruptedInstall> {
@@ -463,6 +515,7 @@ impl SharedCoreAdapter {
                 discovered: true,
                 pinned: false,
                 last_seen_at: None,
+                rollback: None,
                 version: "Imported external service".to_owned(),
                 location: "local".to_owned(),
                 target_id: "local".to_owned(),
@@ -968,6 +1021,7 @@ impl SharedCoreAdapter {
             discovered: existing.as_ref().is_some_and(|model| model.discovered),
             pinned: existing.as_ref().is_some_and(|model| model.pinned),
             last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+            rollback: existing.as_ref().and_then(|model| model.rollback.clone()),
             version: "External service".to_owned(),
             location: "local".to_owned(),
             target_id: "local".to_owned(),
@@ -1270,6 +1324,574 @@ impl SharedCoreAdapter {
         )))
     }
 
+    pub async fn model_update_plan(&self, entry_id: &str) -> Result<ModelUpdatePlan, String> {
+        let entry = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let catalog = self.catalog_clone().await?;
+        build_model_update_plan(&catalog, &entry)
+    }
+
+    pub async fn apply_model_update(
+        &self,
+        entry_id: &str,
+        license_acknowledged: bool,
+    ) -> Result<PersistedModelEntry, String> {
+        let source = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let _operation = self
+            .begin_model_operation(&format!("target:{}", source.target_id), "update")
+            .await?;
+        let catalog = self.catalog_clone().await?;
+        let plan = build_model_update_plan(&catalog, &source)?;
+        if !plan.available {
+            return Err("No newer catalog revision is available for this model.".to_owned());
+        }
+        if plan.requires_license_acknowledgement && !license_acknowledged {
+            return Err(
+                "The model license or usage policy changed. Review and acknowledge the current catalog terms before updating."
+                    .to_owned(),
+            );
+        }
+        let (catalog_model, variant) = find_variant(&catalog, &source.model_id)?;
+        if plan.kinds.is_empty() && plan.license_changed {
+            let mut updated = source.clone();
+            updated.license_profile_id = catalog_model.license.profile_id.clone();
+            updated.license_name = Some(catalog_model.license.name.clone());
+            updated.license_url = catalog_model.license.url.clone();
+            updated.license_reviewed_at = catalog_model.license.reviewed_at.clone();
+            updated.license_catalog_version = Some(catalog.catalog_version.clone());
+            if plan.requires_license_acknowledgement {
+                updated.license_acknowledged_at = Some(chrono::Utc::now().to_rfc3339());
+            }
+            updated.logs.push(format!(
+                "[{}] Reviewed updated catalog license and usage-policy metadata; model weights and settings were unchanged.",
+                current_timestamp()
+            ));
+            {
+                let mut state = self.state.write().await;
+                let model = state
+                    .models
+                    .iter_mut()
+                    .find(|model| model.id == source.id)
+                    .ok_or_else(|| "The model disappeared during the update.".to_owned())?;
+                *model = updated.clone();
+            }
+            self.flush_state().await?;
+            return Ok(updated);
+        }
+        let previous_settings = source.model_settings.clone().unwrap_or_default();
+        let mut snapshot = ModelRevisionSnapshot {
+            runtime_model_id: source
+                .runtime_model_id
+                .clone()
+                .unwrap_or_else(|| variant.runtime_ref.clone()),
+            rollback_artifact_id: None,
+            runtime_executable: None,
+            digest: source.digest.clone(),
+            version: source.version.clone(),
+            model_settings: previous_settings.clone(),
+            installation_validation: source.installation_validation.clone(),
+            saved_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let updated = if source.runtime_id == OLLAMA_RUNTIME && source.target_id == "local" {
+            let runtime_model_id = source
+                .runtime_model_id
+                .as_deref()
+                .ok_or_else(|| "The current Ollama model identity is unavailable.".to_owned())?;
+            let weights_changed = plan.kinds.iter().any(|kind| kind == "modelWeights");
+            let runtime_changed = plan.kinds.iter().any(|kind| kind == "runtime");
+            let previous_executable = if runtime_changed {
+                if !self.runtime.managed_process_running().await {
+                    return Err(
+                        "The Ollama service is managed outside Lumen Source. Update that runtime with its owner; model weights remain independently updateable."
+                            .to_owned(),
+                    );
+                }
+                let previous = self.runtime.executable_path().await;
+                snapshot.runtime_executable = Some(previous.display().to_string());
+                let (artifact, version) = runtime_artifact(&catalog, OLLAMA_RUNTIME)?;
+                let data_root = dirs::data_local_dir()
+                    .ok_or_else(|| "No local application data directory is available".to_owned())?;
+                let install_dir = data_root
+                    .join("lumen-source/runtimes")
+                    .join(OLLAMA_RUNTIME)
+                    .join(version);
+                let installer = ArtifactInstaller::default();
+                let cancellation = CancellationToken::new();
+                let candidate = if artifact.executable_name.ends_with(".zip") {
+                    installer
+                        .install_zip_cancellable(
+                            &artifact,
+                            &install_dir,
+                            std::path::Path::new("ollama.exe"),
+                            &|_| {},
+                            &cancellation,
+                        )
+                        .await
+                } else {
+                    installer
+                        .install_tar_zst_cancellable(
+                            &artifact,
+                            &install_dir,
+                            std::path::Path::new("bin/ollama"),
+                            &|_| {},
+                            &cancellation,
+                        )
+                        .await
+                }
+                .map_err(|error| format!("Could not install the runtime candidate: {error}"))?;
+                self.runtime.set_executable(candidate).await;
+                if let Err(error) = self.runtime.restart_managed_server().await {
+                    self.runtime.set_executable(previous.clone()).await;
+                    let restore = self.runtime.restart_managed_server().await;
+                    return Err(match restore {
+                        Ok(()) => {
+                            format!("The runtime candidate could not start. The previous runtime was restored: {error}")
+                        }
+                        Err(restore_error) => format!(
+                            "The runtime candidate could not start, and the previous runtime also failed to restart: {error}; restore error: {restore_error}"
+                        ),
+                    });
+                }
+                Some(previous)
+            } else {
+                None
+            };
+            let rollback_ref = if weights_changed {
+                let rollback_ref =
+                    format!("lumensource-rollback-{}:latest", Uuid::new_v4().simple());
+                if let Err(error) = self
+                    .runtime
+                    .copy_model(runtime_model_id, &rollback_ref)
+                    .await
+                {
+                    if let Some(previous) = previous_executable.as_ref() {
+                        self.runtime.set_executable(previous.clone()).await;
+                        let _ = self.runtime.restart_managed_server().await;
+                    }
+                    return Err(format!("Could not preserve the rollback copy: {error}"));
+                }
+                snapshot.rollback_artifact_id = Some(rollback_ref.clone());
+                Some(rollback_ref)
+            } else {
+                None
+            };
+            let update_result = async {
+                if weights_changed {
+                    self.runtime
+                        .pull_model(&variant.runtime_ref, &|_| {})
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                let profile = previous_settings.performance_profile.unwrap_or_default();
+                let mut validation = self
+                    .validate_installation(
+                        &variant.id,
+                        &source.target_id,
+                        profile,
+                        source.running,
+                    )
+                    .await?;
+                if !validation.passed {
+                    return Err(validation.message);
+                }
+                validation.settings = previous_settings.clone();
+                let mut updated = source.clone();
+                updated.rollback = Some(snapshot.clone());
+                updated.digest = variant.runtime_digest.clone();
+                updated.version = catalog
+                    .runtimes
+                    .iter()
+                    .find(|runtime| runtime.id == variant.runtime)
+                    .map(|runtime| runtime.install.version.clone())
+                    .unwrap_or_else(|| source.version.clone());
+                updated.installation_validation = Some(validation);
+                updated.model_settings = Some(previous_settings.clone());
+                updated.license_catalog_version = Some(catalog.catalog_version.clone());
+                updated.license_reviewed_at = catalog_model.license.reviewed_at.clone();
+                updated.logs.push(format!(
+                    "[{}] Updated {} and validated the candidate; the previous working revision is retained for rollback.",
+                    current_timestamp(),
+                    plan.kinds.join(", ")
+                ));
+                Ok::<_, String>(updated)
+            }
+            .await;
+            match update_result {
+                Ok(updated) => updated,
+                Err(error) => {
+                    if let Some(previous_executable) = previous_executable {
+                        self.runtime.set_executable(previous_executable).await;
+                        let _ = self.runtime.restart_managed_server().await;
+                    }
+                    if let Some(rollback_ref) = rollback_ref {
+                        let _ = self.runtime.delete_model(&variant.runtime_ref).await;
+                        let restore = self
+                            .runtime
+                            .copy_model(&rollback_ref, runtime_model_id)
+                            .await;
+                        if restore.is_ok() {
+                            let _ = self.runtime.delete_model(&rollback_ref).await;
+                        }
+                    }
+                    return Err(format!(
+                        "The update candidate failed validation. The previous model was restored: {error}"
+                    ));
+                }
+            }
+        } else if source.runtime_id == VLLM_RUNTIME
+            && source.runtime_capabilities.lifecycle
+                == Some(crate::runtime_registry::RuntimeLifecycle::Managed)
+        {
+            let replacement = self
+                .install_managed_vllm_variant(catalog_model, variant, &source)
+                .await?;
+            if let Some(settings) = source.model_settings.as_ref() {
+                if let (Some(engine), Some(name)) = (
+                    settings
+                        .managed_container_engine
+                        .as_deref()
+                        .and_then(managed_vllm::parse_engine),
+                    settings.managed_container_name.as_deref(),
+                ) {
+                    managed_vllm::stop(engine, name).await?;
+                }
+            }
+            let mut updated = replacement.clone();
+            updated.id = source.id.clone();
+            updated.rollback = Some(snapshot);
+            updated.pinned = source.pinned;
+            updated.logs = source.logs.clone();
+            updated.logs.push(format!(
+                "[{}] Installed and validated a side-by-side managed vLLM candidate. The previous container is stopped and retained for rollback.",
+                current_timestamp()
+            ));
+            self.state
+                .write()
+                .await
+                .models
+                .retain(|model| model.id != replacement.id);
+            updated
+        } else {
+            return Err(
+                "Side-by-side updates are supported for local managed Ollama and managed vLLM models. External and remote services must be updated by their owner."
+                    .to_owned(),
+            );
+        };
+        let updated_runtime_executable = if source.runtime_id == OLLAMA_RUNTIME
+            && plan.kinds.iter().any(|kind| kind == "runtime")
+        {
+            Some(self.runtime.executable_path().await)
+        } else {
+            None
+        };
+        {
+            let mut state = self.state.write().await;
+            let model = state
+                .models
+                .iter_mut()
+                .find(|model| model.id == source.id)
+                .ok_or_else(|| "The model disappeared while the update was running.".to_owned())?;
+            *model = updated.clone();
+            if let Some(executable) = updated_runtime_executable {
+                state.runtime_executable = Some(executable.clone());
+                state.settings.ollama.executable_path = Some(executable);
+            }
+        }
+        self.flush_state().await?;
+        Ok(updated)
+    }
+
+    pub async fn rollback_model_update(
+        &self,
+        entry_id: &str,
+    ) -> Result<PersistedModelEntry, String> {
+        let current = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let _operation = self
+            .begin_model_operation(&format!("target:{}", current.target_id), "roll back")
+            .await?;
+        let snapshot = current
+            .rollback
+            .clone()
+            .ok_or_else(|| "No validated rollback revision is available.".to_owned())?;
+        if current.runtime_id == OLLAMA_RUNTIME && current.target_id == "local" {
+            let current_ref = current
+                .runtime_model_id
+                .as_deref()
+                .ok_or_else(|| "The current Ollama model identity is unavailable.".to_owned())?;
+            if let Some(rollback_ref) = snapshot.rollback_artifact_id.as_deref() {
+                self.runtime
+                    .delete_model(current_ref)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.runtime
+                    .copy_model(rollback_ref, current_ref)
+                    .await
+                    .map_err(|error| format!("Could not restore the rollback copy: {error}"))?;
+                let _ = self.runtime.delete_model(rollback_ref).await;
+            }
+            if let Some(executable) = snapshot.runtime_executable.as_deref() {
+                self.runtime.set_executable(PathBuf::from(executable)).await;
+                self.runtime
+                    .restart_managed_server()
+                    .await
+                    .map_err(|error| format!("The previous runtime could not restart: {error}"))?;
+            }
+        } else if current.runtime_id == VLLM_RUNTIME {
+            let current_settings = current
+                .model_settings
+                .as_ref()
+                .ok_or_else(|| "The current managed-vLLM settings are unavailable.".to_owned())?;
+            let previous_name = snapshot
+                .model_settings
+                .managed_container_name
+                .as_deref()
+                .ok_or_else(|| "The rollback container identity is unavailable.".to_owned())?;
+            let engine = snapshot
+                .model_settings
+                .managed_container_engine
+                .as_deref()
+                .and_then(managed_vllm::parse_engine)
+                .ok_or_else(|| "The rollback container engine is unavailable.".to_owned())?;
+            if let Some(current_name) = current_settings.managed_container_name.as_deref() {
+                managed_vllm::remove_container(engine, current_name).await?;
+            }
+            if let Some(port) = current_settings.managed_port {
+                self.managed_ports.lock().await.remove(&port);
+            }
+            managed_vllm::start(engine, previous_name).await?;
+            if let (Some(port), Some(served)) = (
+                snapshot.model_settings.managed_port,
+                snapshot.model_settings.vllm_served_model_name.as_deref(),
+            ) {
+                managed_vllm::wait_until_healthy(port, served, 180).await?;
+            }
+        } else {
+            return Err("This runtime does not have a Lumen Source rollback copy.".to_owned());
+        }
+        let restored_runtime_executable = if current.runtime_id == OLLAMA_RUNTIME {
+            Some(self.runtime.executable_path().await)
+        } else {
+            None
+        };
+        let mut restored = current;
+        restored.runtime_model_id = Some(snapshot.runtime_model_id);
+        restored.digest = snapshot.digest;
+        restored.version = snapshot.version;
+        restored.model_settings = Some(snapshot.model_settings);
+        restored.installation_validation = snapshot.installation_validation;
+        restored.rollback = None;
+        restored.running = true;
+        restored.logs.push(format!(
+            "[{}] Restored the previous validated revision.",
+            current_timestamp()
+        ));
+        {
+            let mut state = self.state.write().await;
+            let model = state
+                .models
+                .iter_mut()
+                .find(|model| model.id == entry_id)
+                .ok_or_else(|| "The model disappeared during rollback.".to_owned())?;
+            *model = restored.clone();
+            if let Some(executable) = restored_runtime_executable {
+                state.runtime_executable = Some(executable.clone());
+                state.settings.ollama.executable_path = Some(executable);
+            }
+        }
+        self.flush_state().await?;
+        Ok(restored)
+    }
+
+    pub async fn resource_start_plan(&self, entry_id: &str) -> Result<ResourceStartPlan, String> {
+        let models = self.state.read().await.models.clone();
+        let entry = models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let catalog = self.catalog_clone().await?;
+        let variant = catalog
+            .models
+            .iter()
+            .flat_map(|model| &model.variants)
+            .find(|variant| variant.id == entry.model_id);
+        let required_memory_bytes = variant.map(estimated_loaded_memory).map_or_else(
+            || entry.size_bytes.unwrap_or(2_u64 * 1024 * 1024 * 1024),
+            |(_, maximum)| maximum,
+        );
+        let required_vram_bytes = variant
+            .and_then(|variant| variant.requirements.min_vram_gb)
+            .map_or(0, |gib| (gib * GIB).ceil() as u64);
+        let hardware = self.hardware_for_target(&entry.target_id).await?;
+        let total_vram = hardware
+            .accelerators
+            .iter()
+            .filter_map(|accelerator| accelerator.total_vram_bytes)
+            .sum::<u64>();
+        let mut consumers = Vec::new();
+        for model in models.iter().filter(|model| {
+            model.running && model.target_id == entry.target_id && model.id != entry.id
+        }) {
+            let allocation = if model.runtime_id == OLLAMA_RUNTIME && model.target_id == "local" {
+                match model.runtime_model_id.as_deref() {
+                    Some(runtime_model_id) => self
+                        .runtime
+                        .model_allocation(runtime_model_id)
+                        .await
+                        .ok()
+                        .flatten(),
+                    None => None,
+                }
+            } else {
+                None
+            };
+            consumers.push(ResourceConsumer {
+                model_id: model.id.clone(),
+                name: model.name.clone(),
+                memory_bytes: allocation.as_ref().map_or_else(
+                    || model.size_bytes.unwrap_or_default(),
+                    |value| value.total_memory_bytes,
+                ),
+                vram_bytes: allocation
+                    .as_ref()
+                    .map_or(0, |value| value.vram_memory_bytes),
+                pinned: model.pinned,
+            });
+        }
+        let used_vram = consumers
+            .iter()
+            .map(|consumer| consumer.vram_bytes)
+            .sum::<u64>();
+        let available_vram_bytes = (total_vram > 0).then_some(total_vram.saturating_sub(used_vram));
+        let memory_ok = required_memory_bytes <= hardware.available_ram_bytes;
+        let vram_ok = required_vram_bytes == 0
+            || available_vram_bytes.is_some_and(|available| required_vram_bytes <= available);
+        let stoppable_model_ids = consumers
+            .iter()
+            .filter(|consumer| !consumer.pinned)
+            .map(|consumer| consumer.model_id.clone())
+            .collect::<Vec<_>>();
+        let pinned_model_ids = consumers
+            .iter()
+            .filter(|consumer| consumer.pinned)
+            .map(|consumer| consumer.model_id.clone())
+            .collect::<Vec<_>>();
+        let can_start = memory_ok && vram_ok;
+        let has_pinned_consumers = !pinned_model_ids.is_empty();
+        Ok(ResourceStartPlan {
+            can_start,
+            required_memory_bytes,
+            available_memory_bytes: hardware.available_ram_bytes,
+            required_vram_bytes,
+            available_vram_bytes,
+            consumers,
+            stoppable_model_ids,
+            pinned_model_ids,
+            waiting_reason: (!can_start).then(|| {
+                if has_pinned_consumers {
+                    "Available resources may be insufficient, and one or more running models are pinned as always available.".to_owned()
+                } else {
+                    "Available resources may be insufficient. Stop the listed running models or choose safer settings.".to_owned()
+                }
+            }),
+        })
+    }
+
+    pub async fn prepare_start(
+        &self,
+        entry_id: Option<&str>,
+        stop_conflicts: bool,
+    ) -> Result<(), String> {
+        let Some(entry_id) = entry_id else {
+            return Ok(());
+        };
+        let plan = self.resource_start_plan(entry_id).await?;
+        if plan.can_start {
+            return Ok(());
+        }
+        if !stop_conflicts {
+            return Err(
+                "The resource plan predicts a memory conflict. Review the guided start choice before continuing."
+                    .to_owned(),
+            );
+        }
+        let recoverable_memory = plan.available_memory_bytes.saturating_add(
+            plan.consumers
+                .iter()
+                .filter(|consumer| !consumer.pinned)
+                .map(|consumer| consumer.memory_bytes)
+                .sum::<u64>(),
+        );
+        if recoverable_memory < plan.required_memory_bytes {
+            return Err(
+                "Stopping unpinned models would still not provide the estimated memory. Reduce this model's context or unpin another model first."
+                    .to_owned(),
+            );
+        }
+        {
+            let mut state = self.state.write().await;
+            if let Some(model) = state.models.iter_mut().find(|model| model.id == entry_id) {
+                model.logs.push(format!(
+                    "[{}] Resource plan required {:.1} GiB with {:.1} GiB available; stopping {} unpinned model(s) before start.",
+                    current_timestamp(),
+                    plan.required_memory_bytes as f64 / GIB,
+                    plan.available_memory_bytes as f64 / GIB,
+                    plan.stoppable_model_ids.len()
+                ));
+            }
+            for conflict_id in &plan.stoppable_model_ids {
+                if let Some(model) = state
+                    .models
+                    .iter_mut()
+                    .find(|model| &model.id == conflict_id)
+                {
+                    model.logs.push(format!(
+                        "[{}] Queued to stop for another model's explicit resource decision.",
+                        current_timestamp()
+                    ));
+                }
+            }
+        }
+        self.flush_state().await?;
+        let models = self.state.read().await.models.clone();
+        for conflict_id in &plan.stoppable_model_ids {
+            let Some(conflict) = models.iter().find(|model| &model.id == conflict_id) else {
+                continue;
+            };
+            self.stop(
+                Some(&conflict.id),
+                conflict.model_id.clone(),
+                conflict.target_id.clone(),
+                None,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     pub async fn managed_vllm_support(&self) -> ManagedVllmSupport {
         managed_vllm::detect_support().await
     }
@@ -1547,6 +2169,7 @@ impl SharedCoreAdapter {
                     discovered: false,
                     pinned: source.pinned,
                     last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+                    rollback: None,
                     version: catalog
                         .runtimes
                         .iter()
@@ -1803,6 +2426,7 @@ impl SharedCoreAdapter {
             discovered: false,
             pinned: source.pinned,
             last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+            rollback: None,
             version: defaults.pinned_runtime_version,
             location: "local".to_owned(),
             target_id: "local".to_owned(),
@@ -2835,8 +3459,19 @@ impl SharedCoreAdapter {
         password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
         let _operation = self
-            .begin_model_operation(entry_id.unwrap_or(variant_id.as_str()), "start")
+            .begin_model_operation(&format!("target:{target_id}"), "start")
             .await?;
+        if target_id == "local" {
+            if let Some(entry_id) = entry_id {
+                let plan = self.resource_start_plan(entry_id).await?;
+                if !plan.can_start {
+                    return Err(
+                        "The resource state changed while this start was queued. Review the updated resource plan and try again."
+                            .to_owned(),
+                    );
+                }
+            }
+        }
         if let Some(entry) = self.managed_vllm_entry(entry_id).await {
             let settings = entry.model_settings.as_ref().ok_or_else(|| {
                 "The managed vLLM model has incomplete deployment settings.".to_owned()
@@ -2978,7 +3613,7 @@ impl SharedCoreAdapter {
         password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
         let _operation = self
-            .begin_model_operation(entry_id.unwrap_or(variant_id.as_str()), "stop")
+            .begin_model_operation(&format!("target:{target_id}"), "stop")
             .await?;
         if let Some(entry) = self.managed_vllm_entry(entry_id).await {
             let settings = entry.model_settings.as_ref().ok_or_else(|| {
@@ -3968,6 +4603,15 @@ impl SharedCoreAdapter {
             return;
         };
         for container in containers {
+            if models.iter().any(|model| {
+                model
+                    .rollback
+                    .as_ref()
+                    .and_then(|rollback| rollback.model_settings.managed_container_name.as_deref())
+                    == Some(container.name.as_str())
+            }) {
+                continue;
+            }
             if let Some(existing) = models.iter_mut().find(|model| {
                 model.id == container.entry_id
                     || model
@@ -4061,6 +4705,7 @@ impl SharedCoreAdapter {
                 discovered: true,
                 pinned: false,
                 last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+                rollback: None,
                 version: self
                     .state
                     .read()
@@ -4190,6 +4835,21 @@ impl SharedCoreAdapter {
                 if let Some(port) = settings.managed_port {
                     self.managed_ports.lock().await.remove(&port);
                 }
+                if let Some(rollback_settings) = entry
+                    .rollback
+                    .as_ref()
+                    .map(|rollback| &rollback.model_settings)
+                {
+                    if let Some(rollback_name) = rollback_settings.managed_container_name.as_deref()
+                    {
+                        if rollback_name != name {
+                            managed_vllm::remove_container(engine, rollback_name).await?;
+                        }
+                    }
+                    if let Some(port) = rollback_settings.managed_port {
+                        self.managed_ports.lock().await.remove(&port);
+                    }
+                }
             }
             credential_store::delete_runtime_secret_for_account(
                 RuntimeSecretKind::VllmApiKey,
@@ -4270,6 +4930,16 @@ impl SharedCoreAdapter {
                     .delete_model(runtime_model_id)
                     .await
                     .map_err(|error| error.to_string())?;
+                if let Some(rollback_ref) = entry
+                    .rollback
+                    .as_ref()
+                    .and_then(|rollback| rollback.rollback_artifact_id.as_deref())
+                {
+                    runtime
+                        .delete_model(rollback_ref)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
             }
 
             let models = {
@@ -4954,6 +5624,102 @@ fn estimated_loaded_memory(variant: &ModelVariant) -> (u64, u64) {
     (minimum, minimum.saturating_add(context_reserve))
 }
 
+fn build_model_update_plan(
+    catalog: &Catalog,
+    entry: &PersistedModelEntry,
+) -> Result<ModelUpdatePlan, String> {
+    let (model, variant) = find_variant(catalog, &entry.model_id)?;
+    let runtime_version = catalog
+        .runtimes
+        .iter()
+        .find(|runtime| runtime.id == variant.runtime)
+        .map(|runtime| runtime.install.version.as_str());
+    let settings = entry.model_settings.as_ref();
+    let model_revision_changed = variant.runtime_digest.is_some()
+        && variant.runtime_digest != entry.digest
+        || variant.model_revision.is_some()
+            && variant.model_revision
+                != settings.and_then(|settings| settings.vllm_model_revision.clone());
+    let tokenizer_changed = variant.tokenizer_revision.is_some()
+        && variant.tokenizer_revision
+            != settings.and_then(|settings| settings.vllm_tokenizer_revision.clone());
+    let runtime_changed =
+        entry.managed && runtime_version.is_some_and(|version| version != entry.version.as_str());
+    let container_changed = entry.runtime_id == VLLM_RUNTIME && runtime_changed;
+    let license_changed = entry.license_profile_id != model.license.profile_id
+        || entry.license_reviewed_at != model.license.reviewed_at;
+    let mut kinds = Vec::new();
+    if runtime_changed && entry.runtime_id == OLLAMA_RUNTIME {
+        kinds.push("runtime".to_owned());
+    }
+    if container_changed {
+        kinds.push("containerImage".to_owned());
+    }
+    if model_revision_changed {
+        kinds.push("modelWeights".to_owned());
+    }
+    if tokenizer_changed {
+        kinds.push("tokenizer".to_owned());
+    }
+    let available = !kinds.is_empty() || license_changed;
+    let candidate_revision = variant
+        .runtime_digest
+        .clone()
+        .or_else(|| variant.model_revision.clone())
+        .or_else(|| runtime_version.map(str::to_owned))
+        .unwrap_or_else(|| catalog.catalog_version.clone());
+    let current_revision = entry
+        .digest
+        .clone()
+        .or_else(|| settings.and_then(|settings| settings.vllm_model_revision.clone()))
+        .unwrap_or_else(|| entry.version.clone());
+    let classification = if license_changed {
+        "compatibility"
+    } else if variant
+        .runtime_compatibility
+        .iter()
+        .any(|tag| tag.to_ascii_lowercase().contains("security"))
+    {
+        "security"
+    } else if model_revision_changed || container_changed {
+        "recommended"
+    } else {
+        "optional"
+    };
+    Ok(ModelUpdatePlan {
+        available,
+        classification: classification.to_owned(),
+        kinds,
+        current_revision,
+        candidate_revision,
+        download_bytes: if model_revision_changed {
+            variant_size_bytes(variant)
+        } else {
+            0
+        },
+        additional_disk_bytes: if model_revision_changed {
+            variant_size_bytes(variant)
+        } else {
+            0
+        },
+        license_changed,
+        requires_license_acknowledgement: license_changed && model.license.requires_user_acceptance,
+        compatibility: if variant.runtime_compatibility.is_empty() {
+            "No additional runtime compatibility constraints are declared.".to_owned()
+        } else {
+            format!(
+                "Catalog compatibility: {}.",
+                variant.runtime_compatibility.join(", ")
+            )
+        },
+        message: if available {
+            "A catalog candidate is available. The current validated revision remains available until the candidate passes validation.".to_owned()
+        } else {
+            "This model already matches the active catalog revision.".to_owned()
+        },
+    })
+}
+
 fn recommendation_labels(
     model: &ModelEntry,
     variant: &ModelVariant,
@@ -5404,6 +6170,7 @@ mod tests {
             discovered: false,
             pinned: false,
             last_seen_at: None,
+            rollback: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -5481,6 +6248,70 @@ mod tests {
     }
 
     #[test]
+    fn update_plan_separates_weights_and_preserves_noop_revisions() {
+        let Ok(mut catalog) = Catalog::from_slice(TEST_CATALOG) else {
+            panic!("bundled test catalog should parse");
+        };
+        let (variant_id, runtime_ref) = {
+            let Some(variant) = catalog
+                .models
+                .iter_mut()
+                .flat_map(|model| &mut model.variants)
+                .find(|variant| variant.id == "qwen2.5-coder-14b-q4_k_m")
+            else {
+                panic!("test variant should exist");
+            };
+            variant.runtime_digest = Some("sha256:candidate".to_owned());
+            (variant.id.clone(), variant.runtime_ref.clone())
+        };
+        let entry = PersistedModelEntry {
+            id: "update-row".to_owned(),
+            name: "Qwen".to_owned(),
+            model_id: variant_id,
+            model_name: "Qwen2.5 Coder 14B".to_owned(),
+            runtime_id: OLLAMA_RUNTIME.to_owned(),
+            runtime_model_id: Some(runtime_ref),
+            runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
+            model_settings: Some(ModelSettings::default()),
+            installation_validation: None,
+            inventory_status: "available".to_owned(),
+            discovered: false,
+            pinned: false,
+            last_seen_at: None,
+            rollback: None,
+            version: "0.32.1".to_owned(),
+            location: "local".to_owned(),
+            target_id: local_target_id(),
+            target_name: None,
+            running: false,
+            managed: true,
+            digest: Some("sha256:current".to_owned()),
+            size_bytes: Some(9_000),
+            license_basis: Some("catalog".to_owned()),
+            license_reference: None,
+            license_acknowledged_at: None,
+            license_profile_id: None,
+            license_name: Some("Apache License 2.0".to_owned()),
+            license_url: None,
+            license_reviewed_at: None,
+            license_catalog_version: Some(catalog.catalog_version.clone()),
+            logs: Vec::new(),
+        };
+        let Ok(plan) = build_model_update_plan(&catalog, &entry) else {
+            panic!("update plan should build");
+        };
+        assert!(plan.available);
+        assert_eq!(plan.kinds, ["modelWeights"]);
+
+        let mut current = entry;
+        current.digest = Some("sha256:candidate".to_owned());
+        let Ok(noop) = build_model_update_plan(&catalog, &current) else {
+            panic!("current plan should build");
+        };
+        assert!(!noop.available);
+    }
+
+    #[test]
     fn preserves_the_persisted_dummy_model_for_ui_testing() {
         let Ok(catalog) = Catalog::from_slice(TEST_CATALOG) else {
             panic!("bundled test catalog should parse");
@@ -5499,6 +6330,7 @@ mod tests {
             discovered: false,
             pinned: false,
             last_seen_at: None,
+            rollback: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -5550,6 +6382,7 @@ mod tests {
             discovered: false,
             pinned: false,
             last_seen_at: None,
+            rollback: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -5582,6 +6415,7 @@ mod tests {
             discovered: false,
             pinned: false,
             last_seen_at: None,
+            rollback: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),

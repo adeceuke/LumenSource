@@ -183,44 +183,44 @@ resources in surprising ways.
 
 ### Model and runtime updates
 
-- [ ] Detect newer catalog revisions for an installed model.
-- [ ] Separate application, runtime, container-image, model-weight, and
+- [x] Detect newer catalog revisions for an installed model.
+- [x] Separate application, runtime, container-image, model-weight, and
       tokenizer updates.
-- [ ] Show download size, disk-space impact, license changes, revision changes,
+- [x] Show download size, disk-space impact, license changes, revision changes,
       and expected compatibility before updating.
-- [ ] Classify updates as optional, recommended, compatibility-related, or
+- [x] Classify updates as optional, recommended, compatibility-related, or
       security-related without installing them automatically.
-- [ ] Install the candidate alongside the working copy where the runtime
+- [x] Install the candidate alongside the working copy where the runtime
       permits it.
-- [ ] Run the same post-install validation used for a new installation.
-- [ ] Switch the model entry only after validation succeeds.
-- [ ] Preserve enough metadata to roll back to the previous working revision.
-- [ ] Never overwrite a user's model settings without showing the migration.
-- [ ] Handle an updated license or usage policy as a new acknowledgement gate.
+- [x] Run the same post-install validation used for a new installation.
+- [x] Switch the model entry only after validation succeeds.
+- [x] Preserve enough metadata to roll back to the previous working revision.
+- [x] Never overwrite a user's model settings without showing the migration.
+- [x] Handle an updated license or usage policy as a new acknowledgement gate.
 
 ### Resource conflict management
 
-- [ ] Estimate RAM and VRAM before starting a model.
-- [ ] Account for loaded models, context allocation, concurrency, vLLM
+- [x] Estimate RAM and VRAM before starting a model.
+- [x] Account for loaded models, context allocation, concurrency, vLLM
       instances, and known shared-runtime behavior.
-- [ ] Warn before a start is likely to exceed available resources.
-- [ ] Offer **Stop other models and continue** with an exact list of affected
+- [x] Warn before a start is likely to exceed available resources.
+- [x] Offer **Stop other models and continue** with an exact list of affected
       models.
-- [ ] Queue conflicting start and update operations instead of launching them
+- [x] Queue conflicting start and update operations instead of launching them
       simultaneously.
-- [ ] Preserve models that the user explicitly pinned as always available.
-- [ ] Show current RAM/VRAM consumers and the reason a model is waiting.
-- [ ] Recover the queue cleanly after runtime or application restart.
+- [x] Preserve models that the user explicitly pinned as always available.
+- [x] Show current RAM/VRAM consumers and the reason a model is waiting.
+- [x] Recover the queue cleanly after runtime or application restart.
 
 ### 0.8 acceptance criteria
 
-- [ ] No update removes the last validated model copy before the replacement
+- [x] No update removes the last validated model copy before the replacement
       works.
-- [ ] Failed updates leave the previous model startable.
-- [ ] Runtime and model versions are visible and unambiguous.
-- [ ] Starting two models that exceed detected memory produces a guided choice,
+- [x] Failed updates leave the previous model startable.
+- [x] Runtime and model versions are visible and unambiguous.
+- [x] Starting two models that exceed detected memory produces a guided choice,
       not an unexplained runtime failure.
-- [ ] Update and resource decisions are reproducible in lifecycle diagnostics.
+- [x] Update and resource decisions are reproducible in lifecycle diagnostics.
 
 ## 0.9: Secure sharing and release hardening
 

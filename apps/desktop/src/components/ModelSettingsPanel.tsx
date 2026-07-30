@@ -4,6 +4,7 @@ import { browserMessages } from "../i18n";
 import type {
   ApplicationSettings,
   ModelSettings,
+  ModelUpdatePlan,
   RunningModelEntry,
   RuntimeDiagnostics,
   RuntimeMigrationOption,
@@ -86,6 +87,9 @@ export function ModelSettingsPanel({
   const [huggingFaceToken, setHuggingFaceToken] = useState("");
   const [inventoryBusy, setInventoryBusy] = useState(false);
   const [memoryWarning, setMemoryWarning] = useState<string>();
+  const [updatePlan, setUpdatePlan] = useState<ModelUpdatePlan>();
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateLicenseAcknowledged, setUpdateLicenseAcknowledged] = useState(false);
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(baseline),
     [baseline, draft],
@@ -98,10 +102,12 @@ export function ModelSettingsPanel({
     void Promise.all([
       desktopCommands.runtimeDiagnostics(model.id),
       desktopCommands.runtimeMigrationOptions(model.id),
-    ]).then(([nextDiagnostics, nextOptions]) => {
+      desktopCommands.modelUpdatePlan(model.id).catch(() => undefined),
+    ]).then(([nextDiagnostics, nextOptions, nextUpdatePlan]) => {
       if (!active) return;
       setDiagnostics(nextDiagnostics);
       setMigrationOptions(nextOptions);
+      setUpdatePlan(nextUpdatePlan);
     }).catch(() => {
       if (active) setMigrationOptions([]);
     });
@@ -109,6 +115,40 @@ export function ModelSettingsPanel({
       active = false;
     };
   }, [model.id, model.running]);
+
+  const applyUpdate = async () => {
+    setUpdateBusy(true);
+    setError(undefined);
+    try {
+      const updated = await desktopCommands.applyModelUpdate(
+        model.id,
+        updateLicenseAcknowledged,
+      );
+      onSaved(updated);
+      setUpdatePlan(await desktopCommands.modelUpdatePlan(updated.id));
+      setNotice("The candidate passed validation. The previous revision is retained for rollback.");
+    } catch (updateError) {
+      setError(messageFromError(updateError, text.errors.unexpected));
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const rollbackUpdate = async () => {
+    if (!window.confirm("Restore the previous validated revision? The current candidate will be removed, while shared caches remain.")) return;
+    setUpdateBusy(true);
+    setError(undefined);
+    try {
+      const restored = await desktopCommands.rollbackModelUpdate(model.id);
+      onSaved(restored);
+      setUpdatePlan(await desktopCommands.modelUpdatePlan(restored.id));
+      setNotice("The previous validated revision was restored.");
+    } catch (rollbackError) {
+      setError(messageFromError(rollbackError, text.errors.unexpected));
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -251,6 +291,51 @@ export function ModelSettingsPanel({
           </button>
           <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction("forget")}>Forget entry only</button>
         </div>
+      </fieldset>
+
+      <fieldset className="model-settings-group update-state">
+        <legend>Updates and rollback</legend>
+        {!updatePlan ? <p>Checking the active catalog…</p> : (
+          <>
+            <dl className="runtime-diagnostics">
+              <div><dt>Current revision</dt><dd>{updatePlan.currentRevision}</dd></div>
+              <div><dt>Catalog candidate</dt><dd>{updatePlan.candidateRevision}</dd></div>
+              <div><dt>Classification</dt><dd>{updatePlan.classification}</dd></div>
+              <div><dt>Changes</dt><dd>{updatePlan.kinds.length > 0 ? updatePlan.kinds.join(", ") : "Metadata only"}</dd></div>
+              <div><dt>Download</dt><dd>{updatePlan.downloadBytes.toLocaleString(text.locale)} bytes</dd></div>
+              <div><dt>Additional rollback space</dt><dd>{updatePlan.additionalDiskBytes.toLocaleString(text.locale)} bytes</dd></div>
+            </dl>
+            <p>{updatePlan.compatibility}</p>
+            <p>{updatePlan.message}</p>
+            {updatePlan.licenseChanged && (
+              <div className="api-notice warning">
+                <strong>License or usage policy changed</strong>
+                <span>Review the current catalog terms before updating. Existing weights and settings are not changed until you continue.</span>
+              </div>
+            )}
+            {updatePlan.requiresLicenseAcknowledgement && (
+              <label className="checkbox-row">
+                <input type="checkbox" checked={updateLicenseAcknowledged} onChange={(event) => setUpdateLicenseAcknowledged(event.target.checked)} />
+                <span>I acknowledge the current cataloged terms for this update.</span>
+              </label>
+            )}
+            <div className="runtime-actions">
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!updatePlan.available || updateBusy || (updatePlan.requiresLicenseAcknowledgement && !updateLicenseAcknowledged)}
+                onClick={() => void applyUpdate()}
+              >
+                {updateBusy ? "Working…" : "Install and validate update"}
+              </button>
+              {model.rollback && (
+                <button className="secondary-button" type="button" disabled={updateBusy} onClick={() => void rollbackUpdate()}>
+                  Restore previous revision
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </fieldset>
 
       {draft.performanceProfile && (

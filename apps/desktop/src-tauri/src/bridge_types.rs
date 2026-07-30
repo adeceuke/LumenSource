@@ -32,6 +32,8 @@ pub struct PersistedModelEntry {
     pub pinned: bool,
     #[serde(default)]
     pub last_seen_at: Option<String>,
+    #[serde(default)]
+    pub rollback: Option<ModelRevisionSnapshot>,
     pub version: String,
     pub location: String,
     #[serde(default = "local_target_id")]
@@ -117,6 +119,68 @@ pub struct InterruptedInstall {
     pub install_runtime: bool,
     pub started_at: String,
     pub recovery: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRevisionSnapshot {
+    pub runtime_model_id: String,
+    pub rollback_artifact_id: Option<String>,
+    pub runtime_executable: Option<String>,
+    pub digest: Option<String>,
+    pub version: String,
+    pub model_settings: ModelSettings,
+    pub installation_validation: Option<InstallationValidationReport>,
+    pub saved_at: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUpdatePlan {
+    pub available: bool,
+    pub classification: String,
+    pub kinds: Vec<String>,
+    pub current_revision: String,
+    pub candidate_revision: String,
+    pub download_bytes: u64,
+    pub additional_disk_bytes: u64,
+    pub license_changed: bool,
+    pub requires_license_acknowledgement: bool,
+    pub compatibility: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceStartPlan {
+    pub can_start: bool,
+    pub required_memory_bytes: u64,
+    pub available_memory_bytes: u64,
+    pub required_vram_bytes: u64,
+    pub available_vram_bytes: Option<u64>,
+    pub consumers: Vec<ResourceConsumer>,
+    pub stoppable_model_ids: Vec<String>,
+    pub pinned_model_ids: Vec<String>,
+    pub waiting_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceConsumer {
+    pub model_id: String,
+    pub name: String,
+    pub memory_bytes: u64,
+    pub vram_bytes: u64,
+    pub pinned: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedOperation {
+    pub model_id: String,
+    pub action: String,
+    pub queued_at: String,
+    pub needs_retry: bool,
 }
 
 fn default_managed() -> bool {

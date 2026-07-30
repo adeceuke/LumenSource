@@ -69,7 +69,33 @@ export function useModels(onError: (error: unknown) => void): ModelsController {
       if (selected.running) {
         await desktopCommands.stop(selected.modelId, selected.targetId, password, selected.id);
       } else {
-        await desktopCommands.start(selected.modelId, selected.targetId, password, selected.id);
+        let stopConflicts = false;
+        if (selected.targetId === "local") {
+          const plan = await desktopCommands.resourceStartPlan(selected.id);
+          if (!plan.canStart) {
+            const stoppable = plan.consumers
+              .filter((consumer) => !consumer.pinned)
+              .map((consumer) => consumer.name);
+            const pinned = plan.consumers
+              .filter((consumer) => consumer.pinned)
+              .map((consumer) => consumer.name);
+            if (stoppable.length === 0) {
+              throw new Error(`${plan.waitingReason ?? "Not enough memory."}${pinned.length > 0 ? ` Always available: ${pinned.join(", ")}.` : ""}`);
+            }
+            const confirmed = window.confirm(
+              `${plan.waitingReason ?? "Starting this model may exceed available memory."}\n\nStop and unload: ${stoppable.join(", ")}${pinned.length > 0 ? `\n\nKept running because they are pinned: ${pinned.join(", ")}` : ""}\n\nContinue?`,
+            );
+            if (!confirmed) return;
+            stopConflicts = true;
+          }
+        }
+        await desktopCommands.start(
+          selected.modelId,
+          selected.targetId,
+          password,
+          selected.id,
+          stopConflicts,
+        );
       }
       const running = !selected.running;
       const log = lifecycleLog(running ? text.lifecycle.started : text.lifecycle.stopped);

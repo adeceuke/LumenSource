@@ -294,6 +294,7 @@ export interface RunningModelEntry {
   discovered?: boolean;
   pinned?: boolean;
   lastSeenAt?: string;
+  rollback?: ModelRevisionSnapshot;
   version: string;
   location: "local" | "remote";
   targetId: string;
@@ -316,6 +317,58 @@ export interface RunningModelEntry {
 export type RuntimeId = "ollama" | "vllm";
 export type PerformanceProfile = "safe" | "balanced" | "fast" | "custom";
 export type RuntimeSecretKind = "vllmApiKey" | "huggingFaceToken";
+
+export interface ModelRevisionSnapshot {
+  runtimeModelId: string;
+  rollbackArtifactId?: string;
+  runtimeExecutable?: string;
+  digest?: string;
+  version: string;
+  modelSettings: ModelSettings;
+  installationValidation?: InstallationValidationReport;
+  savedAt: string;
+}
+
+export interface ModelUpdatePlan {
+  available: boolean;
+  classification: "optional" | "recommended" | "compatibility" | "security";
+  kinds: Array<"application" | "runtime" | "containerImage" | "modelWeights" | "tokenizer">;
+  currentRevision: string;
+  candidateRevision: string;
+  downloadBytes: number;
+  additionalDiskBytes: number;
+  licenseChanged: boolean;
+  requiresLicenseAcknowledgement: boolean;
+  compatibility: string;
+  message: string;
+}
+
+export interface ResourceStartPlan {
+  canStart: boolean;
+  requiredMemoryBytes: number;
+  availableMemoryBytes: number;
+  requiredVramBytes: number;
+  availableVramBytes?: number;
+  consumers: ResourceConsumer[];
+  stoppableModelIds: string[];
+  pinnedModelIds: string[];
+  waitingReason?: string;
+}
+
+export interface ResourceConsumer {
+  modelId: string;
+  name: string;
+  memoryBytes: number;
+  vramBytes: number;
+  pinned: boolean;
+}
+
+export interface QueuedOperation {
+  modelId: string;
+  action: string;
+  queuedAt: string;
+  needsRetry: boolean;
+}
 
 export interface ApplicationSettings {
   schemaVersion: number;

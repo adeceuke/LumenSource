@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { desktopCommands, messageFromError } from "../commands";
-import type { InterruptedInstall, RunningModelEntry, StorageReport } from "../types";
+import type { InterruptedInstall, QueuedOperation, RunningModelEntry, StorageReport } from "../types";
 
 function formatBytes(value: number): string {
   if (value <= 0) return "0 B";
@@ -20,6 +20,7 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
   const [notice, setNotice] = useState<string>();
   const [profiles, setProfiles] = useState("");
   const [interrupted, setInterrupted] = useState<InterruptedInstall>();
+  const [queued, setQueued] = useState<QueuedOperation[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -34,6 +35,7 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
     void desktopCommands.interruptedInstall().then((operation) => {
       setInterrupted(operation ?? undefined);
     }).catch(() => setInterrupted(undefined));
+    void desktopCommands.queuedOperations().then(setQueued).catch(() => setQueued([]));
   }, [refresh]);
 
   const cleanup = async (entryId: string, label: string, effect: string) => {
@@ -124,6 +126,25 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
             <button className="primary-button" type="button" disabled={busy !== undefined} onClick={() => void resumeInstall()}>Resume and validate</button>
             <button className="secondary-button" type="button" disabled={busy !== undefined} onClick={() => void discardInstall()}>Discard recovery record</button>
           </div>
+        </section>
+      )}
+      {queued.length > 0 && (
+        <section className="interrupted-operation">
+          <h2>Queued model operations</h2>
+          {queued.map((operation) => (
+            <div key={`${operation.modelId}:${operation.action}`}>
+              <p>
+                <strong>{operation.action}</strong> for {operation.modelId} · queued {new Date(operation.queuedAt).toLocaleString()}
+                {operation.needsRetry ? " · App restarted; retry this action from the model page." : " · Waiting for the conflicting operation to finish."}
+              </p>
+              {operation.needsRetry && (
+                <button className="secondary-button" type="button" onClick={() => {
+                  void desktopCommands.dismissQueuedOperation(operation.modelId, operation.action)
+                    .then(() => setQueued((current) => current.filter((item) => item !== operation)));
+                }}>Dismiss recovered queue item</button>
+              )}
+            </div>
+          ))}
         </section>
       )}
 

@@ -16,12 +16,14 @@ import type {
   ManagedVllmSupport,
   ModelSettings,
   ModelSettingsSaveReport,
+  ModelUpdatePlan,
   OllamaConnectionReport,
   PerformanceProfile,
   PerformanceProfileReport,
   PerformanceSnapshot,
   PreflightReport,
   Recommendation,
+  QueuedOperation,
   RemoteConnectionReport,
   RemoteCredentialStatus,
   RemoteTargetConfig,
@@ -32,6 +34,7 @@ import type {
   RuntimeMigrationOption,
   RuntimeMigrationReport,
   RuntimeStatus,
+  ResourceStartPlan,
   SettingsSaveReport,
   SettingsValidationError,
   StorageReport,
@@ -96,6 +99,17 @@ export const desktopCommands = {
     invoke<ModelSettingsSaveReport>("save_model_settings", { entryId, settings, applyRestart }),
   modelSettingsMemoryWarning: (entryId: string, settings: ModelSettings) =>
     invoke<string | null>("model_settings_memory_warning", { entryId, settings }),
+  modelUpdatePlan: (entryId: string) =>
+    invoke<ModelUpdatePlan>("model_update_plan", { entryId }),
+  applyModelUpdate: (entryId: string, licenseAcknowledged: boolean) =>
+    invoke<RunningModelEntry>("apply_model_update", { entryId, licenseAcknowledged }),
+  rollbackModelUpdate: (entryId: string) =>
+    invoke<RunningModelEntry>("rollback_model_update", { entryId }),
+  resourceStartPlan: (entryId: string) =>
+    invoke<ResourceStartPlan>("resource_start_plan", { entryId }),
+  queuedOperations: () => invoke<QueuedOperation[]>("queued_operations"),
+  dismissQueuedOperation: (modelId: string, action: string) =>
+    invoke<void>("dismiss_queued_operation", { modelId, action }),
   managedVllmSupport: () => invoke<ManagedVllmSupport>("managed_vllm_support"),
   runtimeMigrationOptions: (entryId: string) =>
     invoke<RuntimeMigrationOption[]>("runtime_migration_options", { entryId }),
@@ -155,8 +169,8 @@ export const desktopCommands = {
     handler: (progress: InstallProgress) => void,
   ): Promise<UnlistenFn> =>
     listen<InstallProgress>("install-progress", ({ payload }) => handler(payload)),
-  start: (modelId: string, targetId: string, password?: string, entryId?: string) =>
-    invoke<RuntimeStatus>("start_runtime", { entryId, modelId, targetId, password }),
+  start: (modelId: string, targetId: string, password?: string, entryId?: string, stopConflicts = false) =>
+    invoke<RuntimeStatus>("start_runtime", { entryId, modelId, targetId, password, stopConflicts }),
   stop: (modelId: string, targetId: string, password?: string, entryId?: string) =>
     invoke<RuntimeStatus>("stop_runtime", { entryId, modelId, targetId, password }),
   status: () => invoke<RuntimeStatus>("runtime_status"),
