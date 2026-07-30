@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { desktopCommands, messageFromError } from "../commands";
 import { browserMessages } from "../i18n";
 import type {
@@ -6,6 +6,8 @@ import type {
   ManagedVllmSupport,
   OllamaConnectionReport,
   RemoteTargetProfile,
+  RunningModelEntry,
+  SharingStatus,
   SettingsValidationError,
 } from "../types";
 
@@ -26,14 +28,6 @@ function valueFromNumber(value: string): number {
   return Number.parseInt(value, 10) || 0;
 }
 
-function exposesNetwork(bindAddress: string): boolean {
-  const address = bindAddress.trim().toLowerCase();
-  return !(address.startsWith("127.")
-    || address.startsWith("localhost:")
-    || address.startsWith("[::1]:")
-    || address === "::1");
-}
-
 export function SettingsPage({
   settings,
   onSaved,
@@ -52,6 +46,16 @@ export function SettingsPage({
   const [huggingFaceToken, setHuggingFaceToken] = useState("");
   const [huggingFaceTokenSaved, setHuggingFaceTokenSaved] = useState(false);
   const [vllmBusy, setVllmBusy] = useState(false);
+  const [models, setModels] = useState<RunningModelEntry[]>([]);
+  const [sharingStatus, setSharingStatus] = useState<SharingStatus>();
+  const [sharingBusy, setSharingBusy] = useState(false);
+  const [generatedToken, setGeneratedToken] = useState("");
+  const [sharingEnabled, setSharingEnabled] = useState(settings.sharing.enabled);
+  const [allowOtherDevices, setAllowOtherDevices] = useState(settings.sharing.allowOtherDevices);
+  const [sharingPort, setSharingPort] = useState(settings.sharing.port);
+  const [exposedModelIds, setExposedModelIds] = useState(settings.sharing.exposedModelIds);
+  const restoreInput = useRef<HTMLInputElement>(null);
+  const [supportBusy, setSupportBusy] = useState(false);
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(settings),
     [draft, settings],
@@ -63,6 +67,10 @@ export function SettingsPage({
 
   useEffect(() => {
     setDraft(cloneSettings(settings));
+    setSharingEnabled(settings.sharing.enabled);
+    setAllowOtherDevices(settings.sharing.allowOtherDevices);
+    setSharingPort(settings.sharing.port);
+    setExposedModelIds(settings.sharing.exposedModelIds);
   }, [settings]);
 
   useEffect(() => {
@@ -88,7 +96,146 @@ export function SettingsPage({
     void desktopCommands.runtimeSecretStatus("huggingFaceToken")
       .then(setHuggingFaceTokenSaved)
       .catch(() => setHuggingFaceTokenSaved(false));
+    void desktopCommands.loadModels().then(setModels).catch(() => setModels([]));
+    void desktopCommands.sharingStatus().then(setSharingStatus).catch(() => setSharingStatus(undefined));
   }, []);
+
+  const shareableModels = useMemo(
+    () => models.filter((model) =>
+      model.managed
+      && model.targetId === "local"
+      && model.inventoryStatus === "available"
+      && (model.runtimeId === "ollama" || model.runtimeId === "vllm")
+      && model.runtimeCapabilities.lifecycle !== "external"),
+    [models],
+  );
+
+  const generateSharingToken = async () => {
+    setSharingBusy(true);
+    try {
+      const token = await desktopCommands.generateSharingToken();
+      setGeneratedToken(token);
+      setSharingStatus(await desktopCommands.sharingStatus());
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setSharingBusy(false);
+    }
+  };
+
+  const applySharing = async () => {
+    const confirmed = !sharingEnabled
+      || !allowOtherDevices
+      || window.confirm(
+        "Other devices will reach an authenticated HTTP endpoint. Traffic is not encrypted; use only a trusted network or a TLS reverse proxy. Lumen Source does not change your firewall or router.",
+      );
+    if (!confirmed) return;
+    setSharingBusy(true);
+    try {
+      const status = await desktopCommands.configureSharing(
+        sharingEnabled,
+        allowOtherDevices,
+        sharingPort,
+        exposedModelIds,
+        confirmed,
+      );
+      setSharingStatus(status);
+      const saved = await desktopCommands.loadSettings();
+      setDraft(cloneSettings(saved));
+      onSaved(saved);
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setSharingBusy(false);
+    }
+  };
+
+  const revokeSharingToken = async () => {
+    if (!window.confirm("Revoke the sharing token and immediately restore loopback-only access?")) return;
+    setSharingBusy(true);
+    try {
+      await desktopCommands.revokeSharingToken();
+      setGeneratedToken("");
+      setSharingEnabled(false);
+      setSharingStatus(await desktopCommands.sharingStatus());
+      const saved = await desktopCommands.loadSettings();
+      setDraft(cloneSettings(saved));
+      onSaved(saved);
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setSharingBusy(false);
+    }
+  };
+
+  const downloadDocument = (name: string, content: string) => {
+    const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportDiagnostics = async () => {
+    setSupportBusy(true);
+    try {
+      downloadDocument("lumen-source-diagnostics.json", await desktopCommands.diagnosticBundle());
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setSupportBusy(false);
+    }
+  };
+
+  const exportStateBackup = async () => {
+    setSupportBusy(true);
+    try {
+      downloadDocument("lumen-source-state-backup.json", await desktopCommands.exportStateBackup());
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setSupportBusy(false);
+    }
+  };
+
+  const restoreStateBackup = async (file?: File) => {
+    if (!file || !window.confirm(
+      "Replace current settings and inventory with this backup? Credentials and installed model weights are not changed.",
+    )) return;
+    setSupportBusy(true);
+    try {
+      const restored = await desktopCommands.restoreStateBackup(await file.text(), true);
+      setDraft(cloneSettings(restored));
+      onSaved(restored);
+      setModels(await desktopCommands.loadModels());
+      setSharingStatus(await desktopCommands.sharingStatus());
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      if (restoreInput.current) restoreInput.current.value = "";
+      setSupportBusy(false);
+    }
+  };
+
+  const safeReset = async (clearInventory: boolean) => {
+    const scope = clearInventory
+      ? "Reset settings and forget the Lumen Source inventory? Model weights, shared caches, and credentials remain on disk."
+      : "Reset settings and operation records? Installed models, inventory, weights, caches, and credentials are preserved.";
+    if (!window.confirm(scope)) return;
+    setSupportBusy(true);
+    try {
+      const resetSettings = await desktopCommands.safeReset(clearInventory, true);
+      setDraft(cloneSettings(resetSettings));
+      onSaved(resetSettings);
+      setModels(await desktopCommands.loadModels());
+      setSharingStatus(await desktopCommands.sharingStatus());
+    } catch (error) {
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      setSupportBusy(false);
+    }
+  };
 
   const saveHuggingFaceToken = async () => {
     if (!huggingFaceToken.trim()) return;
@@ -145,10 +292,7 @@ export function SettingsPage({
       const errors = await desktopCommands.validateSettings(draft);
       setValidation(errors);
       if (errors.length > 0) return;
-      const confirmationRequired = exposesNetwork(draft.ollama.bindAddress);
-      const confirmed = !confirmationRequired || window.confirm(text.settings.networkWarning);
-      if (!confirmed) return;
-      const report = await desktopCommands.saveSettings(draft, confirmed);
+      const report = await desktopCommands.saveSettings(draft, false);
       setRestartRequired(report.runtimeRestartRequired);
       setDraft(cloneSettings(report.settings));
       onSaved(report.settings);
@@ -416,24 +560,6 @@ export function SettingsPage({
                 />
                 {fieldError("ollama.gpuSelection")}
               </label>
-              <label>
-                <span>{text.settings.ollama.bindAddress}</span>
-                <input
-                  value={draft.ollama.bindAddress}
-                  onChange={(event) => update((next) => { next.ollama.bindAddress = event.target.value; })}
-                />
-                {fieldError("ollama.bindAddress")}
-              </label>
-              <label className="wide-setting">
-                <span>{text.settings.ollama.allowedOrigins}</span>
-                <input
-                  value={draft.ollama.allowedOrigins.join(", ")}
-                  placeholder="https://app.example.com"
-                  onChange={(event) => update((next) => {
-                    next.ollama.allowedOrigins = event.target.value.split(",").map((value) => value.trim()).filter(Boolean);
-                  })}
-                />
-              </label>
               <label className="check-setting">
                 <input
                   type="checkbox"
@@ -535,6 +661,97 @@ export function SettingsPage({
         </div>
       </section>
 
+      <section className="settings-section" aria-labelledby="settings-sharing">
+        <div className="settings-section-heading">
+          <h2 id="settings-sharing">Share an API</h2>
+          <p>Use an authenticated OpenAI-compatible gateway. Ollama and managed vLLM remain private on this machine.</p>
+        </div>
+        <div className="settings-grid">
+          <label className="check-setting">
+            <input
+              type="checkbox"
+              checked={sharingEnabled}
+              onChange={(event) => setSharingEnabled(event.target.checked)}
+            />
+            <span>
+              <strong>Enable API sharing</strong>
+              <small>Localhost only unless you explicitly allow other devices.</small>
+            </span>
+          </label>
+          <label className="check-setting">
+            <input
+              type="checkbox"
+              checked={allowOtherDevices}
+              disabled={!sharingEnabled}
+              onChange={(event) => setAllowOtherDevices(event.target.checked)}
+            />
+            <span>
+              <strong>Allow other devices</strong>
+              <small>Requires authentication and an explicit unencrypted-transport confirmation.</small>
+            </span>
+          </label>
+          <label>
+            <span>Gateway port</span>
+            <input
+              type="number"
+              min={1024}
+              max={65535}
+              value={sharingPort}
+              disabled={!sharingEnabled}
+              onChange={(event) => setSharingPort(valueFromNumber(event.target.value))}
+            />
+          </label>
+        </div>
+        <fieldset className="settings-choice-group" disabled={!sharingEnabled}>
+          <legend>Models available through the gateway</legend>
+          {shareableModels.length === 0 && <p>No eligible local managed models are installed.</p>}
+          {shareableModels.map((model) => (
+            <label className="check-setting" key={model.id}>
+              <input
+                type="checkbox"
+                checked={exposedModelIds.includes(model.id)}
+                onChange={(event) => setExposedModelIds((current) =>
+                  event.target.checked
+                    ? [...new Set([...current, model.id])]
+                    : current.filter((id) => id !== model.id))}
+              />
+              <span><strong>{model.name}</strong><small>{model.runtimeId} · {model.runtimeModelId}</small></span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="runtime-actions">
+          <button type="button" className="secondary-button" disabled={sharingBusy} onClick={() => void generateSharingToken()}>
+            {sharingStatus?.tokenSaved ? "Rotate API token" : "Generate API token"}
+          </button>
+          <button type="button" className="primary-button" disabled={sharingBusy || (sharingEnabled && exposedModelIds.length === 0)} onClick={() => void applySharing()}>
+            {sharingEnabled ? "Apply sharing settings" : "Disable sharing"}
+          </button>
+          {sharingStatus?.tokenSaved && (
+            <button type="button" className="danger-button" disabled={sharingBusy} onClick={() => void revokeSharingToken()}>
+              Revoke token and disable
+            </button>
+          )}
+        </div>
+        {generatedToken && (
+          <div className="settings-notice" role="status">
+            <strong>Copy this token now</strong>
+            <p>The full token is shown only after generation or rotation.</p>
+            <code>{generatedToken}</code>
+            <button type="button" className="secondary-button" onClick={() => void navigator.clipboard.writeText(generatedToken)}>Copy token</button>
+          </div>
+        )}
+        {sharingStatus?.running && (
+          <div className="connection-ok" role="status">
+            <strong>Gateway running at {sharingStatus.address}</strong>
+            <p>Exposed models: {sharingStatus.exposedModels.join(", ")}</p>
+          </div>
+        )}
+        {sharingStatus?.transportWarning && <p className="connection-error" role="alert">{sharingStatus.transportWarning}</p>}
+        <p className="managed-runtime-note">
+          Lumen Source does not open firewall ports or configure your router. For internet or untrusted-network use, terminate TLS and enforce network policy in a trusted reverse proxy.
+        </p>
+      </section>
+
       <section className="settings-section" aria-labelledby="settings-storage">
         <div className="settings-section-heading">
           <h2 id="settings-storage">{text.settings.storage.title}</h2>
@@ -596,12 +813,52 @@ export function SettingsPage({
         </div>
       </section>
 
+      <section className="settings-section" aria-labelledby="settings-support">
+        <div className="settings-section-heading">
+          <h2 id="settings-support">Diagnostics and recovery</h2>
+          <p>Export privacy-safe support information or protect and restore Lumen Source state.</p>
+        </div>
+        <div className="runtime-actions">
+          <button type="button" className="secondary-button" disabled={supportBusy} onClick={() => void exportDiagnostics()}>
+            Export redacted diagnostics
+          </button>
+          <button type="button" className="secondary-button" disabled={supportBusy} onClick={() => void exportStateBackup()}>
+            Back up settings and inventory
+          </button>
+          <button type="button" className="secondary-button" disabled={supportBusy} onClick={() => restoreInput.current?.click()}>
+            Restore a backup
+          </button>
+          <input
+            ref={restoreInput}
+            className="visually-hidden"
+            type="file"
+            accept="application/json,.json"
+            aria-label="Choose a Lumen Source state backup"
+            onChange={(event) => void restoreStateBackup(event.target.files?.[0])}
+          />
+        </div>
+        <p className="managed-runtime-note">
+          Diagnostics exclude secrets, prompts, responses, user paths, hostnames, and raw addresses. State backups exclude credential-store secrets.
+        </p>
+        <div className="runtime-actions">
+          <button type="button" className="secondary-button" disabled={supportBusy} onClick={() => void safeReset(false)}>
+            Safe reset
+          </button>
+          <button type="button" className="danger-button" disabled={supportBusy} onClick={() => void safeReset(true)}>
+            Reset and forget inventory
+          </button>
+        </div>
+        <p className="managed-runtime-note">
+          Neither reset deletes model weights, runtime installations, or shared caches. Use Models and Storage for explicit data removal.
+        </p>
+      </section>
+
       <section className="settings-section about-settings" aria-labelledby="settings-about">
         <div className="settings-section-heading">
           <h2 id="settings-about">{text.settings.about.title}</h2>
           <p>{text.settings.about.description}</p>
         </div>
-        <dl><div><dt>{text.settings.about.version}</dt><dd>0.8.0</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
+        <dl><div><dt>{text.settings.about.version}</dt><dd>0.9.0</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
       </section>
     </div>
   );

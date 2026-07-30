@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::runtime_registry::RuntimeId;
 
-pub const SETTINGS_SCHEMA_VERSION: u32 = 5;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +47,7 @@ pub enum PerformanceProfile {
 pub enum RuntimeSecretKind {
     VllmApiKey,
     HuggingFaceToken,
+    SharingApiToken,
 }
 
 impl RuntimeSecretKind {
@@ -54,6 +55,7 @@ impl RuntimeSecretKind {
         match self {
             Self::VllmApiKey => "dev.lumensource.desktop.vllm",
             Self::HuggingFaceToken => "dev.lumensource.desktop.hugging-face",
+            Self::SharingApiToken => "dev.lumensource.desktop.sharing",
         }
     }
 }
@@ -70,6 +72,7 @@ pub struct ApplicationSettings {
     pub auto_start_managed_runtimes: bool,
     pub storage: StorageSettings,
     pub privacy: PrivacySettings,
+    pub sharing: SharingSettings,
     pub ollama: OllamaSettings,
     pub vllm: VllmSettings,
 }
@@ -86,8 +89,29 @@ impl Default for ApplicationSettings {
             auto_start_managed_runtimes: true,
             storage: StorageSettings::default(),
             privacy: PrivacySettings::default(),
+            sharing: SharingSettings::default(),
             ollama: OllamaSettings::default(),
             vllm: VllmSettings::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SharingSettings {
+    pub enabled: bool,
+    pub allow_other_devices: bool,
+    pub port: u16,
+    pub exposed_model_ids: Vec<String>,
+}
+
+impl Default for SharingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_other_devices: false,
+            port: 32_123,
+            exposed_model_ids: Vec::new(),
         }
     }
 }
@@ -453,6 +477,12 @@ pub fn migrate_settings(mut settings: ApplicationSettings) -> ApplicationSetting
             settings.storage.model_directory = default_model_directory();
         }
     }
+    if previous_version < 6 {
+        settings.ollama.bind_address = defaults.ollama.bind_address.clone();
+        settings.ollama.allowed_origins.clear();
+        settings.vllm.bind_address = defaults.vllm.bind_address.clone();
+        settings.sharing = SharingSettings::default();
+    }
     if settings.schema_version < SETTINGS_SCHEMA_VERSION {
         settings.schema_version = SETTINGS_SCHEMA_VERSION;
     }
@@ -494,6 +524,13 @@ pub fn validate_settings(settings: &ApplicationSettings) -> Vec<SettingsValidati
         );
     }
     validate_http_url(&mut errors, "ollama.endpoint", &settings.ollama.endpoint);
+    if !(1_024..=65_535).contains(&settings.sharing.port) {
+        push_error(
+            &mut errors,
+            "sharing.port",
+            "Choose a sharing port between 1,024 and 65,535.",
+        );
+    }
     if settings.default_target_id.trim().is_empty() {
         push_error(
             &mut errors,
@@ -543,6 +580,23 @@ pub fn validate_settings(settings: &ApplicationSettings) -> Vec<SettingsValidati
             &mut errors,
             "ollama.bindAddress",
             "Use a host and port, for example 127.0.0.1:11434.",
+        );
+    }
+    if settings.ollama.exposes_network() {
+        push_error(
+            &mut errors,
+            "ollama.bindAddress",
+            "Managed Ollama must stay on loopback. Use the authenticated Sharing section for other devices.",
+        );
+    }
+    if settings.vllm.bind_address.trim() != "127.0.0.1"
+        && settings.vllm.bind_address.trim() != "localhost"
+        && settings.vllm.bind_address.trim() != "::1"
+    {
+        push_error(
+            &mut errors,
+            "vllm.bindAddress",
+            "Managed vLLM must stay on loopback. Use the authenticated Sharing section for other devices.",
         );
     }
     if let Some(selection) = &settings.ollama.gpu_selection {

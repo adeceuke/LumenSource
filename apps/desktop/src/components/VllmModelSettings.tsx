@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { desktopCommands, messageFromError } from "../commands";
 import { browserMessages } from "../i18n";
+import { useModalFocus } from "../hooks/useModalFocus";
 import type {
   ExternalVllmConfig,
   RunningModelEntry,
@@ -33,6 +34,7 @@ export function VllmModelSettings({
   onCancel,
   onSaved,
 }: VllmModelSettingsProps) {
+  const dialogRef = useModalFocus<HTMLFormElement>(onCancel, dialog);
   const [displayName, setDisplayName] = useState(model?.name ?? "");
   const [config, setConfig] = useState(() => initialConfig(model));
   const [apiKey, setApiKey] = useState("");
@@ -100,6 +102,8 @@ export function VllmModelSettings({
 
   const content = (
     <form
+      ref={dialogRef}
+      tabIndex={dialog ? -1 : undefined}
       className={dialog ? "modal-card vllm-dialog" : "detail-section vllm-settings-form"}
       role={dialog ? "dialog" : undefined}
       aria-modal={dialog || undefined}

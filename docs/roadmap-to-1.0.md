@@ -229,29 +229,29 @@ stable public release.
 
 ### Guided API sharing
 
-- [ ] Keep localhost-only access as the default.
-- [ ] Add an explicit **Allow other devices** workflow rather than making raw
+- [x] Keep localhost-only access as the default.
+- [x] Add an explicit **Allow other devices** workflow rather than making raw
       bind addresses the primary control.
-- [ ] Require authentication before enabling managed network exposure.
-- [ ] Generate, rotate, copy, and revoke API tokens through the operating
+- [x] Require authentication before enabling managed network exposure.
+- [x] Generate, rotate, copy, and revoke API tokens through the operating
       system credential store.
-- [ ] Display the exact reachable address and currently exposed models.
-- [ ] Explain firewall and router requirements without silently changing them.
-- [ ] Warn when transport is unencrypted and document a reverse-proxy/TLS
+- [x] Display the exact reachable address and currently exposed models.
+- [x] Explain firewall and router requirements without silently changing them.
+- [x] Warn when transport is unencrypted and document a reverse-proxy/TLS
       deployment path.
-- [ ] Provide one action to disable sharing and restore loopback-only binding.
-- [ ] Do not claim that external services are secured or firewalled by Lumen
+- [x] Provide one action to disable sharing and restore loopback-only binding.
+- [x] Do not claim that external services are secured or firewalled by Lumen
       Source.
 
 ### Diagnostics and support
 
-- [ ] Export a redacted diagnostic bundle containing application, runtime,
+- [x] Export a redacted diagnostic bundle containing application, runtime,
       model, hardware, health, effective-setting, and recent lifecycle data.
-- [ ] Exclude secrets, prompts, responses, user paths, hostnames, and raw remote
+- [x] Exclude secrets, prompts, responses, user paths, hostnames, and raw remote
       addresses.
-- [ ] Include a human-readable summary with recommended recovery actions.
-- [ ] Add a user-visible state backup and restore workflow.
-- [ ] Provide a safe reset that preserves installed model data unless the user
+- [x] Include a human-readable summary with recommended recovery actions.
+- [x] Add a user-visible state backup and restore workflow.
+- [x] Provide a safe reset that preserves installed model data unless the user
       explicitly chooses otherwise.
 
 ### Packaging and data safety
@@ -261,13 +261,13 @@ stable public release.
 - [ ] Produce verified Linux release packages for the supported distribution
       matrix.
 - [ ] Test clean install, in-place upgrade, repair, and uninstall.
-- [ ] Keep models, caches, settings, and credentials separate so uninstall can
+- [x] Keep models, caches, settings, and credentials separate so uninstall can
       offer clear retention choices.
-- [ ] Back up state before every schema migration.
-- [ ] Restore the previous state automatically when migration fails.
-- [ ] Recover from truncated or corrupted state files using the last valid
+- [x] Back up state before every schema migration.
+- [x] Restore the previous state automatically when migration fails.
+- [x] Recover from truncated or corrupted state files using the last valid
       backup.
-- [ ] Ensure the application can start offline after an upgrade.
+- [x] Ensure the application can start offline after an upgrade.
 
 ### Usability and accessibility
 
@@ -275,21 +275,36 @@ stable public release.
 - [ ] Verify screen-reader labels, focus order, error announcements, and modal
       focus containment.
 - [ ] Test contrast and layouts at operating-system text scaling levels.
-- [ ] Remove remaining broken character encoding from visible strings.
+- [x] Remove remaining broken character encoding from visible strings.
 - [ ] Use consistent beginner-facing names for model, runtime, server,
       endpoint, weights, cache, and context.
 - [ ] Review every error for a clear next action.
 
 ### 0.9 acceptance criteria
 
-- [ ] Network access cannot be enabled accidentally or without authentication.
-- [ ] Diagnostic exports contain none of the prohibited sensitive fields.
-- [ ] A failed state migration returns to the previous working application
+- [x] Network access cannot be enabled accidentally or without authentication.
+- [x] Diagnostic exports contain none of the prohibited sensitive fields.
+- [x] A failed state migration returns to the previous working application
       state.
 - [ ] Signed Windows and supported Linux packages pass clean-machine upgrade
       and uninstall tests.
 - [ ] Core workflows pass keyboard, screen-reader, scaling, and contrast
       acceptance checks.
+
+### Remaining 0.9 release evidence
+
+The application-side 0.9 implementation is complete. The release workflow
+refuses unsigned Windows packages, verifies Linux package structure, and emits
+checksums, but the following items require release identities, clean machines,
+and assistive-technology or scaled-display test environments:
+
+- Build the MSI and NSIS installers with the protected Authenticode identity
+  and verify their signatures on a clean Windows machine.
+- Build and exercise the deb and AppImage on the supported Ubuntu matrix.
+- Record clean install, in-place upgrade, repair, retain-data uninstall, and
+  remove-data uninstall results.
+- Complete keyboard-only, screen-reader, 100–200% text scaling, and contrast
+  acceptance runs for every core workflow.
 
 ## 1.0: Stabilization and support commitment
 

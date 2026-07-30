@@ -1,9 +1,9 @@
 # Platform support
 
-## v0.1 target
+## Supported release target
 
-Lumen Source v0.1 is developed, packaged, and acceptance-tested on Ubuntu
-24.04 LTS. The first supported CPU architecture is x86_64; aarch64 should not
+Lumen Source is developed and packaged for Ubuntu 24.04 LTS and Windows 10/11.
+The supported CPU architecture is x86_64; aarch64 should not
 be advertised until it has its own clean-machine acceptance run.
 
 The release gate is:
@@ -45,7 +45,7 @@ added for any platform must preserve these boundaries:
 
 ## Platform adapters
 
-| Capability | Ubuntu 24.04 v0.1 | macOS future | Windows x86_64 |
+| Capability | Ubuntu 24.04 x86_64 | macOS future | Windows 10/11 x86_64 |
 | --- | --- | --- | --- |
 | Desktop shell | Tauri/WebKitGTK | Tauri/WKWebView | Tauri/WebView2 |
 | Hardware facts | `/proc`, CPU/EDAC sysfs, DMI, fixed vendor tools | system APIs, `system_profiler`/Metal | CIM/WMI plus optional `nvidia-smi` usage |

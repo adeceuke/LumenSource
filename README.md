@@ -62,7 +62,9 @@ See [development setup](docs/development.md), [platform support](docs/platform-s
 [remote host planning](docs/remote-hosts.md), and
 [current implementation](docs/current-implementation.md) for details. The
 [roadmap to 1.0](docs/roadmap-to-1.0.md) tracks the planned stabilization and
-beginner-focused management releases.
+beginner-focused management releases. Release operators should also read
+[API sharing and security](docs/sharing-and-security.md) and
+[release packaging and data retention](docs/release-packaging.md).
 
 ## Current local workflow
 

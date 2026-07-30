@@ -37,6 +37,7 @@ import type {
   ResourceStartPlan,
   SettingsSaveReport,
   SettingsValidationError,
+  SharingStatus,
   StorageReport,
   CleanupReport,
   UseIntent,
@@ -53,6 +54,28 @@ export const desktopCommands = {
   saveSettings: (settings: ApplicationSettings, confirmNetworkExposure: boolean) =>
     invoke<SettingsSaveReport>("save_settings", { settings, confirmNetworkExposure }),
   resetSettings: () => invoke<SettingsSaveReport>("reset_settings"),
+  sharingStatus: () => invoke<SharingStatus>("sharing_status"),
+  generateSharingToken: () => invoke<string>("generate_sharing_token"),
+  revokeSharingToken: () => invoke<void>("revoke_sharing_token"),
+  configureSharing: (
+    enabled: boolean,
+    allowOtherDevices: boolean,
+    port: number,
+    exposedModelIds: string[],
+    confirmUnencryptedNetwork: boolean,
+  ) => invoke<SharingStatus>("configure_sharing", {
+    enabled,
+    allowOtherDevices,
+    port,
+    exposedModelIds,
+    confirmUnencryptedNetwork,
+  }),
+  diagnosticBundle: () => invoke<string>("diagnostic_bundle"),
+  exportStateBackup: () => invoke<string>("export_state_backup"),
+  restoreStateBackup: (document: string, confirmed: boolean) =>
+    invoke<ApplicationSettings>("restore_state_backup", { document, confirmed }),
+  safeReset: (clearInventory: boolean, confirmed: boolean) =>
+    invoke<ApplicationSettings>("safe_reset", { clearInventory, confirmed }),
   storageReport: () => invoke<StorageReport>("storage_report"),
   cleanupStorage: (entryId: string, confirmed: boolean) =>
     invoke<CleanupReport>("cleanup_storage", { entryId, confirmed }),

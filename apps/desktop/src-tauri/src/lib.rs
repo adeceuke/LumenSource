@@ -7,6 +7,7 @@ mod model_reconciliation;
 pub mod remote;
 mod runtime_registry;
 pub mod settings;
+mod sharing;
 mod storage;
 pub mod telemetry;
 
@@ -29,6 +30,16 @@ pub fn run() {
         .manage(core)
         .setup(|app| {
             app.state::<SharedCoreAdapter>().retry_telemetry_upload();
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = app_handle
+                    .state::<SharedCoreAdapter>()
+                    .start_configured_sharing()
+                    .await
+                {
+                    eprintln!("could not start configured sharing gateway: {error}");
+                }
+            });
             if let (Some(window), Some(icon)) =
                 (app.get_webview_window("main"), app.default_window_icon())
             {
@@ -43,6 +54,14 @@ pub fn run() {
             commands::validate_settings,
             commands::save_settings,
             commands::reset_settings,
+            commands::sharing_status,
+            commands::generate_sharing_token,
+            commands::revoke_sharing_token,
+            commands::configure_sharing,
+            commands::diagnostic_bundle,
+            commands::export_state_backup,
+            commands::restore_state_backup,
+            commands::safe_reset,
             commands::storage_report,
             commands::cleanup_storage,
             commands::export_connection_profiles,

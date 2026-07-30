@@ -17,6 +17,7 @@ use crate::settings::{
     ModelSettings, ModelSettingsSaveReport, OllamaConnectionReport, RuntimeSecretKind,
     SettingsSaveReport, SettingsValidationError, VllmConnectionReport,
 };
+use crate::sharing::SharingStatus;
 use crate::storage::{CleanupReport, StorageReport};
 
 #[tauri::command]
@@ -60,6 +61,68 @@ pub async fn reset_settings(
     core: State<'_, SharedCoreAdapter>,
 ) -> Result<SettingsSaveReport, String> {
     core.reset_settings().await
+}
+
+#[tauri::command]
+pub async fn sharing_status(core: State<'_, SharedCoreAdapter>) -> Result<SharingStatus, String> {
+    core.sharing_status().await
+}
+
+#[tauri::command]
+pub async fn generate_sharing_token(core: State<'_, SharedCoreAdapter>) -> Result<String, String> {
+    core.generate_sharing_token().await
+}
+
+#[tauri::command]
+pub async fn revoke_sharing_token(core: State<'_, SharedCoreAdapter>) -> Result<(), String> {
+    core.revoke_sharing_token().await
+}
+
+#[tauri::command]
+pub async fn configure_sharing(
+    core: State<'_, SharedCoreAdapter>,
+    enabled: bool,
+    allow_other_devices: bool,
+    port: u16,
+    exposed_model_ids: Vec<String>,
+    confirm_unencrypted_network: bool,
+) -> Result<SharingStatus, String> {
+    core.configure_sharing(
+        enabled,
+        allow_other_devices,
+        port,
+        exposed_model_ids,
+        confirm_unencrypted_network,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn diagnostic_bundle(core: State<'_, SharedCoreAdapter>) -> Result<String, String> {
+    core.diagnostic_bundle().await
+}
+
+#[tauri::command]
+pub async fn export_state_backup(core: State<'_, SharedCoreAdapter>) -> Result<String, String> {
+    core.export_state_backup().await
+}
+
+#[tauri::command]
+pub async fn restore_state_backup(
+    core: State<'_, SharedCoreAdapter>,
+    document: String,
+    confirmed: bool,
+) -> Result<ApplicationSettings, String> {
+    core.restore_state_backup(&document, confirmed).await
+}
+
+#[tauri::command]
+pub async fn safe_reset(
+    core: State<'_, SharedCoreAdapter>,
+    clear_inventory: bool,
+    confirmed: bool,
+) -> Result<ApplicationSettings, String> {
+    core.safe_reset(clear_inventory, confirmed).await
 }
 
 #[tauri::command]

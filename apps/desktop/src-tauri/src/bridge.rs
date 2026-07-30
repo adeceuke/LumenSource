@@ -18,6 +18,7 @@ use lumen_source_runtime::{
     RuntimeProgress, RuntimeStatus as CoreRuntimeStatus, Url, VllmRuntime,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, Notify, RwLock};
 use uuid::Uuid;
@@ -43,6 +44,7 @@ use crate::settings::{
     ModelSettingsSaveReport, OllamaConnectionReport, PerformanceProfile, RuntimeSecretKind,
     SettingsSaveReport, VllmConnectionReport,
 };
+use crate::sharing::{SharedModel, SharingServer, SharingStatus};
 use crate::storage::{self, CleanupReport, StorageReport};
 use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
 
@@ -93,6 +95,15 @@ struct PersistedState {
     interrupted_install: Option<InterruptedInstall>,
     #[serde(default)]
     queued_operations: Vec<QueuedOperation>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StateBackup {
+    schema_version: u32,
+    exported_at: String,
+    credentials_included: bool,
+    state: PersistedState,
 }
 
 struct ActiveInstall {
@@ -162,6 +173,7 @@ pub struct SharedCoreAdapter {
     managed_ports: Mutex<BTreeSet<u16>>,
     model_operations: Arc<Mutex<BTreeSet<String>>>,
     operation_notify: Arc<Notify>,
+    sharing_server: Mutex<Option<SharingServer>>,
     remote_session: RwLock<Option<Arc<RemoteSession>>>,
     state_path: PathBuf,
     telemetry: Telemetry,
@@ -182,10 +194,10 @@ impl SharedCoreAdapter {
             .ok_or_else(|| "No local application data directory is available".to_owned())?;
         let state_path = data_root.join("lumen-source/state.json");
         let telemetry = Telemetry::new(&data_root);
-        let mut persisted = std::fs::read(&state_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<PersistedState>(&bytes).ok())
-            .unwrap_or_default();
+        let mut persisted = load_persisted_state(&state_path);
+        if persisted.settings.schema_version < crate::settings::SETTINGS_SCHEMA_VERSION {
+            preserve_pre_migration_state(&state_path, &persisted)?;
+        }
         persisted.settings = migrate_settings(persisted.settings);
         for queued in &mut persisted.queued_operations {
             queued.needs_retry = true;
@@ -238,6 +250,7 @@ impl SharedCoreAdapter {
             managed_ports: Mutex::new(managed_ports),
             model_operations: Arc::new(Mutex::new(BTreeSet::new())),
             operation_notify: Arc::new(Notify::new()),
+            sharing_server: Mutex::new(None),
             remote_session: RwLock::new(None),
             state_path,
             telemetry,
@@ -259,9 +272,374 @@ impl SharedCoreAdapter {
         Ok(settings)
     }
 
+    pub async fn sharing_status(&self) -> Result<SharingStatus, String> {
+        let state = self.state.read().await;
+        let token_saved =
+            credential_store::runtime_secret_is_saved(RuntimeSecretKind::SharingApiToken).await?;
+        let server = self.sharing_server.lock().await;
+        let exposed_models = state
+            .settings
+            .sharing
+            .exposed_model_ids
+            .iter()
+            .filter_map(|entry_id| {
+                state
+                    .models
+                    .iter()
+                    .find(|model| &model.id == entry_id)
+                    .map(|model| model.name.clone())
+            })
+            .collect();
+        Ok(SharingStatus {
+            enabled: state.settings.sharing.enabled,
+            running: server.is_some(),
+            allow_other_devices: state.settings.sharing.allow_other_devices,
+            token_saved,
+            address: server.as_ref().map(|server| server.address.clone()),
+            exposed_models,
+            transport_warning: state
+                .settings
+                .sharing
+                .allow_other_devices
+                .then(|| {
+                    "Traffic uses unencrypted HTTP. Keep it on a trusted network or place a TLS reverse proxy in front of this address.".to_owned()
+                }),
+        })
+    }
+
+    pub async fn generate_sharing_token(&self) -> Result<String, String> {
+        let token = format!("ls_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        credential_store::save_runtime_secret(
+            RuntimeSecretKind::SharingApiToken,
+            Zeroizing::new(token.clone()),
+        )
+        .await?;
+        if self.state.read().await.settings.sharing.enabled {
+            self.restart_sharing().await?;
+        }
+        Ok(token)
+    }
+
+    pub async fn revoke_sharing_token(&self) -> Result<(), String> {
+        self.stop_sharing().await;
+        self.state.write().await.settings.sharing.enabled = false;
+        self.flush_state().await?;
+        credential_store::delete_runtime_secret(RuntimeSecretKind::SharingApiToken).await
+    }
+
+    pub async fn configure_sharing(
+        &self,
+        enabled: bool,
+        allow_other_devices: bool,
+        port: u16,
+        exposed_model_ids: Vec<String>,
+        confirm_unencrypted_network: bool,
+    ) -> Result<SharingStatus, String> {
+        if !(1_024..=65_535).contains(&port) {
+            return Err("Choose a sharing port between 1,024 and 65,535.".to_owned());
+        }
+        if enabled && allow_other_devices && !confirm_unencrypted_network {
+            return Err(
+                "Confirm that other devices will use an authenticated but unencrypted HTTP connection."
+                    .to_owned(),
+            );
+        }
+        if enabled
+            && !credential_store::runtime_secret_is_saved(RuntimeSecretKind::SharingApiToken)
+                .await?
+        {
+            return Err("Generate an API token before enabling sharing.".to_owned());
+        }
+        {
+            let state = self.state.read().await;
+            for entry_id in &exposed_model_ids {
+                let model = state
+                    .models
+                    .iter()
+                    .find(|model| &model.id == entry_id)
+                    .ok_or_else(|| format!("Model entry {entry_id} no longer exists."))?;
+                if !shareable_model(model) {
+                    return Err(format!(
+                        "{} is not a local managed Ollama or vLLM model and cannot be secured by the Lumen Source gateway.",
+                        model.name
+                    ));
+                }
+            }
+        }
+        {
+            let mut state = self.state.write().await;
+            state.settings.sharing.enabled = enabled;
+            state.settings.sharing.allow_other_devices = allow_other_devices;
+            state.settings.sharing.port = port;
+            state.settings.sharing.exposed_model_ids = exposed_model_ids;
+        }
+        self.flush_state().await?;
+        self.restart_sharing().await?;
+        self.sharing_status().await
+    }
+
+    pub async fn start_configured_sharing(&self) -> Result<(), String> {
+        self.restart_sharing().await
+    }
+
+    async fn restart_sharing(&self) -> Result<(), String> {
+        self.stop_sharing().await;
+        let (settings, models) = {
+            let state = self.state.read().await;
+            if !state.settings.sharing.enabled {
+                return Ok(());
+            }
+            (
+                state.settings.clone(),
+                state
+                    .models
+                    .iter()
+                    .filter(|model| state.settings.sharing.exposed_model_ids.contains(&model.id))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let token = credential_store::load_runtime_secret_for_account(
+            RuntimeSecretKind::SharingApiToken,
+            "default".to_owned(),
+        )
+        .await?
+        .ok_or_else(|| "The sharing token is missing from the credential store.".to_owned())?;
+        let shared_models = models
+            .iter()
+            .map(|model| shared_model(&settings, model))
+            .collect::<Result<Vec<_>, _>>()?;
+        let server = crate::sharing::start(
+            settings.sharing.port,
+            settings.sharing.allow_other_devices,
+            token,
+            shared_models,
+        )
+        .await?;
+        *self.sharing_server.lock().await = Some(server);
+        Ok(())
+    }
+
+    async fn stop_sharing(&self) {
+        if let Some(server) = self.sharing_server.lock().await.take() {
+            server.stop();
+        }
+    }
+
     pub async fn storage_report(&self) -> Result<StorageReport, String> {
         let state = self.state.read().await;
         Ok(storage::storage_report(&state.settings, &state.models))
+    }
+
+    pub async fn diagnostic_bundle(&self) -> Result<String, String> {
+        let hardware = self.detect_hardware("local", None).await?;
+        let state = self.state.read().await;
+        let stale_models = state
+            .models
+            .iter()
+            .filter(|model| model.inventory_status != "available")
+            .count();
+        let failed_validations = state
+            .models
+            .iter()
+            .filter(|model| {
+                model
+                    .installation_validation
+                    .as_ref()
+                    .is_some_and(|validation| !validation.passed)
+            })
+            .count();
+        let recovery_actions = [
+            (stale_models > 0).then_some(
+                "Open Models and use Repair, Reconnect, Rematch, or Forget on stale entries.",
+            ),
+            (failed_validations > 0)
+                .then_some("Retry validation or apply the Safe performance profile."),
+            state
+                .interrupted_install
+                .is_some()
+                .then_some("Resume or discard the interrupted installation from Storage."),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        let models = state
+            .models
+            .iter()
+            .map(|model| {
+                let lifecycle_categories = model
+                    .logs
+                    .iter()
+                    .rev()
+                    .take(20)
+                    .map(|message| lifecycle_category(message))
+                    .collect::<Vec<_>>();
+                json!({
+                    "catalogModelId": if model.model_id.starts_with("external:") { "external-model" } else { model.model_id.as_str() },
+                    "runtime": model.runtime_id,
+                    "targetKind": if model.target_id == "local" { "local" } else { "remote" },
+                    "managed": model.managed,
+                    "running": model.running,
+                    "inventoryStatus": model.inventory_status,
+                    "version": model.version,
+                    "digestRecorded": model.digest.is_some(),
+                    "validationPassed": model.installation_validation.as_ref().map(|report| report.passed),
+                    "effectiveSettings": redacted_effective_settings(model.model_settings.as_ref()),
+                    "recentLifecycleCategories": lifecycle_categories,
+                })
+            })
+            .collect::<Vec<_>>();
+        let bundle = json!({
+            "schemaVersion": 1,
+            "generatedAt": chrono::Utc::now().to_rfc3339(),
+            "redaction": {
+                "secrets": "excluded",
+                "promptsAndResponses": "excluded",
+                "userPaths": "excluded",
+                "hostnamesAndAddresses": "excluded"
+            },
+            "application": {
+                "version": env!("CARGO_PKG_VERSION"),
+                "settingsSchema": state.settings.schema_version,
+                "offlineCapable": true,
+            },
+            "hardware": {
+                "platform": hardware.platform,
+                "cpu": hardware.cpu,
+                "cpuCores": hardware.cpu_cores,
+                "memoryBytes": hardware.memory_bytes,
+                "memoryKind": hardware.memory_kind,
+                "gpu": hardware.gpu,
+                "storage": {
+                    "totalBytes": hardware.storage.total_bytes,
+                    "availableBytes": hardware.storage.available_bytes,
+                }
+            },
+            "health": {
+                "modelCount": state.models.len(),
+                "staleModels": stale_models,
+                "failedValidations": failed_validations,
+                "interruptedInstall": state.interrupted_install.is_some(),
+                "queuedOperations": state.queued_operations.len(),
+            },
+            "models": models,
+            "humanReadableSummary": {
+                "status": if stale_models == 0 && failed_validations == 0 { "No persisted model problem was detected." } else { "One or more models need attention." },
+                "recommendedRecoveryActions": recovery_actions,
+            }
+        });
+        serde_json::to_string_pretty(&bundle)
+            .map_err(|error| format!("Could not create the diagnostic bundle: {error}"))
+    }
+
+    pub async fn export_state_backup(&self) -> Result<String, String> {
+        let state = self.state.read().await.clone();
+        serde_json::to_string_pretty(&StateBackup {
+            schema_version: 1,
+            exported_at: chrono::Utc::now().to_rfc3339(),
+            credentials_included: false,
+            state,
+        })
+        .map_err(|error| format!("Could not export the state backup: {error}"))
+    }
+
+    pub async fn restore_state_backup(
+        &self,
+        document: &str,
+        confirmed: bool,
+    ) -> Result<ApplicationSettings, String> {
+        if !confirmed {
+            return Err(
+                "Confirm replacement of the current settings and model inventory. Installed model weights and credentials are not changed."
+                    .to_owned(),
+            );
+        }
+        let mut backup: StateBackup = serde_json::from_str(document)
+            .map_err(|error| format!("The state backup is not valid JSON: {error}"))?;
+        if backup.schema_version != 1 || backup.credentials_included {
+            return Err("This state-backup format is not supported.".to_owned());
+        }
+        backup.state.settings = migrate_settings(backup.state.settings);
+        // Credential-store secrets are intentionally absent from backups, so
+        // restored sharing must be explicitly re-enabled with a local token.
+        backup.state.settings.sharing.enabled = false;
+        let validation = validate_settings(&backup.state.settings);
+        if !validation.is_empty() {
+            return Err(format!(
+                "The restored settings are invalid: {}",
+                validation
+                    .into_iter()
+                    .map(|error| error.message)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+        *self.state.write().await = backup.state;
+        self.flush_state().await?;
+        let settings = self.state.read().await.settings.clone();
+        self.runtime
+            .set_endpoint(&settings.ollama.endpoint)
+            .map_err(|error| error.to_string())?;
+        self.runtime
+            .set_executable(
+                settings
+                    .ollama
+                    .executable_path
+                    .as_deref()
+                    .map(resolve_ollama_executable)
+                    .unwrap_or_else(default_ollama_executable),
+            )
+            .await;
+        self.runtime
+            .set_server_environment(
+                settings
+                    .ollama
+                    .server_environment(settings.storage.model_directory.as_deref()),
+            )
+            .await;
+        self.restart_sharing().await?;
+        Ok(settings)
+    }
+
+    pub async fn safe_reset(
+        &self,
+        clear_inventory: bool,
+        confirmed: bool,
+    ) -> Result<ApplicationSettings, String> {
+        if !confirmed {
+            return Err(
+                "Confirm resetting Lumen Source settings. Model weights and shared caches will be preserved."
+                    .to_owned(),
+            );
+        }
+        self.stop_sharing().await;
+        let settings = ApplicationSettings::default();
+        {
+            let mut state = self.state.write().await;
+            state.settings = settings.clone();
+            state.interrupted_install = None;
+            state.queued_operations.clear();
+            if clear_inventory {
+                state.models.clear();
+                state.installed_model = None;
+            }
+        }
+        self.flush_state().await?;
+        self.telemetry.set_enabled(false).await?;
+        self.runtime
+            .set_endpoint(&settings.ollama.endpoint)
+            .map_err(|error| error.to_string())?;
+        self.runtime
+            .set_executable(default_ollama_executable())
+            .await;
+        self.runtime
+            .set_server_environment(
+                settings
+                    .ollama
+                    .server_environment(settings.storage.model_directory.as_deref()),
+            )
+            .await;
+        Ok(settings)
     }
 
     pub async fn cleanup_storage(
@@ -653,12 +1031,7 @@ impl SharedCoreAdapter {
                 .collect::<Vec<_>>()
                 .join("\n"));
         }
-        if settings.ollama.exposes_network() && !confirm_network_exposure {
-            return Err(
-                "Network exposure confirmation is required before Ollama can bind beyond loopback."
-                    .to_owned(),
-            );
-        }
+        let _ = confirm_network_exposure;
         let previous = self.state.read().await.settings.clone();
         let runtime_restart_required = previous.ollama != settings.ollama;
         self.telemetry
@@ -5037,14 +5410,93 @@ impl SharedCoreAdapter {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(|error| error.to_string())?;
+        let backup = self.state_path.with_extension("backup.json");
+        if let Ok(existing) = tokio::fs::read(&self.state_path).await {
+            if serde_json::from_slice::<PersistedState>(&existing).is_ok() {
+                tokio::fs::write(&backup, existing)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+        }
         let temporary = self.state_path.with_extension("json.tmp");
-        tokio::fs::write(&temporary, bytes)
+        let mut file = tokio::fs::File::create(&temporary)
             .await
             .map_err(|error| error.to_string())?;
+        use tokio::io::AsyncWriteExt;
+        file.write_all(&bytes)
+            .await
+            .map_err(|error| error.to_string())?;
+        file.sync_all().await.map_err(|error| error.to_string())?;
+        drop(file);
         tokio::fs::rename(&temporary, &self.state_path)
             .await
             .map_err(|error| error.to_string())
     }
+}
+
+fn load_persisted_state(state_path: &std::path::Path) -> PersistedState {
+    [
+        state_path.to_path_buf(),
+        state_path.with_extension("backup.json"),
+    ]
+    .into_iter()
+    .find_map(|path| {
+        let bytes = std::fs::read(path).ok()?;
+        serde_json::from_slice::<PersistedState>(&bytes).ok()
+    })
+    .unwrap_or_default()
+}
+
+fn preserve_pre_migration_state(
+    state_path: &std::path::Path,
+    state: &PersistedState,
+) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(state)
+        .map_err(|error| format!("Could not serialize pre-migration state: {error}"))?;
+    let Some(parent) = state_path.parent() else {
+        return Err("State file has no parent directory.".to_owned());
+    };
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    std::fs::write(state_path.with_extension("pre-migration.json"), bytes)
+        .map_err(|error| format!("Could not preserve pre-migration state: {error}"))
+}
+
+fn lifecycle_category(message: &str) -> &'static str {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("install") {
+        "installation"
+    } else if normalized.contains("validat") {
+        "validation"
+    } else if normalized.contains("update") {
+        "update"
+    } else if normalized.contains("rollback") || normalized.contains("restor") {
+        "rollback"
+    } else if normalized.contains("start") || normalized.contains("stop") {
+        "runtime-lifecycle"
+    } else if normalized.contains("error") || normalized.contains("fail") {
+        "failure"
+    } else {
+        "inventory"
+    }
+}
+
+fn redacted_effective_settings(settings: Option<&ModelSettings>) -> serde_json::Value {
+    let Some(settings) = settings else {
+        return json!(null);
+    };
+    json!({
+        "performanceProfile": settings.performance_profile,
+        "inferenceTask": settings.inference_task,
+        "contextLength": settings.context_length,
+        "temperature": settings.temperature,
+        "maxOutputTokens": settings.max_output_tokens,
+        "keepAlive": settings.keep_alive,
+        "loadOnStartup": settings.load_on_startup,
+        "preferredAccelerator": settings.preferred_accelerator,
+        "vllmGpuMemoryUtilization": settings.vllm_gpu_memory_utilization,
+        "vllmMaxConcurrentSequences": settings.vllm_max_concurrent_sequences,
+        "vllmCpuOffloadGib": settings.vllm_cpu_offload_gib,
+    })
 }
 
 fn default_ollama_executable() -> PathBuf {
@@ -5063,6 +5515,47 @@ fn default_ollama_executable() -> PathBuf {
     }
     #[cfg(not(target_os = "windows"))]
     PathBuf::from("ollama")
+}
+
+fn shareable_model(model: &PersistedModelEntry) -> bool {
+    model.managed
+        && model.target_id == "local"
+        && model.inventory_status == "available"
+        && matches!(model.runtime_id.as_str(), OLLAMA_RUNTIME | VLLM_RUNTIME)
+        && model.runtime_capabilities.lifecycle
+            != Some(crate::runtime_registry::RuntimeLifecycle::External)
+}
+
+fn shared_model(
+    settings: &ApplicationSettings,
+    model: &PersistedModelEntry,
+) -> Result<SharedModel, String> {
+    if !shareable_model(model) {
+        return Err(format!(
+            "{} is not eligible for managed sharing.",
+            model.name
+        ));
+    }
+    let backend_model = model
+        .runtime_model_id
+        .clone()
+        .ok_or_else(|| format!("{} has no runtime model identity.", model.name))?;
+    let endpoint = if model.runtime_id == OLLAMA_RUNTIME {
+        settings.ollama.endpoint.clone()
+    } else {
+        model
+            .model_settings
+            .as_ref()
+            .and_then(|model_settings| model_settings.endpoint.clone())
+            .ok_or_else(|| format!("{} has no managed vLLM endpoint.", model.name))?
+    };
+    Ok(SharedModel {
+        entry_id: model.id.clone(),
+        display_name: model.name.clone(),
+        public_name: backend_model.clone(),
+        backend_model,
+        endpoint,
+    })
 }
 
 fn resolve_ollama_executable(persisted: &std::path::Path) -> PathBuf {
@@ -6499,5 +6992,43 @@ mod tests {
             "localhost:5000/team/model:latest"
         ));
         assert!(!same_ollama_reference("model:small", "model:large"));
+    }
+
+    #[test]
+    fn corrupted_primary_state_recovers_from_the_last_valid_backup() {
+        let Ok(directory) = tempfile::tempdir() else {
+            panic!("temporary directory should be available");
+        };
+        let state_path = directory.path().join("state.json");
+        let backup_path = state_path.with_extension("backup.json");
+        let expected = PersistedState {
+            selected_runtime: Some("ollama".to_owned()),
+            ..PersistedState::default()
+        };
+        assert!(std::fs::write(&state_path, b"{truncated").is_ok());
+        let Ok(bytes) = serde_json::to_vec(&expected) else {
+            panic!("test state should serialize");
+        };
+        assert!(std::fs::write(backup_path, bytes).is_ok());
+
+        let recovered = load_persisted_state(&state_path);
+
+        assert_eq!(recovered.selected_runtime.as_deref(), Some("ollama"));
+    }
+
+    #[test]
+    fn diagnostic_settings_exclude_content_and_connection_fields() {
+        let settings = ModelSettings {
+            endpoint: Some("https://private-host.example/v1".to_owned()),
+            system_prompt: Some("private prompt".to_owned()),
+            context_length: Some(4_096),
+            ..ModelSettings::default()
+        };
+
+        let redacted = redacted_effective_settings(Some(&settings)).to_string();
+
+        assert!(redacted.contains("4096"));
+        assert!(!redacted.contains("private-host"));
+        assert!(!redacted.contains("private prompt"));
     }
 }

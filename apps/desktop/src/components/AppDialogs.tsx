@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type KeyboardEvent, type RefObject, type SetStateAction } from "react";
 import { browserMessages } from "../i18n";
+import { useModalFocus } from "../hooks/useModalFocus";
 import type { RemoteTargetConfig, RunningModelEntry } from "../types";
 
 const text = browserMessages();
@@ -12,11 +13,14 @@ interface TelemetryDialogProps {
 }
 
 export function TelemetryDialog({ enabled, saving, onClose, onSave }: TelemetryDialogProps) {
+  const dialogRef = useModalFocus<HTMLDivElement>(enabled !== undefined ? onClose : undefined);
   return (
     <div className="modal-backdrop" onClick={() => {
       if (enabled !== undefined) onClose();
     }}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal-card telemetry-dialog"
         role="dialog"
         aria-modal="true"
@@ -67,9 +71,12 @@ export function RemoteTargetDialog({
   onClose,
   onSave,
 }: RemoteTargetDialogProps) {
+  const dialogRef = useModalFocus<HTMLFormElement>(onClose);
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <form
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal-card remote-target-dialog"
         role="dialog"
         aria-modal="true"
@@ -181,12 +188,15 @@ export function RemotePasswordDialog({
   const [password, setPassword] = useState("");
   const [save, setSave] = useState(true);
   const machine = model.targetName ?? text.models.remoteLinux;
+  const dialogRef = useModalFocus<HTMLFormElement>(busy ? undefined : onCancel);
 
   return (
     <div className="modal-backdrop" onClick={() => {
       if (!busy) onCancel();
     }}>
       <form
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal-card remote-password-dialog"
         role="dialog"
         aria-modal="true"
@@ -245,13 +255,14 @@ interface RenameDialogProps {
 }
 
 export function RenameDialog({ inputRef, value, onChange, onKeyDown, onCancel, onSave }: RenameDialogProps) {
+  const dialogRef = useModalFocus<HTMLFormElement>(onCancel);
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <form className="modal-card" onClick={(event) => event.stopPropagation()} onSubmit={(event) => {
+      <form ref={dialogRef} tabIndex={-1} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="rename-dialog-title" onClick={(event) => event.stopPropagation()} onSubmit={(event) => {
         event.preventDefault();
         onSave();
       }}>
-        <h3>{text.dialogs.renameTitle}</h3>
+        <h3 id="rename-dialog-title">{text.dialogs.renameTitle}</h3>
         <input ref={inputRef} value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown} />
         <div className="modal-actions">
           <button className="secondary-button" type="button" onClick={onCancel}>{text.common.cancel}</button>
@@ -270,6 +281,7 @@ interface RemoveDialogProps {
 }
 
 export function RemoveDialog({ model, busy, onCancel, onConfirm }: RemoveDialogProps) {
+  const dialogRef = useModalFocus<HTMLDivElement>(busy ? undefined : onCancel);
   const external = model?.runtimeCapabilities.lifecycle === "external";
   const managedVllm = model?.runtimeId === "vllm"
     && model.runtimeCapabilities.lifecycle === "managed";
@@ -287,8 +299,8 @@ export function RemoveDialog({ model, busy, onCancel, onConfirm }: RemoveDialogP
     <div className="modal-backdrop" onClick={() => {
       if (!busy) onCancel();
     }}>
-      <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-        <h3>{title}</h3>
+      <div ref={dialogRef} tabIndex={-1} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="remove-dialog-title" onClick={(event) => event.stopPropagation()}>
+        <h3 id="remove-dialog-title">{title}</h3>
         <p>{description}</p>
         <div className="modal-actions">
           <button className="secondary-button" type="button" disabled={busy} onClick={onCancel}>{text.common.cancel}</button>
@@ -300,10 +312,11 @@ export function RemoveDialog({ model, busy, onCancel, onConfirm }: RemoveDialogP
 }
 
 export function LeaveWizardDialog({ onStay, onLeave }: { onStay: () => void; onLeave: () => void }) {
+  const dialogRef = useModalFocus<HTMLDivElement>(onStay);
   return (
     <div className="modal-backdrop" onClick={onStay}>
-      <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-        <h3>{text.dialogs.leaveTitle}</h3>
+      <div ref={dialogRef} tabIndex={-1} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="leave-dialog-title" onClick={(event) => event.stopPropagation()}>
+        <h3 id="leave-dialog-title">{text.dialogs.leaveTitle}</h3>
         <p>{text.dialogs.leaveDescription}</p>
         <div className="modal-actions">
           <button className="secondary-button" type="button" onClick={onStay}>{text.dialogs.stay}</button>

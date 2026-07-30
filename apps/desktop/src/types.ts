@@ -387,6 +387,12 @@ export interface ApplicationSettings {
     lifecycleLogRetention: number;
     confirmModelDeletion: boolean;
   };
+  sharing: {
+    enabled: boolean;
+    allowOtherDevices: boolean;
+    port: number;
+    exposedModelIds: string[];
+  };
   ollama: {
     endpoint: string;
     executablePath?: string;
@@ -419,6 +425,16 @@ export interface ApplicationSettings {
     managedPortEnd: number;
     pinnedRuntimeVersion: string;
   };
+}
+
+export interface SharingStatus {
+  enabled: boolean;
+  running: boolean;
+  allowOtherDevices: boolean;
+  tokenSaved: boolean;
+  address?: string;
+  exposedModels: string[];
+  transportWarning?: string;
 }
 
 export interface RuntimeCapabilities {

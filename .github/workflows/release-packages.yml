@@ -1,0 +1,63 @@
+name: Release packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+      - name: Import release identity
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_SIGNING_PFX_BASE64) { throw "The Windows release identity is not configured." }
+          $pfx = Join-Path $env:RUNNER_TEMP "lumensource-release.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_SIGNING_PFX_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
+      - name: Check
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\container.ps1 check
+      - name: Build and verify signed installers
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 -CertificateThumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+
+  ubuntu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify Linux packages
+        run: scripts/package-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-packages
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/SHA256SUMS

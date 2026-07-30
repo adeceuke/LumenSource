@@ -135,6 +135,7 @@ fn secret_storage_error(
     let credential = match kind {
         RuntimeSecretKind::VllmApiKey => "vLLM API key",
         RuntimeSecretKind::HuggingFaceToken => "Hugging Face token",
+        RuntimeSecretKind::SharingApiToken => "sharing API token",
     };
     format!("Could not {action} the {credential} in the operating system credential store: {error}")
 }
@@ -149,6 +150,10 @@ mod tests {
         assert_eq!(
             RuntimeSecretKind::VllmApiKey.service_name(),
             "dev.lumensource.desktop.vllm"
+        );
+        assert_eq!(
+            RuntimeSecretKind::SharingApiToken.service_name(),
+            "dev.lumensource.desktop.sharing"
         );
     }
 }
