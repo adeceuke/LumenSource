@@ -42,7 +42,7 @@ that has actually answered a validation request.
 - [x] Preselect saved target, runtime, use case, and performance profile without
       hiding or bypassing them.
 - [x] Let the user change those selections for each installation.
-- [ ] Make the Back, Cancel, retry, and interrupted-install behavior consistent
+- [x] Make the Back, Cancel, retry, and interrupted-install behavior consistent
       at every step.
 - [x] Return to the model library or open the installed model after completion,
       using an explicit user choice rather than first-run behavior.
@@ -57,7 +57,7 @@ that has actually answered a validation request.
 - [x] Keep calculated runtime values visible in the model Settings tab.
 - [x] Allow **Custom** to use the detailed Ollama and vLLM controls introduced
       in 0.5.
-- [ ] Warn when a custom value exceeds the detected memory budget.
+- [x] Warn when a custom value exceeds the detected memory budget.
 - [x] Store the selected profile with the model so its effective configuration
       can be explained later.
 
@@ -124,57 +124,57 @@ recover when files or processes change outside Lumen Source.
 
 ### Storage manager
 
-- [ ] Add a Storage page showing:
-  - [ ] Installed model weights by runtime and model
-  - [ ] Ollama model storage
-  - [ ] Hugging Face weight cache
-  - [ ] vLLM compile cache
-  - [ ] Lumen Source runtime downloads
-  - [ ] Temporary and incomplete downloads
-- [ ] Distinguish exact values from estimates.
-- [ ] Show which models or services share each cache.
-- [ ] Provide cleanup recommendations ordered by recoverable disk space.
-- [ ] Explain what will need to be downloaded or compiled again.
-- [ ] Never delete a shared cache as an implicit consequence of removing one
+- [x] Add a Storage page showing:
+  - [x] Installed model weights by runtime and model
+  - [x] Ollama model storage
+  - [x] Hugging Face weight cache
+  - [x] vLLM compile cache
+  - [x] Lumen Source runtime downloads
+  - [x] Temporary and incomplete downloads
+- [x] Distinguish exact values from estimates.
+- [x] Show which models or services share each cache.
+- [x] Provide cleanup recommendations ordered by recoverable disk space.
+- [x] Explain what will need to be downloaded or compiled again.
+- [x] Never delete a shared cache as an implicit consequence of removing one
       server.
-- [ ] Recheck available space immediately before large downloads.
+- [x] Recheck available space immediately before large downloads.
 
 ### Existing installation discovery
 
-- [ ] Discover existing Ollama models and match them to catalog variants.
-- [ ] Preserve unmatched models as clearly labeled externally discovered
+- [x] Discover existing Ollama models and match them to catalog variants.
+- [x] Preserve unmatched models as clearly labeled externally discovered
       entries.
-- [ ] Rediscover Lumen Source-managed vLLM containers using ownership labels.
-- [ ] Detect missing containers, deleted models, changed endpoints, and stale
+- [x] Rediscover Lumen Source-managed vLLM containers using ownership labels.
+- [x] Detect missing containers, deleted models, changed endpoints, and stale
       state without discarding user settings automatically.
-- [ ] Let the user repair, reconnect, forget, or rematch a stale entry.
-- [ ] Import and export external-runtime connection profiles without exporting
+- [x] Let the user repair, reconnect, forget, or rematch a stale entry.
+- [x] Import and export external-runtime connection profiles without exporting
       API keys or other credentials.
-- [ ] Prevent reconciliation from creating duplicate entries for persistent
+- [x] Prevent reconciliation from creating duplicate entries for persistent
       derived Ollama models.
 
 ### Interrupted operations
 
-- [ ] Persist enough installation progress to identify an interrupted
+- [x] Persist enough installation progress to identify an interrupted
       operation after application restart.
-- [ ] Resume downloads when the runtime and source safely support it.
-- [ ] Otherwise restart the operation safely and explain why it cannot resume.
-- [ ] Identify and clean Lumen Source temporary files left by interruption.
-- [ ] Reconcile data already committed to an Ollama or Hugging Face store
+- [x] Resume downloads when the runtime and source safely support it.
+- [x] Otherwise restart the operation safely and explain why it cannot resume.
+- [x] Identify and clean Lumen Source temporary files left by interruption.
+- [x] Reconcile data already committed to an Ollama or Hugging Face store
       instead of assuming cancellation removed it.
-- [ ] Make runtime start, stop, update, remove, and cache operations mutually
+- [x] Make runtime start, stop, update, remove, and cache operations mutually
       exclusive per model.
 
 ### 0.7 acceptance criteria
 
 - [ ] Reported storage totals reconcile with the managed directories and
       runtime inventories.
-- [ ] Every cleanup action lists its exact scope before confirmation.
-- [ ] Existing Ollama installations can be adopted without downloading models
+- [x] Every cleanup action lists its exact scope before confirmation.
+- [x] Existing Ollama installations can be adopted without downloading models
       again.
-- [ ] Restarting Lumen Source during an installation results in a recoverable
+- [x] Restarting Lumen Source during an installation results in a recoverable
       state.
-- [ ] External changes never corrupt the persisted model library.
+- [x] External changes never corrupt the persisted model library.
 
 ## 0.8: Safe updates and resource orchestration
 

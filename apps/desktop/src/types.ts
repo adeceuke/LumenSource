@@ -159,6 +159,44 @@ export interface InstallRequest {
   installRuntime: boolean;
 }
 
+export interface StorageReport {
+  scannedAt: string;
+  totalBytes: number;
+  reclaimableBytes: number;
+  entries: StorageEntry[];
+}
+
+export interface StorageEntry {
+  id: string;
+  category: string;
+  label: string;
+  path?: string;
+  sizeBytes: number;
+  exact: boolean;
+  shared: boolean;
+  owners: string[];
+  cleanupEligible: boolean;
+  cleanupEffect: string;
+}
+
+export interface CleanupReport {
+  removedBytes: number;
+  scope: string;
+  effect: string;
+}
+
+export interface InterruptedInstall {
+  modelId: string;
+  targetId: string;
+  performanceProfile: PerformanceProfile;
+  licenseBasis: string;
+  licenseReference?: string;
+  licenseAcknowledged: boolean;
+  installRuntime: boolean;
+  startedAt: string;
+  recovery: "resume" | "restart";
+}
+
 export interface PerformanceProfileReport {
   profile: PerformanceProfile;
   settings: ModelSettings;
@@ -252,6 +290,10 @@ export interface RunningModelEntry {
   runtimeCapabilities: RuntimeCapabilities;
   modelSettings?: ModelSettings;
   installationValidation?: InstallationValidationReport;
+  inventoryStatus?: "available" | "missing" | "needsReconnect";
+  discovered?: boolean;
+  pinned?: boolean;
+  lastSeenAt?: string;
   version: string;
   location: "local" | "remote";
   targetId: string;

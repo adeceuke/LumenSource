@@ -60,6 +60,7 @@ export const en = {
     label: "Main navigation",
     models: "Models",
     machines: "Machines",
+    storage: "Storage",
     settings: "Settings",
   },
   settings: {

@@ -11,6 +11,7 @@ import type {
   InstallProgress,
   InstallRequest,
   InstallationValidationReport,
+  InterruptedInstall,
   MachineUsageSnapshot,
   ManagedVllmSupport,
   ModelSettings,
@@ -33,6 +34,8 @@ import type {
   RuntimeStatus,
   SettingsSaveReport,
   SettingsValidationError,
+  StorageReport,
+  CleanupReport,
   UseIntent,
   VllmConnectionReport,
 } from "./types";
@@ -47,6 +50,18 @@ export const desktopCommands = {
   saveSettings: (settings: ApplicationSettings, confirmNetworkExposure: boolean) =>
     invoke<SettingsSaveReport>("save_settings", { settings, confirmNetworkExposure }),
   resetSettings: () => invoke<SettingsSaveReport>("reset_settings"),
+  storageReport: () => invoke<StorageReport>("storage_report"),
+  cleanupStorage: (entryId: string, confirmed: boolean) =>
+    invoke<CleanupReport>("cleanup_storage", { entryId, confirmed }),
+  exportConnectionProfiles: () => invoke<string>("export_connection_profiles"),
+  importConnectionProfiles: (document: string) =>
+    invoke<RunningModelEntry[]>("import_connection_profiles", { document }),
+  inventoryAction: (entryId: string, action: string, variantId?: string) =>
+    invoke<RunningModelEntry[]>("inventory_action", { entryId, action, variantId }),
+  interruptedInstall: () => invoke<InterruptedInstall | null>("interrupted_install"),
+  resumeInterruptedInstall: () => invoke<void>("resume_interrupted_install"),
+  discardInterruptedInstall: (confirmed: boolean) =>
+    invoke<void>("discard_interrupted_install", { confirmed }),
   testOllamaConnection: (settings: ApplicationSettings) =>
     invoke<OllamaConnectionReport>("test_ollama_connection", { settings }),
   restartManagedOllama: () =>
@@ -79,6 +94,8 @@ export const desktopCommands = {
     invoke<boolean>("vllm_credential_status", { entryId }),
   saveModelSettings: (entryId: string, settings: ModelSettings, applyRestart: boolean) =>
     invoke<ModelSettingsSaveReport>("save_model_settings", { entryId, settings, applyRestart }),
+  modelSettingsMemoryWarning: (entryId: string, settings: ModelSettings) =>
+    invoke<string | null>("model_settings_memory_warning", { entryId, settings }),
   managedVllmSupport: () => invoke<ManagedVllmSupport>("managed_vllm_support"),
   runtimeMigrationOptions: (entryId: string) =>
     invoke<RuntimeMigrationOption[]>("runtime_migration_options", { entryId }),

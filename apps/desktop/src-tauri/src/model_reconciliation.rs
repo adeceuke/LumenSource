@@ -131,6 +131,10 @@ pub(crate) fn reconcile_models(
                     installation_validation: previous
                         .as_ref()
                         .and_then(|entry| entry.installation_validation.clone()),
+                    inventory_status: "available".to_owned(),
+                    discovered: previous.is_none(),
+                    pinned: previous.as_ref().is_some_and(|entry| entry.pinned),
+                    last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
                     version: runtime_version,
                     location: "local".to_owned(),
                     target_id: local_target_id(),
@@ -194,6 +198,10 @@ pub(crate) fn reconcile_models(
                     installation_validation: previous
                         .as_ref()
                         .and_then(|entry| entry.installation_validation.clone()),
+                    inventory_status: "available".to_owned(),
+                    discovered: true,
+                    pinned: previous.as_ref().is_some_and(|entry| entry.pinned),
+                    last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
                     version: "External Ollama model".to_owned(),
                     location: "local".to_owned(),
                     target_id: local_target_id(),
@@ -246,6 +254,16 @@ pub(crate) fn reconcile_models(
             entry.runtime_id = DUMMY_RUNTIME.to_owned();
             entry.runtime_capabilities = capabilities_for(DUMMY_RUNTIME);
             entry.running = running.iter().any(|model| model == &variant.runtime_ref);
+            entry.inventory_status = "available".to_owned();
+            result.push(entry);
+        } else {
+            entry.running = false;
+            entry.inventory_status = "missing".to_owned();
+            let message =
+                "The model is no longer present in the Ollama inventory. Its settings were retained.";
+            if entry.logs.last().is_none_or(|last| last != message) {
+                entry.logs.push(message.to_owned());
+            }
             result.push(entry);
         }
     }
@@ -304,6 +322,10 @@ fn upsert_dummy_models(
             runtime_capabilities: capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            inventory_status: "available".to_owned(),
+            discovered: true,
+            pinned: false,
+            last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
             version,
             location: "local".to_owned(),
             target_id: local_target_id(),

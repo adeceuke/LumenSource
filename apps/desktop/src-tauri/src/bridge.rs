@@ -43,6 +43,7 @@ use crate::settings::{
     ModelSettingsSaveReport, OllamaConnectionReport, PerformanceProfile, RuntimeSecretKind,
     SettingsSaveReport, VllmConnectionReport,
 };
+use crate::storage::{self, CleanupReport, StorageReport};
 use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
 
 const BUNDLED_CATALOG: &[u8] = include_bytes!("../../../../catalog/model-list.json");
@@ -61,6 +62,21 @@ struct LoadedCatalog {
     source: String,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionProfileBundle {
+    schema_version: u32,
+    vllm: Vec<ExternalConnectionProfile>,
+    remote_targets: Vec<RemoteTargetConfig>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalConnectionProfile {
+    display_name: String,
+    config: ExternalVllmConfig,
+}
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct PersistedState {
     installed_model: Option<String>,
@@ -73,6 +89,8 @@ struct PersistedState {
     remote_targets: Vec<RemoteTargetConfig>,
     #[serde(default)]
     models: Vec<PersistedModelEntry>,
+    #[serde(default)]
+    interrupted_install: Option<InterruptedInstall>,
 }
 
 struct ActiveInstall {
@@ -90,6 +108,21 @@ struct RecentInstall {
     variant_id: String,
     target_id: String,
     was_already_installed: bool,
+}
+
+struct ModelOperationGuard {
+    operations: Arc<Mutex<BTreeSet<String>>>,
+    key: String,
+}
+
+impl Drop for ModelOperationGuard {
+    fn drop(&mut self) {
+        let operations = Arc::clone(&self.operations);
+        let key = self.key.clone();
+        tokio::spawn(async move {
+            operations.lock().await.remove(&key);
+        });
+    }
 }
 
 #[derive(Default)]
@@ -122,11 +155,13 @@ pub struct SharedCoreAdapter {
     active_chat: Mutex<Option<ActiveChat>>,
     recent_install: RwLock<Option<RecentInstall>>,
     managed_ports: Mutex<BTreeSet<u16>>,
+    model_operations: Arc<Mutex<BTreeSet<String>>>,
     remote_session: RwLock<Option<Arc<RemoteSession>>>,
     state_path: PathBuf,
     telemetry: Telemetry,
 }
 
+#[derive(Clone)]
 pub struct InstallOptions {
     pub performance_profile: PerformanceProfile,
     pub license_basis: String,
@@ -192,6 +227,7 @@ impl SharedCoreAdapter {
             active_chat: Mutex::new(None),
             recent_install: RwLock::new(None),
             managed_ports: Mutex::new(managed_ports),
+            model_operations: Arc::new(Mutex::new(BTreeSet::new())),
             remote_session: RwLock::new(None),
             state_path,
             telemetry,
@@ -211,6 +247,343 @@ impl SharedCoreAdapter {
             settings.privacy.telemetry_enabled = enabled;
         }
         Ok(settings)
+    }
+
+    pub async fn storage_report(&self) -> Result<StorageReport, String> {
+        let state = self.state.read().await;
+        Ok(storage::storage_report(&state.settings, &state.models))
+    }
+
+    pub async fn cleanup_storage(
+        &self,
+        entry_id: &str,
+        confirmed: bool,
+    ) -> Result<CleanupReport, String> {
+        let _operation = self.begin_model_operation("shared-cache", "clean").await?;
+        if entry_id == "managed-vllm-volumes" {
+            if !confirmed {
+                return Err("Confirm removal of both managed vLLM shared cache volumes.".to_owned());
+            }
+            let support = managed_vllm::detect_support().await;
+            let engine = support
+                .container_engine
+                .as_deref()
+                .and_then(managed_vllm::parse_engine)
+                .ok_or_else(|| "The managed container engine is unavailable.".to_owned())?;
+            managed_vllm::delete_caches(engine, true).await?;
+            return Ok(CleanupReport {
+                removed_bytes: 0,
+                scope: "Managed vLLM Hugging Face and compile-cache volumes".to_owned(),
+                effect: "Managed containers were retained. Model weights and compiled kernels will be recreated when needed.".to_owned(),
+            });
+        }
+        let settings = self.state.read().await.settings.clone();
+        storage::cleanup_directory(&settings, entry_id, confirmed)
+    }
+
+    async fn begin_model_operation(
+        &self,
+        model_key: &str,
+        action: &str,
+    ) -> Result<ModelOperationGuard, String> {
+        let key = model_key.trim().to_owned();
+        let mut operations = self.model_operations.lock().await;
+        if !operations.insert(key.clone()) {
+            return Err(format!(
+                "Another start, stop, update, remove, or cache operation is already active for {model_key}. Wait for it to finish before trying to {action}."
+            ));
+        }
+        drop(operations);
+        Ok(ModelOperationGuard {
+            operations: Arc::clone(&self.model_operations),
+            key,
+        })
+    }
+
+    pub async fn interrupted_install(&self) -> Option<InterruptedInstall> {
+        self.state.read().await.interrupted_install.clone()
+    }
+
+    pub async fn discard_interrupted_install(&self, confirmed: bool) -> Result<(), String> {
+        if !confirmed {
+            return Err(
+                "Confirm that the interrupted-operation record should be discarded.".to_owned(),
+            );
+        }
+        self.state.write().await.interrupted_install = None;
+        self.flush_state().await
+    }
+
+    pub async fn resume_interrupted_install(&self, app: AppHandle) -> Result<(), String> {
+        let pending = self
+            .interrupted_install()
+            .await
+            .ok_or_else(|| "There is no interrupted installation to resume.".to_owned())?;
+        let profile = pending.performance_profile;
+        let model_id = pending.model_id.clone();
+        let target_id = pending.target_id.clone();
+        self.install(
+            app,
+            model_id.clone(),
+            target_id.clone(),
+            InstallOptions {
+                performance_profile: profile,
+                license_basis: pending.license_basis,
+                license_reference: pending.license_reference,
+                license_acknowledged: pending.license_acknowledged,
+                install_runtime: pending.install_runtime,
+            },
+        )
+        .await?;
+        let leave_running = self.state.read().await.settings.start_after_install;
+        let validation = self
+            .validate_installation(&model_id, &target_id, profile, leave_running)
+            .await?;
+        let _ = self.load_models().await?;
+        {
+            let mut state = self.state.write().await;
+            if let Some(model) = state
+                .models
+                .iter_mut()
+                .find(|model| model.model_id == model_id && model.target_id == target_id)
+            {
+                model.installation_validation = Some(validation.clone());
+                model.model_settings = Some(validation.settings.clone());
+                model.running = validation.running;
+                model.managed = true;
+                model.discovered = false;
+                model.inventory_status = "available".to_owned();
+                model.last_seen_at = Some(chrono::Utc::now().to_rfc3339());
+                model.logs.push(
+                    "Interrupted installation resumed and inference validation completed."
+                        .to_owned(),
+                );
+            }
+        }
+        self.flush_state().await?;
+        if validation.passed {
+            Ok(())
+        } else {
+            Err(validation.message)
+        }
+    }
+
+    pub async fn export_connection_profiles(&self) -> Result<String, String> {
+        let state = self.state.read().await;
+        let vllm = state
+            .models
+            .iter()
+            .filter(|model| {
+                model.runtime_id == VLLM_RUNTIME
+                    && model.runtime_capabilities.lifecycle
+                        == Some(crate::runtime_registry::RuntimeLifecycle::External)
+            })
+            .filter_map(|model| {
+                Some(ExternalConnectionProfile {
+                    display_name: model.name.clone(),
+                    config: vllm_config_for_entry(model)?,
+                })
+            })
+            .collect();
+        serde_json::to_string_pretty(&ConnectionProfileBundle {
+            schema_version: 1,
+            vllm,
+            remote_targets: state.remote_targets.clone(),
+        })
+        .map_err(|error| format!("Could not export connection profiles: {error}"))
+    }
+
+    pub async fn import_connection_profiles(
+        &self,
+        document: &str,
+    ) -> Result<Vec<PersistedModelEntry>, String> {
+        let bundle: ConnectionProfileBundle = serde_json::from_str(document)
+            .map_err(|error| format!("The connection-profile document is invalid: {error}"))?;
+        if bundle.schema_version != 1 {
+            return Err(format!(
+                "Unsupported connection-profile schema {}.",
+                bundle.schema_version
+            ));
+        }
+        for target in &bundle.remote_targets {
+            target.validate()?;
+        }
+        for profile in &bundle.vllm {
+            let errors = validate_external_vllm_config(&profile.config, true);
+            if !errors.is_empty() {
+                return Err(errors
+                    .into_iter()
+                    .map(|error| format!("{}: {}", error.field, error.message))
+                    .collect::<Vec<_>>()
+                    .join("\n"));
+            }
+        }
+        let mut state = self.state.write().await;
+        for target in bundle.remote_targets {
+            let normalized = target.normalized();
+            if let Some(existing) = state.remote_targets.iter_mut().find(|candidate| {
+                candidate.host == normalized.host
+                    && candidate.port == normalized.port
+                    && candidate.username == normalized.username
+            }) {
+                *existing = normalized;
+            } else {
+                state.remote_targets.push(normalized);
+            }
+        }
+        for profile in bundle.vllm {
+            let duplicate = state.models.iter().any(|model| {
+                model.runtime_id == VLLM_RUNTIME
+                    && model
+                        .model_settings
+                        .as_ref()
+                        .and_then(|settings| settings.endpoint.as_deref())
+                        == Some(profile.config.endpoint.as_str())
+                    && model.runtime_model_id.as_deref()
+                        == Some(profile.config.served_model.as_str())
+            });
+            if duplicate {
+                continue;
+            }
+            let id = Uuid::new_v4().to_string();
+            state.models.push(PersistedModelEntry {
+                id: id.clone(),
+                name: profile.display_name,
+                model_id: format!("external-vllm-{id}"),
+                model_name: profile.config.served_model.clone(),
+                runtime_id: VLLM_RUNTIME.to_owned(),
+                runtime_model_id: Some(profile.config.served_model.clone()),
+                runtime_capabilities: external_vllm_capabilities(
+                    &self.runtime_registry,
+                    profile.config.inference_task,
+                ),
+                model_settings: Some(profile.config.model_settings()),
+                installation_validation: None,
+                inventory_status: "needsReconnect".to_owned(),
+                discovered: true,
+                pinned: false,
+                last_seen_at: None,
+                version: "Imported external service".to_owned(),
+                location: "local".to_owned(),
+                target_id: "local".to_owned(),
+                target_name: None,
+                running: false,
+                managed: false,
+                digest: None,
+                size_bytes: None,
+                license_basis: None,
+                license_reference: None,
+                license_acknowledged_at: None,
+                license_profile_id: None,
+                license_name: None,
+                license_url: None,
+                license_reviewed_at: None,
+                license_catalog_version: None,
+                logs: vec![
+                    "Imported without credentials. Reconnect to validate this service.".to_owned(),
+                ],
+            });
+        }
+        let models = state.models.clone();
+        drop(state);
+        self.flush_state().await?;
+        Ok(models)
+    }
+
+    pub async fn inventory_action(
+        &self,
+        entry_id: &str,
+        action: &str,
+        variant_id: Option<&str>,
+    ) -> Result<Vec<PersistedModelEntry>, String> {
+        if action == "rescan" || action == "reconnect" {
+            return self.load_models().await;
+        }
+        if action == "forget" {
+            let mut state = self.state.write().await;
+            let before = state.models.len();
+            state.models.retain(|model| model.id != entry_id);
+            if state.models.len() == before {
+                return Err("The inventory entry no longer exists.".to_owned());
+            }
+            let models = state.models.clone();
+            drop(state);
+            self.flush_state().await?;
+            return Ok(models);
+        }
+        if action == "repair" {
+            let entry = self
+                .state
+                .read()
+                .await
+                .models
+                .iter()
+                .find(|model| model.id == entry_id)
+                .cloned()
+                .ok_or_else(|| "The inventory entry no longer exists.".to_owned())?;
+            if entry.runtime_id != OLLAMA_RUNTIME || entry.target_id != "local" {
+                return Err(
+                    "Automatic repair is currently available for local Ollama models.".to_owned(),
+                );
+            }
+            let reference = entry
+                .runtime_model_id
+                .as_deref()
+                .ok_or_else(|| "The Ollama model reference is unavailable.".to_owned())?;
+            self.runtime
+                .ensure_running()
+                .await
+                .map_err(|error| error.to_string())?;
+            self.runtime
+                .pull_model(reference, &|_| {})
+                .await
+                .map_err(|error| error.to_string())?;
+            return self.load_models().await;
+        }
+        let mut state = self.state.write().await;
+        let entry = state
+            .models
+            .iter_mut()
+            .find(|model| model.id == entry_id)
+            .ok_or_else(|| "The inventory entry no longer exists.".to_owned())?;
+        match action {
+            "adopt" => {
+                entry.managed = true;
+                entry.discovered = true;
+                entry.logs.push(
+                    "Adopted by Lumen Source without downloading model weights again.".to_owned(),
+                );
+            }
+            "pin" => entry.pinned = true,
+            "unpin" => entry.pinned = false,
+            "rematch" => {
+                let variant_id =
+                    variant_id.ok_or_else(|| "Choose a catalog variant to rematch.".to_owned())?;
+                let catalog = self
+                    .catalog
+                    .try_read()
+                    .ok()
+                    .and_then(|catalog| catalog.as_ref().map(|loaded| loaded.catalog.clone()))
+                    .ok_or_else(|| "The catalog is not loaded.".to_owned())?;
+                let (model, variant) = find_variant(&catalog, variant_id)?;
+                if variant.runtime != entry.runtime_id {
+                    return Err("The catalog variant uses a different runtime.".to_owned());
+                }
+                entry.model_id = variant.id.clone();
+                entry.model_name = model.display_name.clone();
+                entry.runtime_capabilities =
+                    capabilities_for_catalog_model(&self.runtime_registry, &variant.runtime, model);
+                entry.logs.push(format!(
+                    "Matched to catalog variant {} without changing model weights.",
+                    variant.id
+                ));
+            }
+            _ => return Err("Unsupported inventory action.".to_owned()),
+        }
+        let models = state.models.clone();
+        drop(state);
+        self.flush_state().await?;
+        Ok(models)
     }
 
     pub async fn save_settings(
@@ -591,6 +964,10 @@ impl SharedCoreAdapter {
             ),
             model_settings: Some(settings),
             installation_validation: Some(validation),
+            inventory_status: "available".to_owned(),
+            discovered: existing.as_ref().is_some_and(|model| model.discovered),
+            pinned: existing.as_ref().is_some_and(|model| model.pinned),
+            last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
             version: "External service".to_owned(),
             location: "local".to_owned(),
             target_id: "local".to_owned(),
@@ -828,6 +1205,69 @@ impl SharedCoreAdapter {
                 "Settings saved. They will apply when the model starts.".to_owned()
             },
         })
+    }
+
+    pub async fn model_settings_memory_warning(
+        &self,
+        entry_id: &str,
+        settings: &ModelSettings,
+    ) -> Result<Option<String>, String> {
+        if settings.performance_profile != Some(PerformanceProfile::Custom) {
+            return Ok(None);
+        }
+        let entry = self
+            .state
+            .read()
+            .await
+            .models
+            .iter()
+            .find(|model| model.id == entry_id)
+            .cloned()
+            .ok_or_else(|| "The model is no longer installed.".to_owned())?;
+        let catalog = self.catalog_clone().await?;
+        let Some(variant) = catalog
+            .models
+            .iter()
+            .flat_map(|model| &model.variants)
+            .find(|variant| variant.id == entry.model_id)
+        else {
+            return Ok(None);
+        };
+        let hardware = self.hardware_for_target(&entry.target_id).await?;
+        let (minimum, maximum) = estimated_loaded_memory(variant);
+        let maximum_context = variant.context_window_tokens.unwrap_or(32_768).max(1);
+        let requested_context = settings.context_length.unwrap_or(maximum_context);
+        let context_ratio =
+            f64::from(requested_context.min(maximum_context)) / f64::from(maximum_context);
+        let concurrency = if entry.runtime_id == VLLM_RUNTIME {
+            settings.vllm_max_concurrent_sequences.unwrap_or(1).max(1)
+        } else {
+            u32::from(
+                self.state
+                    .read()
+                    .await
+                    .settings
+                    .ollama
+                    .parallel_requests
+                    .max(1),
+            )
+        };
+        let context_reserve = maximum
+            .saturating_sub(minimum)
+            .saturating_mul(requested_context.min(maximum_context).into())
+            / u64::from(maximum_context);
+        let estimated =
+            minimum.saturating_add(context_reserve.saturating_mul(u64::from(concurrency.min(64))));
+        if estimated <= hardware.available_ram_bytes {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "These Custom values may require about {:.1} GiB of system memory ({:.0}% of the catalog context and {concurrency} concurrent request{}), but only {:.1} GiB is currently available. Saving is allowed, but starting may fail unless you reduce context or concurrency or stop other models.",
+            estimated as f64 / GIB,
+            context_ratio * 100.0,
+            if concurrency == 1 { "" } else { "s" },
+            hardware.available_ram_bytes as f64 / GIB
+        )))
     }
 
     pub async fn managed_vllm_support(&self) -> ManagedVllmSupport {
@@ -1103,6 +1543,10 @@ impl SharedCoreAdapter {
                     ),
                     model_settings: Some(ModelSettings::default()),
                     installation_validation: None,
+                    inventory_status: "available".to_owned(),
+                    discovered: false,
+                    pinned: source.pinned,
+                    last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
                     version: catalog
                         .runtimes
                         .iter()
@@ -1355,6 +1799,10 @@ impl SharedCoreAdapter {
             runtime_capabilities: managed_vllm_capabilities(&self.runtime_registry, inference_task),
             model_settings: Some(settings),
             installation_validation: Some(validation),
+            inventory_status: "available".to_owned(),
+            discovered: false,
+            pinned: source.pinned,
+            last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
             version: defaults.pinned_runtime_version,
             location: "local".to_owned(),
             target_id: "local".to_owned(),
@@ -1448,6 +1896,7 @@ impl SharedCoreAdapter {
     }
 
     pub async fn delete_managed_vllm_caches(&self, confirmed: bool) -> Result<(), String> {
+        let _operation = self.begin_model_operation("shared-cache", "clean").await?;
         let support = managed_vllm::detect_support().await;
         let engine = support
             .container_engine
@@ -2071,6 +2520,9 @@ impl SharedCoreAdapter {
                 "The selected performance profile exceeds the detected memory budget.".to_owned()
             }));
         }
+        let _operation = self
+            .begin_model_operation(&format!("{target_id}:{variant_id}"), "install")
+            .await?;
         let telemetry_model_id = {
             let catalog = self.catalog_clone().await?;
             let (model, _) = find_variant(&catalog, &variant_id)?;
@@ -2092,6 +2544,24 @@ impl SharedCoreAdapter {
         }
 
         let telemetry_variant_id = variant_id.clone();
+        {
+            self.state.write().await.interrupted_install = Some(InterruptedInstall {
+                model_id: variant_id.clone(),
+                target_id: target_id.clone(),
+                performance_profile: options.performance_profile,
+                license_basis: options.license_basis.clone(),
+                license_reference: options.license_reference.clone(),
+                license_acknowledged: options.license_acknowledged,
+                install_runtime: options.install_runtime,
+                started_at: chrono::Utc::now().to_rfc3339(),
+                recovery: "resume".to_owned(),
+            });
+        }
+        if let Err(error) = self.flush_state().await {
+            self.active_install.lock().await.take();
+            self.state.write().await.interrupted_install = None;
+            return Err(error);
+        }
         let result = self
             .install_inner(
                 app,
@@ -2102,6 +2572,8 @@ impl SharedCoreAdapter {
             )
             .await;
         self.active_install.lock().await.take();
+        self.state.write().await.interrupted_install = None;
+        let recovery_flush = self.flush_state().await;
         self.telemetry.record(TelemetryEvent::ModelInstall {
             model_id: telemetry_model_id,
             variant_id: telemetry_variant_id,
@@ -2109,7 +2581,13 @@ impl SharedCoreAdapter {
             succeeded: result.is_ok(),
             failure: result.as_ref().err().map(|error| failure_category(error)),
         });
-        result
+        match result {
+            Ok(()) => recovery_flush,
+            Err(error) => {
+                let _ = recovery_flush;
+                Err(error)
+            }
+        }
     }
 
     pub async fn performance_profile(
@@ -2181,6 +2659,19 @@ impl SharedCoreAdapter {
         let was_already_installed;
         let total = variant_size_bytes(variant);
         let total_items = variant.download_item_count;
+        let required_storage =
+            ((variant.requirements.min_storage_gb * GIB).ceil() as u64).max(total);
+        let available_storage = self
+            .hardware_for_target(target_id)
+            .await?
+            .storage
+            .available_bytes;
+        if available_storage < required_storage {
+            return Err(format!(
+                "Storage changed after preflight: {} bytes are required but only {} bytes are currently available. Free space and retry.",
+                required_storage, available_storage
+            ));
+        }
         app.emit(
             "install-progress",
             progress(
@@ -2343,6 +2834,9 @@ impl SharedCoreAdapter {
         target_id: String,
         password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
+        let _operation = self
+            .begin_model_operation(entry_id.unwrap_or(variant_id.as_str()), "start")
+            .await?;
         if let Some(entry) = self.managed_vllm_entry(entry_id).await {
             let settings = entry.model_settings.as_ref().ok_or_else(|| {
                 "The managed vLLM model has incomplete deployment settings.".to_owned()
@@ -2483,6 +2977,9 @@ impl SharedCoreAdapter {
         target_id: String,
         password: Option<Zeroizing<String>>,
     ) -> Result<RuntimeStatus, String> {
+        let _operation = self
+            .begin_model_operation(entry_id.unwrap_or(variant_id.as_str()), "stop")
+            .await?;
         if let Some(entry) = self.managed_vllm_entry(entry_id).await {
             let settings = entry.model_settings.as_ref().ok_or_else(|| {
                 "The managed vLLM model has incomplete deployment settings.".to_owned()
@@ -3373,6 +3870,9 @@ impl SharedCoreAdapter {
         let (mut vllm_persisted, local_persisted): (Vec<_>, Vec<_>) = local_persisted
             .into_iter()
             .partition(|model| model.runtime_id == VLLM_RUNTIME);
+        let catalog = self.catalog_clone().await?;
+        self.rediscover_managed_vllm(&catalog, &mut vllm_persisted)
+            .await;
         self.refresh_vllm_models(&mut vllm_persisted).await;
         for model in &mut remote_persisted {
             model.runtime_id = OLLAMA_RUNTIME.to_owned();
@@ -3382,8 +3882,8 @@ impl SharedCoreAdapter {
                 .capabilities
                 .clone();
             model.running = false;
+            model.inventory_status = "needsReconnect".to_owned();
         }
-        let catalog = self.catalog_clone().await?;
         let dummy_installed = self
             .dummy_runtime
             .installed_models()
@@ -3451,6 +3951,146 @@ impl SharedCoreAdapter {
         Ok(models)
     }
 
+    async fn rediscover_managed_vllm(
+        &self,
+        catalog: &Catalog,
+        models: &mut Vec<PersistedModelEntry>,
+    ) {
+        let support = managed_vllm::detect_support().await;
+        let Some(engine) = support
+            .container_engine
+            .as_deref()
+            .and_then(managed_vllm::parse_engine)
+        else {
+            return;
+        };
+        let Ok(containers) = managed_vllm::discover_containers(engine).await else {
+            return;
+        };
+        for container in containers {
+            if let Some(existing) = models.iter_mut().find(|model| {
+                model.id == container.entry_id
+                    || model
+                        .model_settings
+                        .as_ref()
+                        .and_then(|settings| settings.managed_container_name.as_deref())
+                        == Some(container.name.as_str())
+            }) {
+                existing.running = container.running;
+                existing.inventory_status = "available".to_owned();
+                existing.last_seen_at = Some(chrono::Utc::now().to_rfc3339());
+                continue;
+            }
+            let catalog_match = catalog.models.iter().find_map(|model| {
+                model
+                    .variants
+                    .iter()
+                    .find(|variant| {
+                        variant.runtime == VLLM_RUNTIME
+                            && variant.hugging_face_model_id.as_deref()
+                                == Some(container.model_id.as_str())
+                    })
+                    .map(|variant| (model, variant))
+            });
+            let (model_id, model_name, settings, size_bytes, digest) =
+                if let Some((model, variant)) = catalog_match {
+                    (
+                        variant.id.clone(),
+                        model.display_name.clone(),
+                        ModelSettings {
+                            performance_profile: Some(PerformanceProfile::Custom),
+                            runtime_management_mode: Some(
+                                crate::settings::RuntimeManagementMode::Managed,
+                            ),
+                            inference_task: Some(ModelInferenceTask::Chat),
+                            endpoint: container
+                                .port
+                                .map(|port| format!("http://127.0.0.1:{port}")),
+                            managed_container_engine: Some(engine.as_str().to_owned()),
+                            managed_container_name: Some(container.name.clone()),
+                            managed_port: container.port,
+                            vllm_model_revision: variant.model_revision.clone(),
+                            vllm_tokenizer_revision: variant.tokenizer_revision.clone(),
+                            vllm_served_model_name: Some(container.served_model_name.clone()),
+                            ..ModelSettings::default()
+                        },
+                        Some(variant_size_bytes(variant)),
+                        variant.runtime_digest.clone(),
+                    )
+                } else {
+                    (
+                        format!("managed-vllm-discovered:{}", container.model_id),
+                        container.model_id.clone(),
+                        ModelSettings {
+                            performance_profile: Some(PerformanceProfile::Custom),
+                            runtime_management_mode: Some(
+                                crate::settings::RuntimeManagementMode::Managed,
+                            ),
+                            inference_task: Some(ModelInferenceTask::Chat),
+                            endpoint: container
+                                .port
+                                .map(|port| format!("http://127.0.0.1:{port}")),
+                            managed_container_engine: Some(engine.as_str().to_owned()),
+                            managed_container_name: Some(container.name.clone()),
+                            managed_port: container.port,
+                            vllm_served_model_name: Some(container.served_model_name.clone()),
+                            ..ModelSettings::default()
+                        },
+                        None,
+                        None,
+                    )
+                };
+            models.push(PersistedModelEntry {
+                id: if container.entry_id.is_empty() {
+                    format!("container:{}", container.name)
+                } else {
+                    container.entry_id
+                },
+                name: model_name.clone(),
+                model_id,
+                model_name,
+                runtime_id: VLLM_RUNTIME.to_owned(),
+                runtime_model_id: Some(container.served_model_name),
+                runtime_capabilities: managed_vllm_capabilities(
+                    &self.runtime_registry,
+                    ModelInferenceTask::Chat,
+                ),
+                model_settings: Some(settings),
+                installation_validation: None,
+                inventory_status: "available".to_owned(),
+                discovered: true,
+                pinned: false,
+                last_seen_at: Some(chrono::Utc::now().to_rfc3339()),
+                version: self
+                    .state
+                    .read()
+                    .await
+                    .settings
+                    .vllm
+                    .pinned_runtime_version
+                    .clone(),
+                location: "local".to_owned(),
+                target_id: "local".to_owned(),
+                target_name: None,
+                running: container.running,
+                managed: true,
+                digest,
+                size_bytes,
+                license_basis: None,
+                license_reference: None,
+                license_acknowledged_at: None,
+                license_profile_id: None,
+                license_name: None,
+                license_url: None,
+                license_reviewed_at: None,
+                license_catalog_version: None,
+                logs: vec![
+                    "Rediscovered from a Lumen Source ownership label on the container.".to_owned(),
+                ],
+            });
+        }
+    }
+
     async fn refresh_vllm_models(&self, models: &mut [PersistedModelEntry]) {
         for model in models {
             let settings = model.model_settings.clone().unwrap_or_default();
@@ -3472,6 +4112,13 @@ impl SharedCoreAdapter {
                         .unwrap_or(false),
                     _ => false,
                 };
+                model.inventory_status = if model.running {
+                    model.last_seen_at = Some(chrono::Utc::now().to_rfc3339());
+                    "available"
+                } else {
+                    "missing"
+                }
+                .to_owned();
                 continue;
             }
             let Some(config) = vllm_config_for_entry(model) else {
@@ -3499,6 +4146,13 @@ impl SharedCoreAdapter {
                     }),
                 Err(_) => false,
             };
+            model.inventory_status = if model.running {
+                model.last_seen_at = Some(chrono::Utc::now().to_rfc3339());
+                "available"
+            } else {
+                "needsReconnect"
+            }
+            .to_owned();
         }
     }
 
@@ -3507,6 +4161,7 @@ impl SharedCoreAdapter {
     }
 
     pub async fn remove_model(&self, model_id: &str) -> Result<Vec<PersistedModelEntry>, String> {
+        let _operation = self.begin_model_operation(model_id, "remove").await?;
         let entry = self
             .state
             .read()
@@ -4745,6 +5400,10 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            inventory_status: "available".to_owned(),
+            discovered: false,
+            pinned: false,
+            last_seen_at: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -4783,6 +5442,42 @@ mod tests {
         assert!(models.iter().any(|model| model.id == "first-row"));
         assert!(models.iter().any(|model| model.id == "second-row"));
         assert!(models.iter().all(|model| model.running));
+
+        let Ok(catalog) = Catalog::from_slice(TEST_CATALOG) else {
+            panic!("bundled test catalog should parse");
+        };
+        let stale = reconcile_models(
+            catalog,
+            vec![entry("missing-row", "Missing copy")],
+            Vec::new(),
+            &[],
+            &[],
+        );
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].inventory_status, "missing");
+        assert_eq!(stale[0].name, "Missing copy");
+    }
+
+    #[test]
+    fn connection_profile_format_has_no_credential_fields() {
+        let Ok(document) = serde_json::to_string(&ConnectionProfileBundle {
+            schema_version: 1,
+            vllm: vec![ExternalConnectionProfile {
+                display_name: "External".to_owned(),
+                config: ExternalVllmConfig {
+                    endpoint: "https://example.invalid/v1".to_owned(),
+                    served_model: "example".to_owned(),
+                    ..ExternalVllmConfig::default()
+                },
+            }],
+            remote_targets: Vec::new(),
+        }) else {
+            panic!("connection profiles should serialize");
+        };
+        let normalized = document.to_ascii_lowercase();
+        assert!(!normalized.contains("password"));
+        assert!(!normalized.contains("apikey"));
+        assert!(!normalized.contains("token"));
     }
 
     #[test]
@@ -4800,6 +5495,10 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            inventory_status: "available".to_owned(),
+            discovered: false,
+            pinned: false,
+            last_seen_at: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -4847,6 +5546,10 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            inventory_status: "available".to_owned(),
+            discovered: false,
+            pinned: false,
+            last_seen_at: None,
             version: "0.0.0-dummy".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),
@@ -4875,6 +5578,10 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            inventory_status: "available".to_owned(),
+            discovered: false,
+            pinned: false,
+            last_seen_at: None,
             version: "0.32.1".to_owned(),
             location: "local".to_owned(),
             target_id: local_target_id(),

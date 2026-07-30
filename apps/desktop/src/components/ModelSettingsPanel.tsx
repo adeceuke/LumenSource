@@ -15,6 +15,7 @@ interface ModelSettingsPanelProps {
   model: RunningModelEntry;
   applicationSettings: ApplicationSettings;
   onSaved: (model: RunningModelEntry) => void;
+  onInventoryChanged: (models: RunningModelEntry[]) => void;
 }
 
 function defaultModelSettings(): ModelSettings {
@@ -72,6 +73,7 @@ export function ModelSettingsPanel({
   model,
   applicationSettings,
   onSaved,
+  onInventoryChanged,
 }: ModelSettingsPanelProps) {
   const [draft, setDraft] = useState(() => cloneSettings(model));
   const [baseline, setBaseline] = useState(() => cloneSettings(model));
@@ -82,6 +84,8 @@ export function ModelSettingsPanel({
   const [migrationOptions, setMigrationOptions] = useState<RuntimeMigrationOption[]>([]);
   const [migrating, setMigrating] = useState(false);
   const [huggingFaceToken, setHuggingFaceToken] = useState("");
+  const [inventoryBusy, setInventoryBusy] = useState(false);
+  const [memoryWarning, setMemoryWarning] = useState<string>();
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(baseline),
     [baseline, draft],
@@ -105,6 +109,23 @@ export function ModelSettingsPanel({
       active = false;
     };
   }, [model.id, model.running]);
+
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void desktopCommands.modelSettingsMemoryWarning(model.id, draft)
+        .then((warning) => {
+          if (active) setMemoryWarning(warning ?? undefined);
+        })
+        .catch(() => {
+          if (active) setMemoryWarning(undefined);
+        });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [draft, model.id]);
 
   const update = (change: Partial<ModelSettings>) => {
     setDraft((current) => ({ ...current, ...change }));
@@ -169,6 +190,29 @@ export function ModelSettingsPanel({
     ? applicationSettings.ollama.keepAlive
     : undefined;
 
+  const inventoryAction = async (
+    action: "rescan" | "repair" | "reconnect" | "adopt" | "forget" | "pin" | "unpin" | "rematch",
+  ) => {
+    let variantId: string | undefined;
+    if (action === "forget" && !window.confirm(
+      "Forget this entry? Model weights, runtime services, shared caches, and credentials will not be removed.",
+    )) return;
+    if (action === "rematch") {
+      variantId = window.prompt("Enter the exact catalog variant ID. Model weights will not be changed.")?.trim();
+      if (!variantId) return;
+    }
+    setInventoryBusy(true);
+    setError(undefined);
+    try {
+      const models = await desktopCommands.inventoryAction(model.id, action, variantId);
+      onInventoryChanged(models);
+    } catch (actionError) {
+      setError(messageFromError(actionError, text.errors.unexpected));
+    } finally {
+      setInventoryBusy(false);
+    }
+  };
+
   return (
     <section className="detail-section model-settings-panel" aria-labelledby="model-settings-title">
       <div className="detail-section-header">
@@ -181,12 +225,41 @@ export function ModelSettingsPanel({
         </span>
       </div>
 
+      <fieldset className="model-settings-group inventory-state">
+        <legend>Inventory</legend>
+        <p>
+          Status: <strong>{model.inventoryStatus ?? "available"}</strong>
+          {model.discovered ? " · Discovered from the runtime" : " · Added by Lumen Source"}
+          {model.lastSeenAt ? ` · Last seen ${new Date(model.lastSeenAt).toLocaleString(text.locale)}` : ""}
+        </p>
+        <div className="runtime-actions">
+          <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction("rescan")}>Rescan</button>
+          {model.inventoryStatus === "missing" && model.runtimeId === "ollama" && (
+            <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction("repair")}>Repair model</button>
+          )}
+          {model.inventoryStatus === "needsReconnect" && (
+            <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction("reconnect")}>Reconnect</button>
+          )}
+          {model.discovered && !model.managed && (
+            <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction("adopt")}>Adopt without downloading</button>
+          )}
+          {model.discovered && model.modelId.startsWith("external:") && (
+            <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction("rematch")}>Match catalog variant</button>
+          )}
+          <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction(model.pinned ? "unpin" : "pin")}>
+            {model.pinned ? "Allow automatic stopping" : "Keep always available"}
+          </button>
+          <button className="secondary-button" type="button" disabled={inventoryBusy} onClick={() => void inventoryAction("forget")}>Forget entry only</button>
+        </div>
+      </fieldset>
+
       {draft.performanceProfile && (
         <p className="model-profile-summary">
           <strong>{text.modelSettings.performanceProfile}:</strong>{" "}
           {text.modelSettings.performanceProfileValue(draft.performanceProfile)}
         </p>
       )}
+      {memoryWarning && <div className="api-notice warning" role="status"><strong>Memory warning</strong><span>{memoryWarning}</span></div>}
 
       {model.installationValidation && (
         <fieldset className="model-settings-group">

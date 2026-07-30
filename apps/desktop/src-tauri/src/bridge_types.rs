@@ -24,6 +24,14 @@ pub struct PersistedModelEntry {
     pub model_settings: Option<ModelSettings>,
     #[serde(default)]
     pub installation_validation: Option<InstallationValidationReport>,
+    #[serde(default = "available_inventory_status")]
+    pub inventory_status: String,
+    #[serde(default)]
+    pub discovered: bool,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub last_seen_at: Option<String>,
     pub version: String,
     pub location: String,
     #[serde(default = "local_target_id")]
@@ -97,12 +105,30 @@ pub struct InstallationValidationCheck {
     pub detail: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InterruptedInstall {
+    pub model_id: String,
+    pub target_id: String,
+    pub performance_profile: PerformanceProfile,
+    pub license_basis: String,
+    pub license_reference: Option<String>,
+    pub license_acknowledged: bool,
+    pub install_runtime: bool,
+    pub started_at: String,
+    pub recovery: String,
+}
+
 fn default_managed() -> bool {
     true
 }
 
 fn default_runtime_id() -> String {
     crate::runtime_registry::OLLAMA_RUNTIME.to_owned()
+}
+
+fn available_inventory_status() -> String {
+    "available".to_owned()
 }
 
 pub(crate) fn local_target_id() -> String {

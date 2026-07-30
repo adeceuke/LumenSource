@@ -7,6 +7,7 @@ mod model_reconciliation;
 pub mod remote;
 mod runtime_registry;
 pub mod settings;
+mod storage;
 pub mod telemetry;
 
 use bridge::SharedCoreAdapter;
@@ -42,6 +43,14 @@ pub fn run() {
             commands::validate_settings,
             commands::save_settings,
             commands::reset_settings,
+            commands::storage_report,
+            commands::cleanup_storage,
+            commands::export_connection_profiles,
+            commands::import_connection_profiles,
+            commands::inventory_action,
+            commands::interrupted_install,
+            commands::resume_interrupted_install,
+            commands::discard_interrupted_install,
             commands::test_ollama_connection,
             commands::restart_managed_ollama,
             commands::runtime_secret_status,
@@ -51,6 +60,7 @@ pub fn run() {
             commands::save_vllm_model,
             commands::vllm_credential_status,
             commands::save_model_settings,
+            commands::model_settings_memory_warning,
             commands::managed_vllm_support,
             commands::runtime_migration_options,
             commands::reinstall_with_runtime,

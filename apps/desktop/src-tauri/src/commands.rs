@@ -17,6 +17,7 @@ use crate::settings::{
     ModelSettings, ModelSettingsSaveReport, OllamaConnectionReport, RuntimeSecretKind,
     SettingsSaveReport, SettingsValidationError, VllmConnectionReport,
 };
+use crate::storage::{CleanupReport, StorageReport};
 
 #[tauri::command]
 pub async fn telemetry_preference(
@@ -59,6 +60,69 @@ pub async fn reset_settings(
     core: State<'_, SharedCoreAdapter>,
 ) -> Result<SettingsSaveReport, String> {
     core.reset_settings().await
+}
+
+#[tauri::command]
+pub async fn storage_report(core: State<'_, SharedCoreAdapter>) -> Result<StorageReport, String> {
+    core.storage_report().await
+}
+
+#[tauri::command]
+pub async fn cleanup_storage(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+    confirmed: bool,
+) -> Result<CleanupReport, String> {
+    core.cleanup_storage(&entry_id, confirmed).await
+}
+
+#[tauri::command]
+pub async fn export_connection_profiles(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<String, String> {
+    core.export_connection_profiles().await
+}
+
+#[tauri::command]
+pub async fn import_connection_profiles(
+    core: State<'_, SharedCoreAdapter>,
+    document: String,
+) -> Result<Vec<PersistedModelEntry>, String> {
+    core.import_connection_profiles(&document).await
+}
+
+#[tauri::command]
+pub async fn inventory_action(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+    action: String,
+    variant_id: Option<String>,
+) -> Result<Vec<PersistedModelEntry>, String> {
+    core.inventory_action(&entry_id, &action, variant_id.as_deref())
+        .await
+}
+
+#[tauri::command]
+pub async fn interrupted_install(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<Option<crate::bridge::InterruptedInstall>, String> {
+    Ok(core.interrupted_install().await)
+}
+
+#[tauri::command]
+pub async fn resume_interrupted_install(
+    app: AppHandle,
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<(), String> {
+    core.resume_interrupted_install(app).await
+}
+
+#[tauri::command]
+pub async fn discard_interrupted_install(
+    core: State<'_, SharedCoreAdapter>,
+    confirmed: bool,
+) -> Result<(), String> {
+    core.discard_interrupted_install(confirmed).await
 }
 
 #[tauri::command]
@@ -142,6 +206,16 @@ pub async fn save_model_settings(
     apply_restart: bool,
 ) -> Result<ModelSettingsSaveReport, String> {
     core.save_model_settings(&entry_id, settings, apply_restart)
+        .await
+}
+
+#[tauri::command]
+pub async fn model_settings_memory_warning(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: String,
+    settings: ModelSettings,
+) -> Result<Option<String>, String> {
+    core.model_settings_memory_warning(&entry_id, &settings)
         .await
 }
 

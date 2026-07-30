@@ -12,6 +12,7 @@ import { ModelSetupWizard } from "./components/ModelSetupWizard";
 import { MachinesPage } from "./components/MachinesPage";
 import { ModelsList } from "./components/ModelsList";
 import { SettingsPage } from "./components/SettingsPage";
+import { StoragePage } from "./components/StoragePage";
 import { VllmModelSettings } from "./components/VllmModelSettings";
 import { desktopCommands, messageFromError } from "./commands";
 import { useModels } from "./hooks/useModels";
@@ -26,7 +27,7 @@ function localizedError(error: unknown): string {
 }
 
 function App() {
-  const [section, setSection] = useState<"models" | "machines" | "settings">("models");
+  const [section, setSection] = useState<"models" | "machines" | "storage" | "settings">("models");
   const [settings, setSettings] = useState<ApplicationSettings>();
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [vllmDialogOpen, setVllmDialogOpen] = useState(false);
@@ -226,7 +227,7 @@ function App() {
     if (pendingRemovalId) await performRemoval(pendingRemovalId);
   };
 
-  const navigate = (next: "models" | "machines" | "settings") => {
+  const navigate = (next: "models" | "machines" | "storage" | "settings") => {
     if (section === "settings" && settingsDirty && next !== "settings"
       && !window.confirm(text.settings.unsavedConfirmation)) return;
     setSection(next);
@@ -285,6 +286,20 @@ function App() {
               </button>
               <button
                 type="button"
+                className={section === "storage" ? "active" : ""}
+                onClick={() => navigate("storage")}
+                disabled={wizard.open}
+              >
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <ellipse cx="12" cy="6" rx="8" ry="3" />
+                    <path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" />
+                  </svg>
+                </span>
+                {text.navigation.storage}
+              </button>
+              <button
+                type="button"
                 className={section === "settings" ? "active" : ""}
                 onClick={() => navigate("settings")}
                 disabled={wizard.open}
@@ -311,6 +326,8 @@ function App() {
               />
             ) : section === "machines" ? (
               <MachinesPage />
+            ) : section === "storage" ? (
+              <StoragePage onError={setError} onModelsChanged={setRunningModels} />
             ) : detailModel ? (
               <ModelDetails
                 model={detailModel}
@@ -333,6 +350,7 @@ function App() {
                     setDetailTab("api");
                   }
                 }}
+                onInventoryChanged={setRunningModels}
               />
             ) : (
               <ModelsList

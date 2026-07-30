@@ -23,6 +23,17 @@ pub struct ManagedVllmSupport {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedContainerInventory {
+    pub name: String,
+    pub entry_id: String,
+    pub model_id: String,
+    pub served_model_name: String,
+    pub port: Option<u16>,
+    pub running: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct ManagedVllmSpec {
     pub entry_id: String,
@@ -219,6 +230,17 @@ pub async fn launch(
         .arg(spec.container_name())
         .arg("--label")
         .arg("dev.lumensource.managed=vllm")
+        .arg("--label")
+        .arg(format!("dev.lumensource.entry-id={}", spec.entry_id))
+        .arg("--label")
+        .arg(format!("dev.lumensource.model-id={}", spec.model_id))
+        .arg("--label")
+        .arg(format!(
+            "dev.lumensource.served-model={}",
+            spec.served_model_name
+        ))
+        .arg("--label")
+        .arg(format!("dev.lumensource.port={}", spec.port))
         .arg("--restart")
         .arg("unless-stopped");
     command.args(engine.gpu_arguments());
@@ -349,6 +371,41 @@ pub async fn logs(
         .map(|line| {
             let line = line.trim();
             line.chars().take(500).collect::<String>()
+        })
+        .collect())
+}
+
+pub async fn discover_containers(
+    engine: ContainerEngine,
+) -> Result<Vec<ManagedContainerInventory>, String> {
+    ensure_linux()?;
+    let output = command_output(
+        engine.as_str(),
+        &[
+            "ps",
+            "--all",
+            "--filter",
+            "label=dev.lumensource.managed=vllm",
+            "--format",
+            "{{.Names}}\t{{.Label \"dev.lumensource.entry-id\"}}\t{{.Label \"dev.lumensource.model-id\"}}\t{{.Label \"dev.lumensource.served-model\"}}\t{{.Label \"dev.lumensource.port\"}}\t{{.State}}",
+        ],
+    )
+    .await?;
+    Ok(output
+        .lines()
+        .filter_map(|line| {
+            let fields = line.split('\t').collect::<Vec<_>>();
+            if fields.len() != 6 || fields[0].trim().is_empty() {
+                return None;
+            }
+            Some(ManagedContainerInventory {
+                name: fields[0].trim().to_owned(),
+                entry_id: fields[1].trim().to_owned(),
+                model_id: fields[2].trim().to_owned(),
+                served_model_name: fields[3].trim().to_owned(),
+                port: fields[4].trim().parse().ok(),
+                running: fields[5].trim().eq_ignore_ascii_case("running"),
+            })
         })
         .collect())
 }

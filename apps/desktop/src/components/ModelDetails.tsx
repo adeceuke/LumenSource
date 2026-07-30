@@ -26,6 +26,7 @@ interface ModelDetailsProps {
   onClearLogs: () => void;
   onCopy: (value: string, feedbackKey: string) => void;
   onModelSaved: (model: RunningModelEntry) => void;
+  onInventoryChanged: (models: RunningModelEntry[]) => void;
 }
 
 export function ModelDetails({
@@ -41,6 +42,7 @@ export function ModelDetails({
   onClearLogs,
   onCopy,
   onModelSaved,
+  onInventoryChanged,
 }: ModelDetailsProps) {
   const performance = usePerformanceMonitor(model, errorFrom);
   const chat = useModelChat(model, tab === "api" || tab === "chat", errorFrom);
@@ -99,9 +101,7 @@ export function ModelDetails({
         <button type="button" className={tab === "logs" ? "active" : ""} onClick={() => onTab("logs")}>{text.common.logs}</button>
         <button type="button" className={tab === "performance" ? "active" : ""} onClick={() => onTab("performance")}>{text.common.performance}</button>
         <button type="button" className={tab === "api" ? "active" : ""} onClick={() => onTab("api")}>{text.common.api}</button>
-        {model.runtimeCapabilities.perModelConfiguration && (
-          <button type="button" className={tab === "settings" ? "active" : ""} onClick={() => onTab("settings")}>{text.navigation.settings}</button>
-        )}
+        <button type="button" className={tab === "settings" ? "active" : ""} onClick={() => onTab("settings")}>{text.navigation.settings}</button>
       </nav>
 
       {tab === "logs" ? (
@@ -119,6 +119,7 @@ export function ModelDetails({
               model={model}
               applicationSettings={applicationSettings}
               onSaved={onModelSaved}
+              onInventoryChanged={onInventoryChanged}
             />
           ) : (
             <section className="detail-section">
