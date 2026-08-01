@@ -72,6 +72,7 @@ jobs:
   windows:
     name: Test and package Windows
     needs: release-metadata
+    if: ${{ vars.WINDOWS_SIGNING_ENABLED == 'true' }}
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -164,6 +165,13 @@ jobs:
   publish:
     name: Publish GitHub release
     needs: [release-metadata, windows, ubuntu]
+    if: >-
+      ${{
+        always() &&
+        needs.release-metadata.result == 'success' &&
+        needs.ubuntu.result == 'success' &&
+        (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+      }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -190,5 +198,6 @@ jobs:
             gh release create "$RELEASE_TAG" release/* \
               --verify-tag \
               --generate-notes \
+              --notes "Official Linux packages are attached for this release. Windows remains supported from source; no unsigned Windows installer is distributed." \
               --title "Lumen Source $RELEASE_TAG"
           fi

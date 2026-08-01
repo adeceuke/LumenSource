@@ -11,16 +11,24 @@ Ubuntu 24.04 x86_64 releases produce a deb and AppImage in the pinned builder.
 
 Pushing a version tag such as `v1.0.0` runs the GitHub Actions release workflow.
 The tag must match the versions in `Cargo.toml`, `apps/desktop/package.json`, and
-the Tauri configuration. Windows and Ubuntu independently run the complete
-check suite before building their native packages. If both jobs succeed, the
-workflow creates a GitHub Release for that tag and uploads versioned,
-OS-specific installers plus SHA-256 checksum files. The workflow can also be
-run manually for an existing tag from the Actions page.
+the Tauri configuration. Ubuntu runs the complete check suite before building
+its native packages. Windows packaging is enabled only when the repository
+variable `WINDOWS_SIGNING_ENABLED` is set to `true`; this prevents unsigned
+Windows artifacts from blocking or entering a Linux-only release. The workflow
+creates a GitHub Release for the tag and uploads every enabled, successfully
+verified package plus SHA-256 checksum files. It can also be run manually for
+an existing tag from the Actions page.
 
-Configure these GitHub Actions repository secrets before the first release:
+Configure these GitHub Actions repository secrets before the first official
+Windows release:
 
 - `WINDOWS_SIGNING_PFX_BASE64`: the release-signing PFX encoded as base64;
 - `WINDOWS_SIGNING_PFX_PASSWORD`: the password for that PFX.
+
+After configuring and verifying the signing identity, set the Actions
+repository variable `WINDOWS_SIGNING_ENABLED` to `true`. Leave it unset while
+only official Linux packages are published. Source archives remain available
+for users who build Windows locally.
 
 After updating every checked project version and committing the release, start
 the pipeline by pushing its tag:
