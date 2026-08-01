@@ -30,6 +30,7 @@ function App() {
   const [section, setSection] = useState<"models" | "machines" | "storage" | "settings">("models");
   const [settings, setSettings] = useState<ApplicationSettings>();
   const [settingsDirty, setSettingsDirty] = useState(false);
+  const [telemetryFocusRequest, setTelemetryFocusRequest] = useState(0);
   const [vllmDialogOpen, setVllmDialogOpen] = useState(false);
   const [catalog, setCatalog] = useState<CatalogSummary>();
   const [error, setError] = useState<string>();
@@ -85,10 +86,9 @@ function App() {
     setModels: setRunningModels,
     setError,
     onOpen: () => setDetailModelId(undefined),
-    onOpenInstalledModel: (entryId) => {
+    onOpenInstalledModel: () => {
       setSection("models");
-      setDetailModelId(entryId);
-      setDetailTab("settings");
+      setDetailModelId(undefined);
     },
     copiedField,
     copyText,
@@ -234,6 +234,11 @@ function App() {
     setDetailModelId(undefined);
   };
 
+  const openTelemetrySettings = () => {
+    navigate("settings");
+    setTelemetryFocusRequest((current) => current + 1);
+  };
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -320,6 +325,7 @@ function App() {
             ) : section === "settings" && settings ? (
               <SettingsPage
                 settings={settings}
+                telemetryFocusRequest={telemetryFocusRequest}
                 onSaved={setSettings}
                 onDirtyChange={setSettingsDirty}
                 onError={setError}
@@ -378,7 +384,7 @@ function App() {
         <button
           className="telemetry-settings-button"
           type="button"
-          onClick={() => navigate("settings")}
+          onClick={openTelemetrySettings}
         >
           {text.footer.usageStatistics(Boolean(settings?.privacy.telemetryEnabled))}
         </button>

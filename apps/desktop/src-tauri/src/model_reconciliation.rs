@@ -283,6 +283,28 @@ pub(crate) fn reconcile_models(
     result
 }
 
+pub(crate) fn reconcile_remote_models(
+    catalog: Catalog,
+    persisted: Vec<PersistedModelEntry>,
+    installed: Vec<InstalledModel>,
+    running: &[String],
+    target_id: &str,
+    target_name: &str,
+) -> Vec<PersistedModelEntry> {
+    let mut models = reconcile_models(catalog, persisted, installed, &[], running);
+    for model in &mut models {
+        model.location = "remote".to_owned();
+        model.target_id = target_id.to_owned();
+        model.target_name = Some(target_name.to_owned());
+        for log in &mut model.logs {
+            if log == "Discovered in the local Ollama model store." {
+                *log = format!("Discovered in the Ollama model store on {target_name}.");
+            }
+        }
+    }
+    models
+}
+
 fn upsert_dummy_models(
     catalog: &Catalog,
     models: &mut Vec<PersistedModelEntry>,

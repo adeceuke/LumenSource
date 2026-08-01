@@ -1,11 +1,11 @@
 {
   "$schema": "./model-list.schema.json",
   "schema_version": "2",
-  "catalog_version": "2026.07.30.1",
-  "generated_at": "2026-07-30T00:00:00Z",
+  "catalog_version": "2026.08.01.3",
+  "generated_at": "2026-08-01T19:23:44Z",
   "generator": {
     "name": "lumensource-catalog",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "models": [
     {
@@ -40,7 +40,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "embeddings"
@@ -120,22 +120,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/bge-m3:567m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/bge-m3/manifests/567m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -144,7 +144,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/bge-m3",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -185,7 +185,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": "https://huggingface.co/spaces/bigcode/license/raw/main/CodeML_OpenRAIL-M_v0.1.docx.txt",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "code"
@@ -259,22 +259,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/starcoder2:3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/starcoder2/manifests/3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -323,22 +323,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/starcoder2:7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/starcoder2/manifests/7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -387,22 +387,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/starcoder2:15b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/starcoder2/manifests/15b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -411,7 +411,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/starcoder2",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -448,7 +448,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -537,22 +537,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/deepseek-r1:1.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/deepseek-r1/manifests/1.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -603,22 +603,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/deepseek-r1:7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/deepseek-r1/manifests/7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -669,22 +669,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/deepseek-r1:8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/deepseek-r1/manifests/8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -735,23 +735,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/deepseek-r1:14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/deepseek-r1/manifests/14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "DS-R1-Distill-Qwen-14B",
+              "overall_tier": "D",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         },
@@ -801,23 +815,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/deepseek-r1:32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/deepseek-r1/manifests/32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "DS-R1-Distill-Qwen-32B",
+              "overall_tier": "C",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         },
@@ -867,23 +895,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/deepseek-r1:70b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/deepseek-r1/manifests/70b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "DS-R1-Distill-Llama-70B",
+              "overall_tier": "C",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         },
@@ -933,23 +975,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/deepseek-r1:671b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/deepseek-r1/manifests/671b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "DeepSeek R1",
+              "overall_tier": "A",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         }
@@ -957,7 +1013,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/deepseek-r1",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -998,7 +1054,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": "https://ai.google.dev/gemma/prohibited_use_policy",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "embeddings"
@@ -1150,7 +1206,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": "https://ai.google.dev/gemma/prohibited_use_policy",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -1238,22 +1294,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gemma3:1b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gemma3/manifests/1b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -1304,22 +1360,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gemma3:4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gemma3/manifests/4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -1370,23 +1426,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gemma3:12b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gemma3/manifests/12b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Gemma 3 12B",
+              "overall_tier": "D",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         },
@@ -1436,23 +1506,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gemma3:27b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gemma3/manifests/27b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Gemma 3 27B",
+              "overall_tier": "C",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         }
@@ -1460,7 +1544,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/gemma3",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -1501,7 +1585,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": "https://ai.google.dev/gemma/prohibited_use_policy",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -1583,22 +1667,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gemma3n:e2b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gemma3n/manifests/e2b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -1648,22 +1732,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gemma3n:e4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gemma3n/manifests/e4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -1672,7 +1756,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/gemma3n",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -1713,7 +1797,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -1830,6 +1914,20 @@
               "retrieved_at": "2026-07-22T08:12:05Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Gemma 4 12B",
+              "overall_tier": "B",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
+            }
           ]
         }
       ],
@@ -1877,7 +1975,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -1952,22 +2050,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/smollm2:135m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/smollm2/manifests/135m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2016,22 +2114,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/smollm2:360m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/smollm2/manifests/360m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2080,22 +2178,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/smollm2:1.7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/smollm2/manifests/1.7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2104,7 +2202,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/smollm2",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -2145,7 +2243,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -2233,22 +2331,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/granite4:350m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/granite4/manifests/350m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2299,22 +2397,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/granite4:1b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/granite4/manifests/1b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2365,22 +2463,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/granite4:3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/granite4/manifests/3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2389,7 +2487,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/granite4",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -2429,7 +2527,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": "https://www.llama.com/llama2/use-policy/",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -2504,22 +2602,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/codellama:7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/codellama/manifests/7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2568,22 +2666,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/codellama:13b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/codellama/manifests/13b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2632,22 +2730,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/codellama:34b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/codellama/manifests/34b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2696,22 +2794,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/codellama:70b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/codellama/manifests/70b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2720,7 +2818,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/codellama",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -2761,7 +2859,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": "https://www.llama.com/llama3_1/use-policy/",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -2856,22 +2954,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/llama3.1:8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/llama3.1/manifests/8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2923,22 +3021,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/llama3.1:70b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/llama3.1/manifests/70b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -2990,22 +3088,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/llama3.1:405b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/llama3.1/manifests/405b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -3014,7 +3112,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/llama3.1",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -3055,7 +3153,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": "https://www.llama.com/llama3_2/use-policy/",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -3142,22 +3240,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/llama3.2:1b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/llama3.2/manifests/1b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -3208,22 +3306,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/llama3.2:3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/llama3.2/manifests/3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -3232,7 +3330,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/llama3.2",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -3276,7 +3374,7 @@
           "European Union: multimodal license rights are withheld from EU-domiciled individuals and companies with an EU principal place of business, except end users of an incorporating product or service."
         ],
         "usage_policy_url": "https://www.llama.com/llama3_2/use-policy/",
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -3358,22 +3456,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/llama3.2-vision:11b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/llama3.2-vision/manifests/11b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -3423,22 +3521,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/llama3.2-vision:90b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/llama3.2-vision/manifests/90b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -3447,7 +3545,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/llama3.2-vision",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -3484,7 +3582,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -3572,23 +3670,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/phi4:14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/phi4/manifests/14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Phi-4",
+              "overall_tier": "D",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         }
@@ -3596,7 +3708,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/phi4",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -3633,7 +3745,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -3728,23 +3840,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/phi4-mini:3.8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/phi4-mini/manifests/3.8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Phi-4-mini",
+              "overall_tier": "D",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         }
@@ -3752,7 +3878,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/phi4-mini",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -3789,7 +3915,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -3942,7 +4068,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -4017,22 +4143,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/codestral:22b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/codestral/manifests/22b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4041,7 +4167,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/codestral",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -4082,7 +4208,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -4164,22 +4290,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/devstral:24b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/devstral/manifests/24b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4188,7 +4314,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/devstral",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -4229,7 +4355,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -4318,22 +4444,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/magistral:24b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/magistral/manifests/24b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4342,7 +4468,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/magistral",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -4383,7 +4509,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -4472,22 +4598,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/ministral-3:3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/ministral-3/manifests/3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4538,22 +4664,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/ministral-3:8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/ministral-3/manifests/8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4604,22 +4730,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/ministral-3:14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/ministral-3/manifests/14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4628,7 +4754,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/ministral-3",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -4669,7 +4795,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -4751,22 +4877,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/mistral:7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/mistral/manifests/7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4775,7 +4901,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/mistral",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -4814,7 +4940,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -4903,22 +5029,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/mistral-large:123b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/mistral-large/manifests/123b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -4927,7 +5053,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/mistral-large",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -4968,7 +5094,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -5056,22 +5182,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/mistral-nemo:12b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/mistral-nemo/manifests/12b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -5080,7 +5206,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/mistral-nemo",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -5121,7 +5247,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -5211,22 +5337,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/mistral-small3.2:24b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/mistral-small3.2/manifests/24b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -5235,7 +5361,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/mistral-small3.2",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -5276,7 +5402,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -5358,22 +5484,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/mixtral:8x7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/mixtral/manifests/8x7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -5423,22 +5549,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/mixtral:8x22b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/mixtral/manifests/8x22b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -5447,7 +5573,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/mixtral",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -5488,7 +5614,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "embeddings"
@@ -5568,22 +5694,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/mxbai-embed-large:335m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/mxbai-embed-large/manifests/335m",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -5592,7 +5718,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/mxbai-embed-large",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -5633,7 +5759,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "embeddings"
@@ -5713,22 +5839,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/nomic-embed-text:v1.5",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/nomic-embed-text/manifests/v1.5",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -5737,7 +5863,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/nomic-embed-text",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -5778,7 +5904,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -5867,23 +5993,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gpt-oss:20b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gpt-oss/manifests/20b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "GPT-oss 20B",
+              "overall_tier": "B",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         },
@@ -5933,23 +6073,37 @@
           "sources": [
             {
               "url": "https://ollama.com/library/gpt-oss:120b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/gpt-oss/manifests/120b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "GPT-oss 120B",
+              "overall_tier": "A",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
             }
           ]
         }
@@ -5957,7 +6111,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/gpt-oss",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -5998,7 +6152,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -6086,82 +6240,23 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5:0.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/0.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
-            }
-          ]
-        },
-        {
-          "id": "qwen-qwen2.5-0.5b-vllm-f16",
-          "display_name": "494M BF16 (vLLM)",
-          "runtime": {
-            "engine": "vllm",
-            "model_ref": "qwen2.5-0.5b-instruct",
-            "digest": null,
-            "hugging_face_model_id": "Qwen/Qwen2.5-0.5B-Instruct",
-            "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
-            "tokenizer_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
-            "gated": false,
-            "task": "generate",
-            "runner": "generate",
-            "compatibility": [
-              "vllm-0.23"
-            ]
-          },
-          "parameters_billion": 0.494,
-          "quantization": null,
-          "context_window_tokens": 32768,
-          "model_size_bytes": 1000000000,
-          "download_item_count": 1,
-          "size_is_estimate": true,
-          "requirements": {
-            "minimum_system_ram_bytes": 8589934592,
-            "recommended_system_ram_bytes": 17179869184,
-            "minimum_vram_bytes": 2147483648,
-            "recommended_vram_bytes": 4294967296,
-            "minimum_free_storage_bytes": 3221225472,
-            "supported_os": [
-              "linux"
-            ],
-            "supported_architectures": [
-              "x86_64"
-            ],
-            "accelerators": [
-              "cuda"
-            ],
-            "notes": "Managed vLLM requires Linux, an NVIDIA GPU, and a configured GPU container runtime. Memory guidance includes runtime and KV-cache headroom."
-          },
-          "recommended_for": [
-            "general",
-            "programming",
-            "tool-use",
-            "translation"
-          ],
-          "sources": [
-            {
-              "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/tree/7ae557604adf67be50417f59c2c2f167def9a775",
-              "retrieved_at": "2026-07-30T00:00:00Z",
-              "notes": "Immutable model and tokenizer revision, BF16 weights, model size, architecture, context length, license, and official vLLM serving example."
-            },
-            {
-              "url": "https://docs.vllm.ai/en/latest/models/supported_models/",
-              "retrieved_at": "2026-07-30T00:00:00Z",
-              "notes": "Official vLLM support documentation for the Qwen2ForCausalLM architecture."
             }
           ]
         },
@@ -6211,22 +6306,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5:1.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/1.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6277,22 +6372,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5:3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6343,22 +6438,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5:7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6409,22 +6504,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5:14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6475,22 +6570,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5:32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6541,22 +6636,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5:72b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5/manifests/72b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6565,7 +6660,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/qwen2.5",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -6606,7 +6701,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -6688,22 +6783,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5-coder:0.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5-coder/manifests/0.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6753,22 +6848,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5-coder:1.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5-coder/manifests/1.5b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6818,22 +6913,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5-coder:3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5-coder/manifests/3b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6883,22 +6978,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5-coder:7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5-coder/manifests/7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -6948,22 +7043,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5-coder:14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5-coder/manifests/14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7013,22 +7108,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen2.5-coder:32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen2.5-coder/manifests/32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7037,7 +7132,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/qwen2.5-coder",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -7078,7 +7173,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -7167,22 +7262,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:0.6b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/0.6b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7233,22 +7328,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:1.7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/1.7b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7299,22 +7394,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7365,22 +7460,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7431,22 +7526,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/14b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7497,22 +7592,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:30b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/30b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7563,22 +7658,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7629,22 +7724,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3:235b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3/manifests/235b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7653,7 +7748,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/qwen3",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -7694,7 +7789,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -7796,6 +7891,20 @@
               "retrieved_at": "2026-07-22T08:12:05Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Qwen3-Coder-Next",
+              "overall_tier": "A",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
+            }
           ]
         }
       ],
@@ -7848,7 +7957,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "embeddings"
@@ -7928,22 +8037,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-embedding:0.6b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-embedding/manifests/0.6b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -7993,22 +8102,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-embedding:4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-embedding/manifests/4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8058,22 +8167,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-embedding:8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-embedding/manifests/8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8082,7 +8191,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/qwen3-embedding",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -8123,7 +8232,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -8213,22 +8322,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-vl:2b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-vl/manifests/2b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8279,22 +8388,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-vl:4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-vl/manifests/4b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8345,22 +8454,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-vl:8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-vl/manifests/8b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8411,22 +8520,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-vl:30b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-vl/manifests/30b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8477,22 +8586,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-vl:32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-vl/manifests/32b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8543,22 +8652,22 @@
           "sources": [
             {
               "url": "https://ollama.com/library/qwen3-vl:235b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Exact tag, parameter count, quantization, model characteristics, and embedded license layer."
             },
             {
               "url": "https://registry.ollama.ai/v2/library/qwen3-vl/manifests/235b",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Immutable manifest digest, config and layer count, and exact blob byte sizes."
             },
             {
               "url": "https://docs.ollama.com/gpu",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "CPU fallback plus CUDA, ROCm, and Metal hardware support."
             },
             {
               "url": "https://docs.ollama.com/quickstart",
-              "retrieved_at": "2026-07-22T12:16:32Z",
+              "retrieved_at": "2026-08-01T19:14:34Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
           ]
@@ -8567,7 +8676,7 @@
       "sources": [
         {
           "url": "https://ollama.com/library/qwen3-vl",
-          "retrieved_at": "2026-07-22T12:16:32Z",
+          "retrieved_at": "2026-08-01T19:14:34Z",
           "notes": "Official Ollama availability, family description, capabilities, explicit local tags, modalities, contexts, and publisher references."
         }
       ]
@@ -8608,7 +8717,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "chat",
@@ -8786,6 +8895,20 @@
               "retrieved_at": "2026-07-22T08:12:05Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Qwen3.5-4B",
+              "overall_tier": "A",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
+            }
           ]
         },
         {
@@ -8853,6 +8976,20 @@
               "retrieved_at": "2026-07-22T08:12:05Z",
               "notes": "Ollama availability on Linux, macOS, and Windows."
             }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Onyx",
+              "leaderboard_name": "Self-Hosted LLM Leaderboard",
+              "source_model_name": "Qwen3.5-9B",
+              "overall_tier": "A",
+              "notes": "Onyx reports a model-level overall tier; it is not a measurement of this specific Ollama quantization.",
+              "source": {
+                "url": "https://onyx.app/self-hosted-llm-leaderboard",
+                "retrieved_at": "2026-08-01T19:23:35Z",
+                "notes": "Onyx Self-Hosted LLM Leaderboard overall tier; page updated 2026-07-20."
+              }
+            }
           ]
         }
       ],
@@ -8896,7 +9033,7 @@
         ],
         "geographic_restrictions": [],
         "usage_policy_url": null,
-        "reviewed_at": "2026-07-22"
+        "reviewed_at": "2026-08-01"
       },
       "capabilities": [
         "ocr",

@@ -1,7 +1,7 @@
 //! Compatibility filtering, ranking, and right-sizing recommendations.
 
 use lumen_source_catalog::{
-    Accelerator, Catalog, ModelEntry, ModelVariant, OperatingSystem, Requirements,
+    Accelerator, Catalog, ModelEntry, ModelVariant, OperatingSystem, OverallTier, Requirements,
 };
 use lumen_source_hardware::{AcceleratorKind, HardwareFacts};
 use serde::{Deserialize, Serialize};
@@ -240,6 +240,21 @@ fn score_variant(
         }
     }
 
+    if let Some((evaluation, bonus)) = variant
+        .external_evaluations
+        .iter()
+        .map(|evaluation| (evaluation, overall_tier_bonus(evaluation.overall_tier)))
+        .max_by_key(|(_, bonus)| *bonus)
+    {
+        score += f64::from(bonus);
+        explanations.push(format!(
+            "{} {} rates this model overall tier {}",
+            evaluation.publisher,
+            evaluation.leaderboard_name,
+            evaluation.overall_tier.as_str()
+        ));
+    }
+
     Recommendation {
         model_id: model.id.clone(),
         model_name: model.display_name.clone(),
@@ -248,6 +263,16 @@ fn score_variant(
         runtime_ref: variant.runtime_ref.clone(),
         score: round_score(score),
         explanations,
+    }
+}
+
+fn overall_tier_bonus(tier: OverallTier) -> u8 {
+    match tier {
+        OverallTier::S => 40,
+        OverallTier::A => 30,
+        OverallTier::B => 20,
+        OverallTier::C => 10,
+        OverallTier::D => 0,
     }
 }
 
@@ -317,7 +342,9 @@ fn round_score(score: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lumen_source_catalog::{License, ModelVariant};
+    use lumen_source_catalog::{
+        ExternalEvaluation, ExternalEvaluationSource, License, ModelVariant, OverallTier,
+    };
     use lumen_source_hardware::{AcceleratorFacts, CpuFacts, MemoryFacts, OsFacts, StorageFacts};
     use std::path::PathBuf;
 
@@ -419,6 +446,7 @@ mod tests {
             },
             artifact: None,
             performance_hint: None,
+            external_evaluations: Vec::new(),
             recommended_for: recommended_for
                 .iter()
                 .map(|value| (*value).to_owned())
@@ -536,5 +564,46 @@ mod tests {
             },
         );
         assert_eq!(report.recommendations.len(), 1);
+    }
+
+    #[test]
+    fn higher_external_overall_tier_promotes_a_compatible_model() {
+        let mut catalog = golden_catalog();
+        let base = catalog.models[1].variants[0].clone();
+        let mut tier_d = base.clone();
+        tier_d.id = "tier-d".to_owned();
+        tier_d.external_evaluations = vec![external_evaluation(OverallTier::D)];
+        let mut tier_a = base;
+        tier_a.id = "tier-a".to_owned();
+        tier_a.external_evaluations = vec![external_evaluation(OverallTier::A)];
+        catalog.models[1].variants = vec![tier_d, tier_a];
+
+        let report = recommend(
+            &catalog,
+            &golden_hardware(),
+            &RecommendationRequest::default(),
+        );
+
+        assert_eq!(report.recommendations[0].variant_id, "tier-a");
+        assert!(report.recommendations[0].score > report.recommendations[1].score);
+        assert!(report.recommendations[0]
+            .explanations
+            .iter()
+            .any(|explanation| explanation.contains("overall tier A")));
+    }
+
+    fn external_evaluation(overall_tier: OverallTier) -> ExternalEvaluation {
+        ExternalEvaluation {
+            publisher: "Onyx".to_owned(),
+            leaderboard_name: "Self-Hosted LLM Leaderboard".to_owned(),
+            source_model_name: "Golden model".to_owned(),
+            overall_tier,
+            notes: "Model-level evaluation".to_owned(),
+            source: ExternalEvaluationSource {
+                url: "https://example.com/leaderboard".to_owned(),
+                retrieved_at: "2026-08-01T00:00:00Z".to_owned(),
+                notes: None,
+            },
+        }
     }
 }

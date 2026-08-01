@@ -14,8 +14,9 @@ pub use error::{
 };
 pub use fetch::{CatalogFetcher, CatalogLocation, FetchedCatalog, ReqwestCatalogFetcher};
 pub use schema::{
-    Accelerator, Artifact, Catalog, Install, InstallStrategy, License, ModelEntry, ModelVariant,
-    OperatingSystem, PerformanceHint, Platform, Requirements, RuntimeEntry, CURRENT_SCHEMA_VERSION,
+    Accelerator, Artifact, Catalog, ExternalEvaluation, ExternalEvaluationSource, Install,
+    InstallStrategy, License, ModelEntry, ModelVariant, OperatingSystem, OverallTier,
+    PerformanceHint, Platform, Requirements, RuntimeEntry, CURRENT_SCHEMA_VERSION,
 };
 pub use service::{CatalogService, CatalogSource};
 pub use verify::{Ed25519Verifier, SignatureVerifier};

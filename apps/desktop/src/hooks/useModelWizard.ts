@@ -90,6 +90,7 @@ export function useModelWizard({
   const [remoteTargetDialogError, setRemoteTargetDialogError] = useState<string>();
   const [remoteConfig, setRemoteConfig] = useState<RemoteTargetConfig>(emptyRemoteTarget);
   const [remotePassword, setRemotePassword] = useState("");
+  const [remotePasswordSaved, setRemotePasswordSaved] = useState(false);
   const [rememberRemotePassword, setRememberRemotePassword] = useState(true);
   const [remoteReport, setRemoteReport] = useState<RemoteConnectionReport>();
   const [remoteCheckLoading, setRemoteCheckLoading] = useState(false);
@@ -146,6 +147,26 @@ export function useModelWizard({
   const licenseReviewComplete = Boolean(selectedRecommendation) && (licenseBasis === "catalog"
     ? !selectedRecommendation?.license.requiresUserAcceptance || licenseAcknowledged
     : licenseAcknowledged && separateLicenseReference.trim().length > 0);
+
+  useEffect(() => {
+    let disposed = false;
+    setRemotePasswordSaved(false);
+    if (!selectedRemoteTarget || selectedRemoteTarget.config.authentication !== "password") {
+      return () => {
+        disposed = true;
+      };
+    }
+    void desktopCommands.remoteCredentialStatus(selectedRemoteTarget.targetId)
+      .then((status) => {
+        if (!disposed) setRemotePasswordSaved(status.passwordSaved);
+      })
+      .catch(() => {
+        if (!disposed) setRemotePasswordSaved(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [selectedRemoteTarget]);
 
   useEffect(() => {
     void desktopCommands.loadRemoteTargets().then(setRemoteTargets).catch((loadError: unknown) => {
@@ -415,6 +436,7 @@ export function useModelWizard({
         && rememberRemotePassword
       ) {
         await desktopCommands.saveRemotePassword(report.targetId, connectionPassword);
+        setRemotePasswordSaved(true);
       }
       setRemoteReport(report);
     } catch (connectionError) {
@@ -581,7 +603,7 @@ export function useModelWizard({
     setValidationDetailsOpen(false);
     setInstallProgress((current) => ({
       modelId: current?.modelId ?? selected.modelId,
-      phase: "installing",
+      phase: "validating",
       completedBytes: current?.totalBytes ?? selected.sizeBytes,
       totalBytes: current?.totalBytes ?? selected.sizeBytes,
       messageKey: "validating",
@@ -594,12 +616,24 @@ export function useModelWizard({
         startAfterInstall,
       );
       setValidationReport(report);
-      if (!report.passed) return;
+      if (!report.passed) {
+        setInstallProgress((current) => current && ({
+          ...current,
+          phase: "failed",
+          messageKey: "validationFailed",
+        }));
+        return;
+      }
       const details = await desktopCommands.endpoint(wizardTargetId ?? "local");
       setEndpoint(details);
       addInstalledModel(selected, report.runtimeModelId || details.model, report);
       setWizardStep("ready");
     } catch (validationError) {
+      setInstallProgress((current) => current && ({
+        ...current,
+        phase: "failed",
+        messageKey: "validationFailed",
+      }));
       setError(localizedError(validationError));
     } finally {
       setDownloadBusy(false);
@@ -734,6 +768,7 @@ export function useModelWizard({
       selectedRemoteTargetId,
       selectedRemoteTarget,
       remotePassword,
+      remotePasswordSaved,
       rememberRemotePassword,
       remoteReport,
       remoteCheckLoading,
@@ -799,7 +834,6 @@ export function useModelWizard({
       useSaferSettings,
       removeIncompleteInstall,
       startInstall,
-      confirmWizardClose,
       openInstalledModel,
       copyText,
     },

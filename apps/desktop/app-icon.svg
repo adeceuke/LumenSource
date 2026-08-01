@@ -1,7 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#18222f"/>
-  <circle cx="256" cy="256" r="132" fill="#f3c969"/>
-  <circle cx="256" cy="256" r="72" fill="#fff7df"/>
-  <path d="M256 52v48M256 412v48M52 256h48M412 256h48M112 112l34 34M366 366l34 34M400 112l-34 34M146 366l-34 34"
-        fill="none" stroke="#f3c969" stroke-linecap="round" stroke-width="28"/>
+<!-- Editable flat construction reference. app-icon.png is the approved production artwork. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LumenSource icon">
+  <rect width="512" height="512" fill="#171b20"/>
+
+  <!-- Two warm modules form the asymmetric local source on the left. -->
+  <path
+    fill="#f47b12"
+    d="M80 170L242 66Q258 55 278 60Q304 68 298 94L266 205Q262 220 250 230L210 270L97 321Q80 329 70 315Q64 307 64 293V190Q64 177 80 170Z"
+  />
+  <path
+    fill="#f47b12"
+    d="M103 345L201 291Q219 281 235 298L354 412Q372 428 356 445L329 464Q321 470 305 470H193Q174 469 157 458L103 422Q79 406 82 379Q84 357 103 345Z"
+  />
+
+  <!-- The ivory module closes the mark while leaving a bold source-shaped gap. -->
+  <path
+    fill="#fff3d8"
+    d="M345 80Q360 80 374 91L420 130Q438 144 438 169V372Q438 397 420 414L399 434Q383 449 369 430L282 310Q270 294 284 280L301 264Q309 256 301 248L283 230Q271 218 278 202L322 102Q330 82 345 80Z"
+  />
 </svg>

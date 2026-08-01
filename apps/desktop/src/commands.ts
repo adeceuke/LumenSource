@@ -71,7 +71,9 @@ export const desktopCommands = {
     confirmUnencryptedNetwork,
   }),
   diagnosticBundle: () => invoke<string>("diagnostic_bundle"),
+  exportDiagnosticBundleFile: () => invoke<string>("export_diagnostic_bundle_file"),
   exportStateBackup: () => invoke<string>("export_state_backup"),
+  exportStateBackupFile: () => invoke<string>("export_state_backup_file"),
   restoreStateBackup: (document: string, confirmed: boolean) =>
     invoke<ApplicationSettings>("restore_state_backup", { document, confirmed }),
   safeReset: (clearInventory: boolean, confirmed: boolean) =>
@@ -92,6 +94,8 @@ export const desktopCommands = {
     invoke<OllamaConnectionReport>("test_ollama_connection", { settings }),
   restartManagedOllama: () =>
     invoke<OllamaConnectionReport>("restart_managed_ollama"),
+  repairManagedOllama: () =>
+    invoke<OllamaConnectionReport>("repair_managed_ollama"),
   runtimeSecretStatus: (kind: RuntimeSecretKind) =>
     invoke<boolean>("runtime_secret_status", { kind }),
   saveRuntimeSecret: (kind: RuntimeSecretKind, secret: string) =>
@@ -149,6 +153,10 @@ export const desktopCommands = {
   loadRemoteTargets: () => invoke<RemoteTargetProfile[]>("load_remote_targets"),
   saveRemoteTarget: (config: RemoteTargetConfig) =>
     invoke<RemoteTargetProfile>("save_remote_target", { config }),
+  updateRemoteTarget: (originalTargetId: string, config: RemoteTargetConfig) =>
+    invoke<RemoteTargetProfile>("update_remote_target", { originalTargetId, config }),
+  removeRemoteTarget: (targetId: string) =>
+    invoke<void>("remove_remote_target", { targetId }),
   checkRemoteTarget: (config: RemoteTargetConfig, password?: string) =>
     invoke<RemoteConnectionReport>("check_remote_target", { config, password }),
   remoteCredentialStatus: (targetId: string) =>

@@ -28,6 +28,22 @@ function Invoke-Native {
     }
 }
 
+function Invoke-RustfmtCheck {
+    $RustfmtPath = (& rustup which rustfmt).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $RustfmtPath) {
+        throw "Could not locate rustfmt through rustup."
+    }
+    $Metadata = Invoke-Native cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+    [string[]]$RustRoots = @(
+        $Metadata.packages.targets.src_path |
+            Sort-Object -Unique
+    )
+    if ($RustRoots.Count -eq 0) {
+        throw "Cargo metadata did not report any Rust crate roots."
+    }
+    Invoke-Native $RustfmtPath --edition 2021 --check @RustRoots
+}
+
 function Show-Usage {
     @"
 Usage: powershell -ExecutionPolicy Bypass -File scripts/container.ps1 <command> [arguments]
@@ -48,7 +64,10 @@ Push-Location $RepositoryRoot
 try {
     switch ($Command) {
         "check" {
-            Invoke-Native cargo fmt --all --check
+            # Call the toolchain binary directly. Managed Windows Application
+            # Control policies may block rustup's cargo-fmt proxy even though
+            # the signed rustfmt executable itself is allowed.
+            Invoke-RustfmtCheck
             [string[]]$ClippyArguments = @(
                 "clippy",
                 "--workspace",
@@ -76,6 +95,7 @@ try {
             Push-Location $DesktopRoot
             try {
                 Invoke-Native npm ci
+                Invoke-Native npm run tauri -- icon app-icon.png
                 [string[]]$TauriArguments = @(
                     "run",
                     "tauri",

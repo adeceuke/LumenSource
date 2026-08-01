@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { desktopCommands, messageFromError } from "../commands";
 import { browserMessages } from "../i18n";
 import { emptyRemoteTarget } from "../modelUi";
@@ -23,9 +24,13 @@ export function MachinesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogSaving, setDialogSaving] = useState(false);
   const [dialogError, setDialogError] = useState<string>();
+  const [editingTargetId, setEditingTargetId] = useState<string>();
+  const [menuOpenId, setMenuOpenId] = useState<string>();
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number }>();
   const [config, setConfig] = useState<RemoteTargetConfig>(emptyRemoteTarget);
   const [password, setPassword] = useState("");
   const [rememberPassword, setRememberPassword] = useState(true);
+  const [editingPasswordSaved, setEditingPasswordSaved] = useState(false);
   const [sessionPasswords, setSessionPasswords] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -37,6 +42,45 @@ export function MachinesPage() {
       .catch((failure: unknown) => setError(localizedError(failure)))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const dismissMenu = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-machine-menu]")) return;
+      setMenuOpenId(undefined);
+      setMenuPosition(undefined);
+    };
+    const dismissWithKeyboard = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpenId(undefined);
+      setMenuPosition(undefined);
+    };
+    document.addEventListener("pointerdown", dismissMenu, true);
+    document.addEventListener("keydown", dismissWithKeyboard);
+    return () => {
+      document.removeEventListener("pointerdown", dismissMenu, true);
+      document.removeEventListener("keydown", dismissWithKeyboard);
+    };
+  }, [menuOpenId]);
+
+  useEffect(() => {
+    let disposed = false;
+    setEditingPasswordSaved(false);
+    if (!dialogOpen || !editingTargetId) return () => {
+      disposed = true;
+    };
+    void desktopCommands.remoteCredentialStatus(editingTargetId)
+      .then((status) => {
+        if (!disposed) setEditingPasswordSaved(status.passwordSaved);
+      })
+      .catch(() => {
+        if (!disposed) setEditingPasswordSaved(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [dialogOpen, editingTargetId]);
 
   const machines: MachineDefinition[] = [
     {
@@ -52,10 +96,23 @@ export function MachinesPage() {
   const selectedMachine = machines.find((machine) => machine.targetId === selectedTargetId);
 
   const openDialog = () => {
+    setEditingTargetId(undefined);
     setConfig(emptyRemoteTarget());
     setPassword("");
     setRememberPassword(true);
+    setEditingPasswordSaved(false);
     setDialogError(undefined);
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (target: RemoteTargetProfile) => {
+    setEditingTargetId(target.targetId);
+    setConfig({ ...target.config });
+    setPassword(sessionPasswords[target.targetId] ?? "");
+    setRememberPassword(true);
+    setDialogError(undefined);
+    setMenuOpenId(undefined);
+    setMenuPosition(undefined);
     setDialogOpen(true);
   };
 
@@ -64,13 +121,14 @@ export function MachinesPage() {
     setDialogOpen(false);
     setDialogError(undefined);
     setPassword("");
+    setEditingTargetId(undefined);
   };
 
   const saveMachine = async () => {
     setDialogSaving(true);
     setDialogError(undefined);
     try {
-      const saved = await desktopCommands.saveRemoteTarget({
+      const normalizedConfig = {
         ...config,
         name: config.name.trim(),
         host: config.host.trim(),
@@ -78,7 +136,10 @@ export function MachinesPage() {
         identityFile: config.authentication === "key"
           ? config.identityFile?.trim() || undefined
           : undefined,
-      });
+      };
+      const saved = editingTargetId
+        ? await desktopCommands.updateRemoteTarget(editingTargetId, normalizedConfig)
+        : await desktopCommands.saveRemoteTarget(normalizedConfig);
       setTargets((current) => [
         ...current.filter((target) => target.targetId !== saved.targetId),
         saved,
@@ -86,19 +147,70 @@ export function MachinesPage() {
       if (saved.config.authentication === "password" && password) {
         if (rememberPassword) {
           await desktopCommands.saveRemotePassword(saved.targetId, password);
+        } else {
+          await desktopCommands.deleteRemotePassword(saved.targetId);
         }
-        setSessionPasswords((current) => ({ ...current, [saved.targetId]: password }));
+      } else if (saved.config.authentication === "password" && !rememberPassword) {
+        await desktopCommands.deleteRemotePassword(saved.targetId);
       }
+      setSessionPasswords((current) => {
+        const next = { ...current };
+        if (editingTargetId && editingTargetId !== saved.targetId) delete next[editingTargetId];
+        if (password) next[saved.targetId] = password;
+        return next;
+      });
       setSelectedTargetId(saved.targetId);
       setDialogOpen(false);
       setConfig(emptyRemoteTarget());
       setPassword("");
+      setEditingTargetId(undefined);
     } catch (failure) {
       setDialogError(localizedError(failure));
     } finally {
       setDialogSaving(false);
     }
   };
+
+  const toggleMenu = (targetId: string, trigger: HTMLButtonElement) => {
+    if (menuOpenId === targetId) {
+      setMenuOpenId(undefined);
+      setMenuPosition(undefined);
+      return;
+    }
+    const rect = trigger.getBoundingClientRect();
+    const menuHeight = 92;
+    setMenuOpenId(targetId);
+    setMenuPosition({
+      top: rect.bottom + 8 + menuHeight <= window.innerHeight
+        ? rect.bottom + 8
+        : Math.max(8, rect.top - menuHeight - 8),
+      left: Math.max(8, Math.min(rect.right - 160, window.innerWidth - 168)),
+    });
+  };
+
+  const removeMachine = async (target: RemoteTargetProfile) => {
+    setMenuOpenId(undefined);
+    setMenuPosition(undefined);
+    if (!window.confirm(text.machines.removeConfirmation(target.targetName))) return;
+    try {
+      await desktopCommands.removeRemoteTarget(target.targetId);
+      setTargets((current) => current.filter((item) => item.targetId !== target.targetId));
+      setSessionPasswords((current) => {
+        const next = { ...current };
+        delete next[target.targetId];
+        return next;
+      });
+      setError(undefined);
+    } catch (failure) {
+      setError(localizedError(failure));
+    }
+  };
+
+  const editedTarget = editingTargetId
+    ? targets.find((target) => target.targetId === editingTargetId)
+    : undefined;
+  const passwordRequired = config.authentication === "password"
+    && (!editedTarget || editedTarget.config.authentication !== "password");
 
   if (selectedMachine) {
     return (
@@ -170,7 +282,31 @@ export function MachinesPage() {
                 </div>
               </div>
             </button>
-            <span className="machine-row-arrow" aria-hidden="true">›</span>
+            {machine.targetId === "local" ? (
+              <span className="machine-row-arrow" aria-hidden="true">›</span>
+            ) : (
+              <div className="model-actions">
+                <div className="menu-wrap" data-machine-menu>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={text.machines.menuAria(machine.name)}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpenId === machine.targetId}
+                    onClick={(event) => toggleMenu(machine.targetId, event.currentTarget)}
+                  >
+                    ⋯
+                  </button>
+                  {menuOpenId === machine.targetId && menuPosition && createPortal(
+                    <div className="menu-popover" data-machine-menu role="menu" style={{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}>
+                      <button type="button" role="menuitem" onClick={() => openEditDialog(targets.find((target) => target.targetId === machine.targetId)!)}>{text.machines.edit}</button>
+                      <button type="button" role="menuitem" onClick={() => void removeMachine(targets.find((target) => target.targetId === machine.targetId)!)}>{text.machines.remove}</button>
+                    </div>,
+                    document.body,
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ))}
         {loading && (
@@ -183,9 +319,12 @@ export function MachinesPage() {
       {dialogOpen && (
         <RemoteTargetDialog
           context="machines"
+          editing={Boolean(editingTargetId)}
           config={config}
           password={password}
+          passwordSaved={editingPasswordSaved}
           rememberPassword={rememberPassword}
+          passwordRequired={passwordRequired}
           saving={dialogSaving}
           error={dialogError}
           setConfig={setConfig}

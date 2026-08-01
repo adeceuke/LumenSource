@@ -90,18 +90,21 @@ pub fn storage_report(
         false,
         "Shared by managed vLLM services. Deleting it requires an explicit shared-cache cleanup and models must be downloaded again.",
     );
-    let cache_root = settings.storage.cache_directory.as_deref();
+    let runtime_root =
+        dirs::data_local_dir().map(|directory| directory.join("lumen-source").join("runtimes"));
     push_directory(
         &mut entries,
-        "runtime-downloads",
+        "installed-runtimes",
         "runtime",
-        "Lumen Source runtime downloads",
-        cache_root.map(|path| path.join("runtimes")).as_deref(),
-        false,
-        Vec::new(),
+        "Installed Lumen Source runtimes",
+        runtime_root.as_deref(),
         true,
-        "Downloaded runtime installers are removed; installed runtimes are not changed.",
+        Vec::new(),
+        false,
+        "Runtime executables managed by Lumen Source. They are retained while models may depend on them.",
     );
+    push_runtime_downloads(&mut entries, runtime_root.as_deref());
+    let cache_root = settings.storage.cache_directory.as_deref();
     push_directory(
         &mut entries,
         "temporary",
@@ -166,7 +169,7 @@ pub fn storage_report(
     });
     let total_bytes = entries
         .iter()
-        .filter(|entry| entry.category != "model")
+        .filter(|entry| entry.category != "model" && entry.id != "runtime-downloads")
         .map(|entry| entry.size_bytes)
         .sum();
     let reclaimable_bytes = entries
@@ -180,6 +183,34 @@ pub fn storage_report(
         reclaimable_bytes,
         entries,
     }
+}
+
+fn push_runtime_downloads(entries: &mut Vec<StorageEntry>, runtime_root: Option<&Path>) {
+    let usage = runtime_root
+        .map(runtime_download_usage)
+        .unwrap_or(DirectoryUsage {
+            bytes: 0,
+            exact: true,
+        });
+    entries.push(StorageEntry {
+        id: "runtime-downloads".to_owned(),
+        category: "runtime".to_owned(),
+        label: "Incomplete runtime downloads".to_owned(),
+        path: runtime_root.map(|path| {
+            format!(
+                "{} (*.download and *.staging only)",
+                path.display()
+            )
+        }),
+        size_bytes: usage.bytes,
+        exact: usage.exact,
+        shared: false,
+        owners: Vec::new(),
+        cleanup_eligible: usage.bytes > 0,
+        cleanup_effect:
+            "Only interrupted runtime archives and staging directories are removed. Installed runtime executables are retained."
+                .to_owned(),
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -262,17 +293,19 @@ pub fn cleanup_directory(
     if !confirmed {
         return Err("Confirm the exact cleanup scope before removing files.".to_owned());
     }
+    if entry_id == "runtime-downloads" {
+        let runtime_root = dirs::data_local_dir()
+            .ok_or_else(|| "No local application data directory is available.".to_owned())?
+            .join("lumen-source")
+            .join("runtimes");
+        return cleanup_runtime_downloads_at(&runtime_root);
+    }
     let cache_root = settings
         .storage
         .cache_directory
         .as_deref()
         .ok_or_else(|| "No Lumen Source cache directory is configured.".to_owned())?;
     let (relative, scope, effect) = match entry_id {
-        "runtime-downloads" => (
-            "runtimes",
-            "Lumen Source runtime-download cache",
-            "Installed runtimes and model weights were retained.",
-        ),
         "temporary" => (
             "temporary",
             "Lumen Source temporary and incomplete downloads",
@@ -301,6 +334,108 @@ pub fn cleanup_directory(
         scope: scope.to_owned(),
         effect: effect.to_owned(),
     })
+}
+
+fn cleanup_runtime_downloads_at(runtime_root: &Path) -> Result<CleanupReport, String> {
+    let candidates = runtime_download_candidates(runtime_root).0;
+    let removed_bytes = candidates
+        .iter()
+        .map(|candidate| {
+            if candidate.is_dir() {
+                directory_usage(candidate).bytes
+            } else {
+                candidate
+                    .metadata()
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0)
+            }
+        })
+        .sum();
+    for candidate in candidates {
+        ensure_child(runtime_root, &candidate)?;
+        let result = if candidate.is_dir() {
+            fs::remove_dir_all(&candidate)
+        } else {
+            fs::remove_file(&candidate)
+        };
+        result.map_err(|error| {
+            format!(
+                "Could not remove the incomplete runtime download {}: {error}. Close any process using that temporary file and retry.",
+                candidate.display()
+            )
+        })?;
+    }
+    Ok(CleanupReport {
+        removed_bytes,
+        scope: "Incomplete Lumen Source runtime downloads".to_owned(),
+        effect: "Installed runtimes and model weights were retained.".to_owned(),
+    })
+}
+
+fn runtime_download_usage(runtime_root: &Path) -> DirectoryUsage {
+    let (candidates, exact) = runtime_download_candidates(runtime_root);
+    DirectoryUsage {
+        bytes: candidates
+            .iter()
+            .map(|candidate| {
+                if candidate.is_dir() {
+                    directory_usage(candidate).bytes
+                } else {
+                    candidate
+                        .metadata()
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0)
+                }
+            })
+            .sum(),
+        exact,
+    }
+}
+
+fn runtime_download_candidates(runtime_root: &Path) -> (Vec<PathBuf>, bool) {
+    if !runtime_root.exists() {
+        return (Vec::new(), true);
+    }
+    let mut candidates = Vec::new();
+    let mut pending = vec![runtime_root.to_path_buf()];
+    let mut exact = true;
+    while let Some(directory) = pending.pop() {
+        let Ok(children) = fs::read_dir(directory) else {
+            exact = false;
+            continue;
+        };
+        for child in children {
+            let Ok(child) = child else {
+                exact = false;
+                continue;
+            };
+            let path = child.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                exact = false;
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                if path
+                    .extension()
+                    .is_some_and(|extension| extension == "staging")
+                {
+                    candidates.push(path);
+                } else {
+                    pending.push(path);
+                }
+            } else if metadata.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "download")
+            {
+                candidates.push(path);
+            }
+        }
+    }
+    (candidates, exact)
 }
 
 fn ensure_child(root: &Path, target: &Path) -> Result<(), String> {
@@ -344,5 +479,28 @@ mod tests {
         };
         assert!(model_store.shared);
         assert!(!model_store.cleanup_eligible);
+    }
+
+    #[test]
+    fn runtime_cleanup_retains_installed_executables() {
+        let Ok(directory) = tempfile::tempdir() else {
+            panic!("temporary directory should be available");
+        };
+        let runtime_root = directory.path().join("runtimes");
+        let installed = runtime_root.join("ollama").join("1.0").join("ollama.exe");
+        let incomplete = runtime_root.join("ollama").join("archive.zip.download");
+        let staging = runtime_root.join("ollama").join("1.1.staging");
+        assert!(fs::create_dir_all(installed.parent().unwrap_or(directory.path())).is_ok());
+        assert!(fs::create_dir_all(&staging).is_ok());
+        assert!(fs::write(&installed, b"installed").is_ok());
+        assert!(fs::write(&incomplete, b"incomplete").is_ok());
+        assert!(fs::write(staging.join("ollama.exe"), b"staged").is_ok());
+
+        let result = cleanup_runtime_downloads_at(&runtime_root);
+
+        assert!(result.is_ok());
+        assert!(installed.exists());
+        assert!(!incomplete.exists());
+        assert!(!staging.exists());
     }
 }

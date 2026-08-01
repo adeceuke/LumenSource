@@ -119,6 +119,7 @@ pub struct ChatOptions {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChatProgress {
     Content(String),
+    Reasoning(String),
     Done,
 }
 
@@ -533,22 +534,23 @@ impl OllamaRuntime {
         self.launched_process.lock().await.is_some()
     }
 
+    /// Stops only an Ollama server launched by this adapter. Returns `false`
+    /// when the reachable service is owned by another process.
+    pub async fn stop_managed_server(&self) -> Result<bool, RuntimeError> {
+        let mut process = self.launched_process.lock().await;
+        let Some(child) = process.as_mut() else {
+            return Ok(false);
+        };
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+        *process = None;
+        Ok(true)
+    }
+
     /// Restarts only an Ollama process launched by this runtime adapter.
     /// A separately launched service is deliberately never terminated.
     pub async fn restart_managed_server(&self) -> Result<(), RuntimeError> {
-        let had_managed_process = {
-            let mut process = self.launched_process.lock().await;
-            if process.is_some() {
-                if let Some(child) = process.as_mut() {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                }
-                *process = None;
-                true
-            } else {
-                false
-            }
-        };
+        let had_managed_process = self.stop_managed_server().await?;
         if !had_managed_process && self.health().await.is_ok() {
             return Err(RuntimeError::ExternallyManaged);
         }
@@ -691,7 +693,8 @@ impl OllamaRuntime {
                 model,
                 messages: &messages,
                 stream: true,
-                keep_alive: options.keep_alive.as_deref().unwrap_or("-1"),
+                keep_alive: ollama_keep_alive(options.keep_alive.as_deref()),
+                think: ollama_think(options.reasoning_level.as_deref()),
                 format: options.structured_output.unwrap_or(false).then_some("json"),
                 options: OllamaChatOptions::from(options),
             })
@@ -835,10 +838,43 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     stream: bool,
-    keep_alive: &'a str,
+    keep_alive: OllamaKeepAlive<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<OllamaThink<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<&'a str>,
     options: OllamaChatOptions<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum OllamaThink<'a> {
+    Enabled(bool),
+    Level(&'a str),
+}
+
+fn ollama_think(value: Option<&str>) -> Option<OllamaThink<'_>> {
+    match value.map(str::trim) {
+        Some("none" | "off" | "disabled") => Some(OllamaThink::Enabled(false)),
+        Some(level @ ("low" | "medium" | "high")) => Some(OllamaThink::Level(level)),
+        Some("on" | "enabled" | "true") => Some(OllamaThink::Enabled(true)),
+        _ => None,
+    }
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum OllamaKeepAlive<'a> {
+    Seconds(i64),
+    Duration(&'a str),
+}
+
+fn ollama_keep_alive(value: Option<&str>) -> OllamaKeepAlive<'_> {
+    match value.map(str::trim).unwrap_or("-1") {
+        "-1" => OllamaKeepAlive::Seconds(-1),
+        "0" => OllamaKeepAlive::Seconds(0),
+        duration => OllamaKeepAlive::Duration(duration),
+    }
 }
 
 #[derive(Serialize)]
@@ -892,6 +928,8 @@ struct ChatResponse {
 struct ChatResponseMessage {
     #[serde(default)]
     content: String,
+    #[serde(default)]
+    thinking: String,
 }
 
 #[derive(Serialize)]
@@ -1357,6 +1395,9 @@ fn report_chat_line(line: &[u8], reporter: &dyn ChatReporter) -> Result<bool, Ru
         return Err(RuntimeError::Remote(error));
     }
     if let Some(message) = update.message {
+        if !message.thinking.is_empty() {
+            reporter.report(ChatProgress::Reasoning(message.thinking));
+        }
         if !message.content.is_empty() {
             reporter.report(ChatProgress::Content(message.content));
         }
@@ -1914,6 +1955,30 @@ mod tests {
     }
 
     #[test]
+    fn chat_progress_reports_reasoning_separately_from_content() {
+        let updates = std::sync::Mutex::new(Vec::new());
+        let reporter = |progress| {
+            if let Ok(mut values) = updates.lock() {
+                values.push(progress);
+            }
+        };
+
+        let result = report_chat_line(
+            br#"{"message":{"role":"assistant","content":"","thinking":"Checking"},"done":false}"#,
+            &reporter,
+        );
+
+        assert!(matches!(result, Ok(false)));
+        let Ok(values) = updates.lock() else {
+            panic!("chat progress values should remain available");
+        };
+        assert_eq!(
+            values.as_slice(),
+            &[ChatProgress::Reasoning("Checking".to_owned())]
+        );
+    }
+
+    #[test]
     fn ollama_delete_request_uses_the_runtime_model_identifier() {
         let Ok(serialized) = serde_json::to_value(DeleteRequest {
             model: "qwen2.5:latest",
@@ -1996,7 +2061,8 @@ mod tests {
             model: "qwen:latest",
             messages: &messages,
             stream: true,
-            keep_alive: options.keep_alive.as_deref().unwrap_or("-1"),
+            keep_alive: ollama_keep_alive(options.keep_alive.as_deref()),
+            think: ollama_think(options.reasoning_level.as_deref()),
             format: options
                 .structured_output
                 .and_then(|enabled| enabled.then_some("json")),
@@ -2011,6 +2077,44 @@ mod tests {
         assert_eq!(serialized["options"]["num_ctx"], 4_096);
         assert_eq!(serialized["options"]["num_predict"], 256);
         assert_eq!(serialized["options"]["stop"][0], "END");
+    }
+
+    #[test]
+    fn ollama_chat_keep_alive_sentinels_are_json_numbers() {
+        let messages = [ChatMessage {
+            role: "user".to_owned(),
+            content: "Hello".to_owned(),
+        }];
+        for (setting, expected) in [(None, -1), (Some("-1"), -1), (Some("0"), 0)] {
+            let Ok(serialized) = serde_json::to_value(ChatRequest {
+                model: "qwen:latest",
+                messages: &messages,
+                stream: true,
+                keep_alive: ollama_keep_alive(setting),
+                think: None,
+                format: None,
+                options: OllamaChatOptions::from(&ChatOptions::default()),
+            }) else {
+                panic!("chat request should serialize");
+            };
+
+            assert_eq!(serialized["keep_alive"], expected);
+        }
+    }
+
+    #[test]
+    fn ollama_chat_thinking_control_uses_the_native_request_field() {
+        assert_eq!(
+            serde_json::to_value(ollama_think(Some("none")))
+                .unwrap_or_else(|error| panic!("thinking control should serialize: {error}")),
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            serde_json::to_value(ollama_think(Some("medium")))
+                .unwrap_or_else(|error| panic!("reasoning level should serialize: {error}")),
+            serde_json::json!("medium")
+        );
+        assert!(ollama_think(None).is_none());
     }
 
     #[test]

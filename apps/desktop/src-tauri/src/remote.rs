@@ -13,7 +13,7 @@ use lumen_source_hardware::{
 };
 use lumen_source_runtime::{OllamaRuntime, Runtime};
 use serde::{Deserialize, Serialize};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -246,8 +246,10 @@ Start-Process -FilePath $path -ArgumentList 'serve' -WindowStyle Hidden
 "#;
 #[cfg(unix)]
 const ASKPASS_SOCKET_ENV: &str = "LUMEN_SOURCE_ASKPASS_SOCKET";
-#[cfg(unix)]
+#[cfg(windows)]
+const ASKPASS_PIPE_ENV: &str = "LUMEN_SOURCE_ASKPASS_PIPE";
 const ASKPASS_MARKER_ENV: &str = "LUMEN_SOURCE_ASKPASS_HELPER";
+const ASKPASS_MAX_REQUESTS: usize = 4;
 #[cfg(unix)]
 static ASKPASS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -356,8 +358,12 @@ fn default_ssh_port() -> u16 {
 struct AskpassBroker {
     #[cfg(unix)]
     socket_path: PathBuf,
+    #[cfg(windows)]
+    pipe_name: String,
     #[cfg(unix)]
     task: tokio::task::JoinHandle<()>,
+    #[cfg(windows)]
+    tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl AskpassBroker {
@@ -381,7 +387,7 @@ impl AskpassBroker {
         std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
             .map_err(|error| format!("Could not secure the SSH password socket: {error}"))?;
         let task = tokio::spawn(async move {
-            for _ in 0..4 {
+            for _ in 0..ASKPASS_MAX_REQUESTS {
                 let Ok((mut stream, _)) = listener.accept().await else {
                     break;
                 };
@@ -396,9 +402,40 @@ impl AskpassBroker {
         Ok(Self { socket_path, task })
     }
 
-    #[cfg(not(unix))]
-    async fn start(_password: Arc<Zeroizing<String>>) -> Result<Self, String> {
-        Err("SSH password authentication is currently available on Linux only".to_owned())
+    #[cfg(windows)]
+    async fn start(password: Arc<Zeroizing<String>>) -> Result<Self, String> {
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let pipe_name = format!(r"\\.\pipe\lumen-source-askpass-{}", uuid::Uuid::new_v4());
+        let mut options = ServerOptions::new();
+        options
+            .access_inbound(false)
+            .access_outbound(true)
+            .max_instances(ASKPASS_MAX_REQUESTS)
+            .reject_remote_clients(true);
+        let mut servers = Vec::with_capacity(ASKPASS_MAX_REQUESTS);
+        for index in 0..ASKPASS_MAX_REQUESTS {
+            options.first_pipe_instance(index == 0);
+            servers.push(
+                options
+                    .create(&pipe_name)
+                    .map_err(|error| format!("Could not open the SSH password pipe: {error}"))?,
+            );
+        }
+        let tasks = servers
+            .into_iter()
+            .map(|mut server| {
+                let password = Arc::clone(&password);
+                tokio::spawn(async move {
+                    if server.connect().await.is_ok() {
+                        let _ = server.write_all(password.as_bytes()).await;
+                        let _ = server.write_all(b"\n").await;
+                        let _ = server.shutdown().await;
+                    }
+                })
+            })
+            .collect();
+        Ok(Self { pipe_name, tasks })
     }
 
     #[cfg(unix)]
@@ -414,9 +451,17 @@ impl AskpassBroker {
         Ok(())
     }
 
-    #[cfg(not(unix))]
-    fn configure(&self, _command: &mut Command) -> Result<(), String> {
-        Err("SSH password authentication is currently available on Linux only".to_owned())
+    #[cfg(windows)]
+    fn configure(&self, command: &mut Command) -> Result<(), String> {
+        let executable = std::env::current_exe()
+            .map_err(|error| format!("Could not locate the SSH password helper: {error}"))?;
+        command
+            .env("SSH_ASKPASS", executable)
+            .env("SSH_ASKPASS_REQUIRE", "force")
+            .env("DISPLAY", "lumen-source-askpass")
+            .env(ASKPASS_MARKER_ENV, "1")
+            .env(ASKPASS_PIPE_ENV, &self.pipe_name);
+        Ok(())
     }
 }
 
@@ -426,6 +471,10 @@ impl Drop for AskpassBroker {
         {
             self.task.abort();
             let _ = std::fs::remove_file(&self.socket_path);
+        }
+        #[cfg(windows)]
+        for task in &self.tasks {
+            task.abort();
         }
     }
 }
@@ -452,7 +501,24 @@ pub fn run_askpass_helper_if_requested() -> Option<i32> {
         })();
         Some(if result.is_ok() { 0 } else { 1 })
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::io::{Read, Write};
+
+        if std::env::var_os(ASKPASS_MARKER_ENV).as_deref() != Some(std::ffi::OsStr::new("1")) {
+            return None;
+        }
+        let result = (|| -> Result<(), ()> {
+            let path = std::env::var_os(ASKPASS_PIPE_ENV).ok_or(())?;
+            let mut pipe = std::fs::File::open(path).map_err(|_| ())?;
+            let mut password = Zeroizing::new(Vec::new());
+            pipe.read_to_end(&mut password).map_err(|_| ())?;
+            std::io::stdout().write_all(&password).map_err(|_| ())?;
+            std::io::stdout().flush().map_err(|_| ())
+        })();
+        Some(if result.is_ok() { 0 } else { 1 })
+    }
+    #[cfg(not(any(unix, windows)))]
     None
 }
 
@@ -1182,20 +1248,42 @@ async fn detect_remote_os(
     config: &RemoteTargetConfig,
     password: Option<&Arc<Zeroizing<String>>>,
 ) -> Result<RemoteOperatingSystem, String> {
-    if ssh_probe(config, "uname -s", password)
-        .await
-        .is_ok_and(|output| output.trim() == "Linux")
+    let linux_probe = ssh_probe(config, "uname -s", password).await;
+    if linux_probe
+        .as_deref()
+        .is_ok_and(|output| remote_os_output_contains(output, "Linux"))
     {
         return Ok(RemoteOperatingSystem::Linux);
     }
     let command = windows_remote_command(REMOTE_WINDOWS_DETECTION_SCRIPT);
-    if ssh_probe(config, &command, password)
-        .await
-        .is_ok_and(|output| output.trim() == "Windows")
+    let windows_probe = ssh_probe(config, &command, password).await;
+    if windows_probe
+        .as_deref()
+        .is_ok_and(|output| remote_os_output_contains(output, "Windows"))
     {
         return Ok(RemoteOperatingSystem::Windows);
     }
-    Err("The SSH target is not a supported Linux or Windows machine.".to_owned())
+
+    match (linux_probe, windows_probe) {
+        (Err(linux_error), Err(windows_error)) => Err(format!(
+            "Could not identify the remote operating system because the SSH probes failed. Linux probe: {linux_error} Windows probe: {windows_error}"
+        )),
+        (linux_result, windows_result) => {
+            let linux_output = linux_result.unwrap_or_default();
+            let windows_output = windows_result.unwrap_or_default();
+            Err(format!(
+                "The SSH connection succeeded, but the target did not identify itself as Linux or Windows (Linux probe: `{}`, Windows probe: `{}`).",
+                compact_output(&linux_output),
+                compact_output(&windows_output),
+            ))
+        }
+    }
+}
+
+fn remote_os_output_contains(output: &str, expected: &str) -> bool {
+    output
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case(expected))
 }
 
 fn windows_remote_command(script: &str) -> String {
@@ -1262,7 +1350,7 @@ async fn ssh_command(
         .arg("-o")
         .arg("ConnectTimeout=10")
         .arg("-o")
-        .arg("StrictHostKeyChecking=yes");
+        .arg("StrictHostKeyChecking=accept-new");
     let askpass = match config.authentication {
         RemoteAuthentication::Key => {
             command.arg("-o").arg("BatchMode=yes");
@@ -1383,7 +1471,8 @@ fn ssh_connection_guidance(detail: &str, config: &RemoteTargetConfig) -> String 
         || normalized.contains("no host key is known")
     {
         return format!(
-            "The target identity is not trusted yet or has changed. Connect once with `ssh -p {} {destination}`, verify the displayed fingerprint with the target administrator, and accept it only when it matches. Then retry LumenSource.",
+            "The target host key conflicts with a previously trusted identity or could not be saved. Verify the target fingerprint before changing trust. Inspect the saved key with `ssh-keygen -F {}` and connect with `ssh -p {} {destination}` for full OpenSSH diagnostics.",
+            config.host,
             config.port
         );
     }
@@ -1454,6 +1543,35 @@ mod tests {
         assert!(command.starts_with("powershell.exe "));
         assert!(command.contains("-EncodedCommand "));
         assert!(!command.contains("Write-Output"));
+    }
+
+    #[tokio::test]
+    async fn ssh_silently_accepts_new_hosts_but_rejects_changed_keys() -> Result<(), String> {
+        let config = valid_config();
+        let (command, broker) = ssh_command(&config, None).await?;
+        let arguments = command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy())
+            .collect::<Vec<_>>();
+        assert!(arguments
+            .iter()
+            .any(|argument| argument == "StrictHostKeyChecking=accept-new"));
+        assert!(broker.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn recognizes_remote_os_with_login_banner_output() {
+        assert!(remote_os_output_contains(
+            "Welcome to Ubuntu 24.04 LTS\nLinux\n",
+            "Linux"
+        ));
+        assert!(remote_os_output_contains(
+            "notice\r\nWindows\r\n",
+            "Windows"
+        ));
+        assert!(!remote_os_output_contains("GNU/Linux", "Linux"));
     }
 
     #[test]
@@ -1718,7 +1836,33 @@ NVIDIA Test GPU, 42, 2048
         Ok(())
     }
 
-    #[cfg(unix)]
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn askpass_broker_uses_a_private_local_named_pipe() -> Result<(), String> {
+        use tokio::io::AsyncReadExt;
+        use tokio::net::windows::named_pipe::ClientOptions;
+
+        let password = Arc::new(Zeroizing::new("test-only-password".to_owned()));
+        let broker = AskpassBroker::start(password).await?;
+        assert!(broker
+            .pipe_name
+            .starts_with(r"\\.\pipe\lumen-source-askpass-"));
+        for _ in 0..ASKPASS_MAX_REQUESTS {
+            let mut options = ClientOptions::new();
+            options.write(false);
+            let mut pipe = options
+                .open(&broker.pipe_name)
+                .map_err(|error| error.to_string())?;
+            let mut received = Zeroizing::new(Vec::new());
+            pipe.read_to_end(&mut received)
+                .await
+                .map_err(|error| error.to_string())?;
+            assert_eq!(received.as_slice(), b"test-only-password\n");
+        }
+        Ok(())
+    }
+
+    #[cfg(any(unix, windows))]
     #[tokio::test]
     async fn password_is_not_exposed_in_ssh_arguments_or_environment() -> Result<(), String> {
         let mut config = valid_config();

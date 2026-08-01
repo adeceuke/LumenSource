@@ -40,9 +40,10 @@ Lumen Source uses the controller's OpenSSH client. Existing SSH
 agent/configuration or an optional identity-file path is the preferred
 authentication method. Password authentication is available as a
 non-preferred fallback and can use the controller operating system's credential
-store. Existing host-key trust is required.
-If it is missing, the wizard tells the user to connect once in a terminal and
-verify the fingerprint before retrying.
+store. On first connection, OpenSSH silently records a new host key in the controller
+user's `known_hosts` file. A changed key remains a hard failure and requires
+the user to verify the target identity outside Lumen Source before replacing
+the saved key.
 
 The saved profile contains the optional target name, host, port, username,
 authentication mode, and optional identity-file path. It contains no password;
@@ -123,8 +124,10 @@ to a LAN or the internet. See Ollama's
 Required controls:
 
 - Bind the controller side of the tunnel to loopback only.
-- Show and explicitly trust a new target host-key fingerprint.
-- Persist trusted host identity and hard-fail a changed key until re-authorized.
+- Use OpenSSH trust-on-first-use to persist a previously unseen target host key
+  without interrupting the setup flow.
+- Hard-fail a changed host key until it is verified and re-authorized outside
+  Lumen Source.
 - Prefer existing SSH configuration, an SSH agent, or a selected key; never
   enable SSH agent forwarding.
 - Do not store passwords, private-key contents, or passphrases in JSON state.
@@ -207,7 +210,8 @@ Missing optional facts remain unavailable rather than failing connection.
 3. In the dialog, enter connection metadata, choose authentication, and select
    **Save**. The new target is selected automatically.
 4. Enter the password when required, choose whether to save it securely, then
-   verify host identity and test the connection.
+   test the connection. OpenSSH records an unseen host identity automatically
+   and rejects a changed identity.
 5. Detect target OS, architecture, hardware, storage, and Ollama status.
 6. Continue without installation when Ollama is already available.
 7. Recommend using target hardware.
@@ -238,7 +242,7 @@ authenticated HTTPS proxy.
 
 - Implement authenticated SSH and loopback forwarding.
 - Support existing SSH configuration, agents, and selected keys.
-- Add fingerprint approval and changed-key rejection.
+- Add silent trust-on-first-use and changed-key rejection.
 - Add keepalive, disconnect, and reconnect behavior.
 - Enable saved remote targets in the wizard.
 

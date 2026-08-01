@@ -46,6 +46,7 @@ export interface ModelSetupWizardProps {
   selectedRemoteTargetId: string;
   selectedRemoteTarget?: RemoteTargetProfile;
   remotePassword: string;
+  remotePasswordSaved: boolean;
   rememberRemotePassword: boolean;
   remoteReport?: RemoteConnectionReport;
   remoteCheckLoading: boolean;
@@ -111,7 +112,6 @@ export interface ModelSetupWizardProps {
   useSaferSettings: () => void | Promise<void>;
   removeIncompleteInstall: () => void | Promise<void>;
   startInstall: () => void | Promise<void>;
-  confirmWizardClose: () => void;
   openInstalledModel: () => void;
   copyText: (value: string, key: string) => void | Promise<void>;
 }
@@ -124,6 +124,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     selectedRemoteTargetId,
     selectedRemoteTarget,
     remotePassword,
+    remotePasswordSaved,
     rememberRemotePassword,
     remoteReport,
     remoteCheckLoading,
@@ -189,7 +190,6 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     useSaferSettings,
     removeIncompleteInstall,
     startInstall,
-    confirmWizardClose,
     openInstalledModel,
     copyText,
   } = props;
@@ -286,7 +286,13 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                               <>
                                 <label className="remote-password-field">
                                   <span>{text.wizard.location.password}</span>
-                                  <input type="password" value={remotePassword} onChange={(event) => { setRemotePassword(event.target.value); setRemoteReport(undefined); }} autoComplete="current-password" />
+                                  <input
+                                    type="password"
+                                    value={remotePassword}
+                                    placeholder={remotePasswordSaved && !remotePassword ? "********" : undefined}
+                                    onChange={(event) => { setRemotePassword(event.target.value); setRemoteReport(undefined); }}
+                                    autoComplete="current-password"
+                                  />
                                   <small>{text.wizard.location.passwordHint}</small>
                                 </label>
                                 <label className="credential-save-choice wizard-credential-choice">
@@ -399,36 +405,6 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                         </button>
                       )}
                     </div>
-                    {validationReport && !validationReport.passed && (
-                      <section className="validation-recovery" aria-live="polite">
-                        <h3>{text.wizard.validation.failedTitle}</h3>
-                        <p>{validationReport.message}</p>
-                        <div className="validation-actions">
-                          <button className="secondary-button" type="button" disabled={downloadBusy} onClick={() => void retryValidation()}>
-                            {text.wizard.validation.retry}
-                          </button>
-                          <button className="secondary-button" type="button" disabled={downloadBusy || performanceProfile === "safe"} onClick={() => void useSaferSettings()}>
-                            {text.wizard.validation.safer}
-                          </button>
-                          <button className="secondary-button" type="button" onClick={() => setValidationDetailsOpen((open) => !open)}>
-                            {validationDetailsOpen ? text.wizard.validation.hideDiagnostics : text.wizard.validation.openDiagnostics}
-                          </button>
-                          <button className="danger-button" type="button" disabled={downloadBusy} onClick={() => void removeIncompleteInstall()}>
-                            {text.wizard.validation.removeIncomplete}
-                          </button>
-                        </div>
-                        {validationDetailsOpen && (
-                          <div className="validation-checks">
-                            {validationReport.checks.map((check) => (
-                              <div className={`validation-check ${check.status}`} key={check.id}>
-                                <strong>{check.id}</strong>
-                                <span>{check.detail}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </section>
-                    )}
                     <div className="actions">
                       <button className="back-button" type="button" onClick={goToPreviousStep}>
                         {text.common.back}
@@ -602,6 +578,15 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                           <span><b>{selectedRecommendation.contextWindow.toLocaleString(text.locale)}</b>{text.wizard.suggestion.context}</span>
                           <span><b>{selectedRecommendation.version}</b>{text.wizard.suggestion.runtime}</span>
                           <span><b>{formatBytes(selectedRecommendation.estimatedLoadedMemoryMinBytes)} - {formatBytes(selectedRecommendation.estimatedLoadedMemoryMaxBytes)}</b>{text.wizard.suggestion.loadedMemory}</span>
+                          {selectedRecommendation.externalEvaluations.map((evaluation) => (
+                            <span
+                              key={`${evaluation.publisher}-${evaluation.leaderboardName}`}
+                              title={`${evaluation.sourceModelName}: ${evaluation.notes}`}
+                            >
+                              <b>{evaluation.overallTier}</b>
+                              {text.wizard.suggestion.externalOverallTier(evaluation.publisher, evaluation.leaderboardName)}
+                            </span>
+                          ))}
                         </div>
                         <h4>{selectedRecommendation.compatible ? text.wizard.suggestion.why : text.wizard.suggestion.compatibilityIssues}</h4>
                         <ul className="ranking-reasons">
@@ -838,6 +823,9 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                       <div className="model-orb"><span>⬇</span><i /></div>
                       <h3>{downloadBusy ? text.wizard.install.inProgress : text.wizard.install.title(selectedRecommendation?.name ?? text.wizard.install.modelFallback)}</h3>
                       <p>{installProgressMessage(installProgress)}</p>
+                      {installProgress?.phase === "validating" && (
+                        <p className="install-phase-note" role="status">{text.wizard.install.validationWait}</p>
+                      )}
                       {installProgress && (
                         <>
                           <div className="progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progressPercent(installProgress))}>
@@ -853,6 +841,36 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                         </>
                       )}
                     </div>
+                    {validationReport && !validationReport.passed && (
+                      <section className="validation-recovery" aria-live="polite">
+                        <h3>{text.wizard.validation.failedTitle}</h3>
+                        <p>{validationReport.message}</p>
+                        <div className="validation-actions">
+                          <button className="secondary-button" type="button" disabled={downloadBusy} onClick={() => void retryValidation()}>
+                            {text.wizard.validation.retry}
+                          </button>
+                          <button className="secondary-button" type="button" disabled={downloadBusy || performanceProfile === "safe"} onClick={() => void useSaferSettings()}>
+                            {text.wizard.validation.safer}
+                          </button>
+                          <button className="secondary-button" type="button" onClick={() => setValidationDetailsOpen((open) => !open)}>
+                            {validationDetailsOpen ? text.wizard.validation.hideDiagnostics : text.wizard.validation.openDiagnostics}
+                          </button>
+                          <button className="danger-button" type="button" disabled={downloadBusy} onClick={() => void removeIncompleteInstall()}>
+                            {text.wizard.validation.removeIncomplete}
+                          </button>
+                        </div>
+                        {validationDetailsOpen && (
+                          <div className="validation-checks">
+                            {validationReport.checks.map((check) => (
+                              <div className={`validation-check ${check.status}`} key={check.id}>
+                                <strong>{check.id}</strong>
+                                <span>{check.detail}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    )}
                     <div className="actions">
                       {downloadBusy ? (
                         <button className="secondary-button" type="button" onClick={() => void requestInstallCancellation()} disabled={!installCancellable || cancelBusy}>
@@ -922,8 +940,7 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                       </div>
                     </div>
                     <div className="actions">
-                      <button className="secondary-button" type="button" onClick={confirmWizardClose}>{text.wizard.ready.returnToLibrary}</button>
-                      <button className="primary-button" type="button" onClick={openInstalledModel}>{text.wizard.ready.openModel}</button>
+                      <button className="primary-button" type="button" onClick={openInstalledModel}>{text.wizard.ready.returnToLibrary}</button>
                     </div>
                   </div>
                 )}

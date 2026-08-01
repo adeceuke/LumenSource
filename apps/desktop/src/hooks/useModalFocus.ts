@@ -14,6 +14,11 @@ export function useModalFocus<T extends HTMLElement>(
   enabled = true,
 ): RefObject<T | null> {
   const ref = useRef<T>(null);
+  const onEscapeRef = useRef(onEscape);
+
+  useEffect(() => {
+    onEscapeRef.current = onEscape;
+  }, [onEscape]);
 
   useEffect(() => {
     if (!enabled || !ref.current) return;
@@ -25,11 +30,12 @@ export function useModalFocus<T extends HTMLElement>(
       Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
         .filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
     const elements = focusable();
-    (elements[0] ?? dialog).focus();
+    const preferred = dialog.querySelector<HTMLElement>("[data-modal-initial-focus]");
+    (preferred ?? elements[0] ?? dialog).focus();
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && onEscape) {
+      if (event.key === "Escape" && onEscapeRef.current) {
         event.preventDefault();
-        onEscape();
+        onEscapeRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -54,7 +60,7 @@ export function useModalFocus<T extends HTMLElement>(
       dialog.removeEventListener("keydown", handleKeyDown);
       previous?.focus();
     };
-  }, [enabled, onEscape]);
+  }, [enabled]);
 
   return ref;
 }

@@ -32,10 +32,12 @@ export function formatLegalValue(value: string): string {
 export function progressPercent(progress?: InstallProgress): number {
   if (!progress) return 0;
   if (progress.phase === "cancelled") return 0;
+  if (progress.phase === "failed") return 98;
   if (progress.phase === "complete") return 100;
   if (progress.phase === "preparing") return 5;
   if (progress.phase === "verifying") return 88;
   if (progress.phase === "installing") return 95;
+  if (progress.phase === "validating") return 98;
   if (progress.totalBytes <= 0) return 12;
   return Math.max(8, Math.min(85, (progress.completedBytes / progress.totalBytes) * 85));
 }

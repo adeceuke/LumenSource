@@ -71,8 +71,10 @@ machine.
 
 The current desktop exposes local deployment plus Linux and Windows remote
 targets backed by the controller's OpenSSH client. A Windows controller can
-use that preview with Windows OpenSSH and key authentication. Windows SSH
-password brokering and remote runtime installation remain deferred.
+use that preview with Windows OpenSSH and key, agent, or password
+authentication. Passwords cross a local, one-time named pipe and are never
+placed in process arguments or environment values. Remote runtime installation
+remains deferred.
 
 Platform-specific implementations should be added as sibling modules, not as
 conditionals spread through recommendation or orchestration code.

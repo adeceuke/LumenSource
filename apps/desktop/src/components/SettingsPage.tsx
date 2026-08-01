@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { desktopCommands, messageFromError } from "../commands";
 import { browserMessages } from "../i18n";
+import { installProgressMessage, progressPercent } from "../modelUi";
 import type {
   ApplicationSettings,
+  InstallProgress,
   ManagedVllmSupport,
   OllamaConnectionReport,
   RemoteTargetProfile,
@@ -15,6 +17,7 @@ const text = browserMessages();
 
 interface SettingsPageProps {
   settings: ApplicationSettings;
+  telemetryFocusRequest: number;
   onSaved: (settings: ApplicationSettings) => void;
   onDirtyChange: (dirty: boolean) => void;
   onError: (error: string) => void;
@@ -28,8 +31,29 @@ function valueFromNumber(value: string): number {
   return Number.parseInt(value, 10) || 0;
 }
 
+async function writeClipboardText(value: string): Promise<void> {
+  // Keep the fallback inside the original click gesture. WebView can reject
+  // navigator.clipboard asynchronously, after the gesture permission expires.
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (copied) return;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  throw new Error("The clipboard is unavailable. Select and copy the token manually.");
+}
+
 export function SettingsPage({
   settings,
+  telemetryFocusRequest,
   onSaved,
   onDirtyChange,
   onError,
@@ -40,6 +64,8 @@ export function SettingsPage({
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [repairingOllama, setRepairingOllama] = useState(false);
+  const [ollamaRepairProgress, setOllamaRepairProgress] = useState<InstallProgress>();
   const [restartRequired, setRestartRequired] = useState(false);
   const [connection, setConnection] = useState<OllamaConnectionReport>();
   const [managedVllmSupport, setManagedVllmSupport] = useState<ManagedVllmSupport>();
@@ -50,12 +76,17 @@ export function SettingsPage({
   const [sharingStatus, setSharingStatus] = useState<SharingStatus>();
   const [sharingBusy, setSharingBusy] = useState(false);
   const [generatedToken, setGeneratedToken] = useState("");
+  const [tokenCopyStatus, setTokenCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [sharingEnabled, setSharingEnabled] = useState(settings.sharing.enabled);
   const [allowOtherDevices, setAllowOtherDevices] = useState(settings.sharing.allowOtherDevices);
   const [sharingPort, setSharingPort] = useState(settings.sharing.port);
   const [exposedModelIds, setExposedModelIds] = useState(settings.sharing.exposedModelIds);
   const restoreInput = useRef<HTMLInputElement>(null);
+  const telemetrySetting = useRef<HTMLLabelElement>(null);
+  const telemetryInput = useRef<HTMLInputElement>(null);
+  const [telemetryHighlighted, setTelemetryHighlighted] = useState(false);
   const [supportBusy, setSupportBusy] = useState(false);
+  const [supportNotice, setSupportNotice] = useState("");
   const dirty = useMemo(
     () => JSON.stringify(draft) !== JSON.stringify(settings),
     [draft, settings],
@@ -72,6 +103,22 @@ export function SettingsPage({
     setSharingPort(settings.sharing.port);
     setExposedModelIds(settings.sharing.exposedModelIds);
   }, [settings]);
+
+  useEffect(() => {
+    if (telemetryFocusRequest === 0) return;
+
+    setTelemetryHighlighted(true);
+    const frame = window.requestAnimationFrame(() => {
+      telemetrySetting.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      telemetryInput.current?.focus({ preventScroll: true });
+    });
+    const highlightTimer = window.setTimeout(() => setTelemetryHighlighted(false), 2_400);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [telemetryFocusRequest]);
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -115,11 +162,22 @@ export function SettingsPage({
     try {
       const token = await desktopCommands.generateSharingToken();
       setGeneratedToken(token);
+      setTokenCopyStatus("idle");
       setSharingStatus(await desktopCommands.sharingStatus());
     } catch (error) {
       onError(messageFromError(error, text.errors.unexpected));
     } finally {
       setSharingBusy(false);
+    }
+  };
+
+  const copyGeneratedToken = async () => {
+    try {
+      await writeClipboardText(generatedToken);
+      setTokenCopyStatus("copied");
+    } catch (error) {
+      setTokenCopyStatus("failed");
+      onError(messageFromError(error, "Could not copy the API token."));
     }
   };
 
@@ -168,19 +226,12 @@ export function SettingsPage({
     }
   };
 
-  const downloadDocument = (name: string, content: string) => {
-    const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = name;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   const exportDiagnostics = async () => {
     setSupportBusy(true);
+    setSupportNotice("Preparing redacted diagnostics…");
     try {
-      downloadDocument("lumen-source-diagnostics.json", await desktopCommands.diagnosticBundle());
+      const path = await desktopCommands.exportDiagnosticBundleFile();
+      setSupportNotice(`Redacted diagnostics saved to ${path}`);
     } catch (error) {
       onError(messageFromError(error, text.errors.unexpected));
     } finally {
@@ -190,8 +241,10 @@ export function SettingsPage({
 
   const exportStateBackup = async () => {
     setSupportBusy(true);
+    setSupportNotice("Preparing state backup…");
     try {
-      downloadDocument("lumen-source-state-backup.json", await desktopCommands.exportStateBackup());
+      const path = await desktopCommands.exportStateBackupFile();
+      setSupportNotice(`State backup saved to ${path}`);
     } catch (error) {
       onError(messageFromError(error, text.errors.unexpected));
     } finally {
@@ -210,6 +263,7 @@ export function SettingsPage({
       onSaved(restored);
       setModels(await desktopCommands.loadModels());
       setSharingStatus(await desktopCommands.sharingStatus());
+      setSupportNotice("State backup restored.");
     } catch (error) {
       onError(messageFromError(error, text.errors.unexpected));
     } finally {
@@ -341,6 +395,30 @@ export function SettingsPage({
       onError(messageFromError(error, text.errors.unexpected));
     } finally {
       setRestarting(false);
+    }
+  };
+
+  const repairOllama = async () => {
+    if (!window.confirm(text.settings.ollama.repairConfirmation)) return;
+    setRepairingOllama(true);
+    setOllamaRepairProgress(undefined);
+    let unlisten: (() => void) | undefined;
+    try {
+      unlisten = await desktopCommands.onInstallProgress((progress) => {
+        if (progress.modelId === "ollama-runtime-repair") setOllamaRepairProgress(progress);
+      });
+      const report = await desktopCommands.repairManagedOllama();
+      setConnection(report);
+    } catch (error) {
+      setOllamaRepairProgress((current) => current && ({
+        ...current,
+        phase: "failed",
+        messageKey: "runtimeRepairFailed",
+      }));
+      onError(messageFromError(error, text.errors.unexpected));
+    } finally {
+      unlisten?.();
+      setRepairingOllama(false);
     }
   };
 
@@ -582,12 +660,22 @@ export function SettingsPage({
             <button type="button" className="secondary-button" onClick={() => void testConnection()} disabled={testing}>
               {testing ? text.settings.ollama.testing : text.settings.ollama.test}
             </button>
+            <button type="button" className="secondary-button" onClick={() => void repairOllama()} disabled={repairingOllama}>
+              {repairingOllama ? text.settings.ollama.repairing : text.settings.ollama.repair}
+            </button>
             {connection && (
               <p className={connection.healthy ? "connection-ok" : "connection-error"} role="status">
                 {connection.message}
               </p>
             )}
           </div>
+          {ollamaRepairProgress && (
+            <div className="runtime-repair-progress" role="status" aria-live="polite">
+              <div><span>{installProgressMessage(ollamaRepairProgress)}</span><strong>{Math.round(progressPercent(ollamaRepairProgress))}%</strong></div>
+              <div className="runtime-repair-track"><i style={{ width: `${progressPercent(ollamaRepairProgress)}%` }} /></div>
+              <small>{text.settings.ollama.repairHint}</small>
+            </div>
+          )}
         </div>
         <div className="runtime-card">
           <div className="runtime-card-heading">
@@ -666,7 +754,8 @@ export function SettingsPage({
           <h2 id="settings-sharing">Share an API</h2>
           <p>Use an authenticated OpenAI-compatible gateway. Ollama and managed vLLM remain private on this machine.</p>
         </div>
-        <div className="settings-grid">
+        <div className="sharing-settings-content">
+          <div className="settings-grid">
           <label className="check-setting">
             <input
               type="checkbox"
@@ -701,10 +790,12 @@ export function SettingsPage({
               onChange={(event) => setSharingPort(valueFromNumber(event.target.value))}
             />
           </label>
-        </div>
-        <fieldset className="settings-choice-group" disabled={!sharingEnabled}>
-          <legend>Models available through the gateway</legend>
-          {shareableModels.length === 0 && <p>No eligible local managed models are installed.</p>}
+          </div>
+          <fieldset className="settings-choice-group sharing-model-picker" disabled={!sharingEnabled}>
+            <legend>Models available through the gateway</legend>
+            {shareableModels.length === 0 && (
+              <p className="sharing-empty-state">No eligible local managed models are installed.</p>
+            )}
           {shareableModels.map((model) => (
             <label className="check-setting" key={model.id}>
               <input
@@ -718,38 +809,45 @@ export function SettingsPage({
               <span><strong>{model.name}</strong><small>{model.runtimeId} · {model.runtimeModelId}</small></span>
             </label>
           ))}
-        </fieldset>
-        <div className="runtime-actions">
+          </fieldset>
+          <div className="runtime-actions">
           <button type="button" className="secondary-button" disabled={sharingBusy} onClick={() => void generateSharingToken()}>
             {sharingStatus?.tokenSaved ? "Rotate API token" : "Generate API token"}
           </button>
           <button type="button" className="primary-button" disabled={sharingBusy || (sharingEnabled && exposedModelIds.length === 0)} onClick={() => void applySharing()}>
-            {sharingEnabled ? "Apply sharing settings" : "Disable sharing"}
+            Apply API sharing settings
           </button>
           {sharingStatus?.tokenSaved && (
             <button type="button" className="danger-button" disabled={sharingBusy} onClick={() => void revokeSharingToken()}>
               Revoke token and disable
             </button>
           )}
+          </div>
+          {generatedToken && (
+            <div className="sharing-token-card" role="status">
+              <div>
+                <strong>Copy this token now</strong>
+                <p>The full token is shown only after generation or rotation.</p>
+              </div>
+              <div className="sharing-token-value">
+                <code>{generatedToken}</code>
+                <button type="button" className="secondary-button" onClick={() => void copyGeneratedToken()}>
+                  {tokenCopyStatus === "copied" ? "Copied" : tokenCopyStatus === "failed" ? "Try copying again" : "Copy token"}
+                </button>
+              </div>
+            </div>
+          )}
+          {sharingStatus?.running && (
+            <div className="connection-ok sharing-running-status" role="status">
+              <strong>Gateway running at {sharingStatus.address}</strong>
+              <p>Exposed models: {sharingStatus.exposedModels.join(", ")}</p>
+            </div>
+          )}
+          {sharingStatus?.transportWarning && <p className="connection-error" role="alert">{sharingStatus.transportWarning}</p>}
+          <p className="managed-runtime-note">
+            Lumen Source does not open firewall ports or configure your router. For internet or untrusted-network use, terminate TLS and enforce network policy in a trusted reverse proxy.
+          </p>
         </div>
-        {generatedToken && (
-          <div className="settings-notice" role="status">
-            <strong>Copy this token now</strong>
-            <p>The full token is shown only after generation or rotation.</p>
-            <code>{generatedToken}</code>
-            <button type="button" className="secondary-button" onClick={() => void navigator.clipboard.writeText(generatedToken)}>Copy token</button>
-          </div>
-        )}
-        {sharingStatus?.running && (
-          <div className="connection-ok" role="status">
-            <strong>Gateway running at {sharingStatus.address}</strong>
-            <p>Exposed models: {sharingStatus.exposedModels.join(", ")}</p>
-          </div>
-        )}
-        {sharingStatus?.transportWarning && <p className="connection-error" role="alert">{sharingStatus.transportWarning}</p>}
-        <p className="managed-runtime-note">
-          Lumen Source does not open firewall ports or configure your router. For internet or untrusted-network use, terminate TLS and enforce network policy in a trusted reverse proxy.
-        </p>
       </section>
 
       <section className="settings-section" aria-labelledby="settings-storage">
@@ -783,8 +881,12 @@ export function SettingsPage({
           <p>{text.settings.privacy.description}</p>
         </div>
         <div className="settings-grid">
-          <label className="check-setting">
+          <label
+            ref={telemetrySetting}
+            className={`check-setting telemetry-setting-target${telemetryHighlighted ? " highlighted" : ""}`}
+          >
             <input
+              ref={telemetryInput}
               type="checkbox"
               checked={draft.privacy.telemetryEnabled}
               onChange={(event) => update((next) => { next.privacy.telemetryEnabled = event.target.checked; })}
@@ -837,6 +939,7 @@ export function SettingsPage({
             onChange={(event) => void restoreStateBackup(event.target.files?.[0])}
           />
         </div>
+        {supportNotice && <p className="settings-saved support-notice" role="status">{supportNotice}</p>}
         <p className="managed-runtime-note">
           Diagnostics exclude secrets, prompts, responses, user paths, hostnames, and raw addresses. State backups exclude credential-store secrets.
         </p>

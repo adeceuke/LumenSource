@@ -70,6 +70,7 @@ export interface Recommendation {
   contextWindow: number;
   runtimeDigest?: string;
   labels: string[];
+  externalEvaluations: ExternalEvaluation[];
   estimatedLoadedMemoryMinBytes: number;
   estimatedLoadedMemoryMaxBytes: number;
   fit: "ideal" | "good" | "limited" | "incompatible";
@@ -77,6 +78,16 @@ export interface Recommendation {
   recommended: boolean;
   compatible: boolean;
   license: ModelLicense;
+}
+
+export interface ExternalEvaluation {
+  publisher: string;
+  leaderboardName: string;
+  sourceModelName: string;
+  overallTier: "S" | "A" | "B" | "C" | "D";
+  notes: string;
+  sourceUrl: string;
+  retrievedAt: string;
 }
 
 export interface ModelLicense {
@@ -234,7 +245,7 @@ export interface InstallationValidationReport {
 
 export interface InstallProgress {
   modelId: string;
-  phase: "preparing" | "downloading" | "verifying" | "installing" | "complete" | "cancelled";
+  phase: "preparing" | "downloading" | "verifying" | "installing" | "validating" | "complete" | "cancelled" | "failed";
   completedBytes: number;
   totalBytes: number;
   currentItem?: number;

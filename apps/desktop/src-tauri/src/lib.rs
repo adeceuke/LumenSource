@@ -14,6 +14,8 @@ pub mod telemetry;
 use bridge::SharedCoreAdapter;
 use tauri::Manager;
 
+const WINDOW_ICON: tauri::image::Image<'static> = tauri::include_image!("./icons/128x128.png");
+
 pub fn run() {
     if let Some(exit_code) = remote::run_askpass_helper_if_requested() {
         std::process::exit(exit_code);
@@ -40,10 +42,8 @@ pub fn run() {
                     eprintln!("could not start configured sharing gateway: {error}");
                 }
             });
-            if let (Some(window), Some(icon)) =
-                (app.get_webview_window("main"), app.default_window_icon())
-            {
-                window.set_icon(icon.clone())?;
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(WINDOW_ICON.clone())?;
             }
             Ok(())
         })
@@ -59,7 +59,9 @@ pub fn run() {
             commands::revoke_sharing_token,
             commands::configure_sharing,
             commands::diagnostic_bundle,
+            commands::export_diagnostic_bundle_file,
             commands::export_state_backup,
+            commands::export_state_backup_file,
             commands::restore_state_backup,
             commands::safe_reset,
             commands::storage_report,
@@ -72,6 +74,7 @@ pub fn run() {
             commands::discard_interrupted_install,
             commands::test_ollama_connection,
             commands::restart_managed_ollama,
+            commands::repair_managed_ollama,
             commands::runtime_secret_status,
             commands::save_runtime_secret,
             commands::delete_runtime_secret,
@@ -95,6 +98,8 @@ pub fn run() {
             commands::machine_usage,
             commands::load_remote_targets,
             commands::save_remote_target,
+            commands::update_remote_target,
+            commands::remove_remote_target,
             commands::check_remote_target,
             commands::remote_credential_status,
             commands::save_remote_password,

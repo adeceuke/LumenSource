@@ -33,11 +33,12 @@ The guided wizard uses the shared hardware, catalog, recommendation, host, and
 runtime crates for the local flow: it detects hardware (including CPU frequency
 and best-effort RAM generation/speed), ranks compatible catalog variants, lets
 the user choose the recommendation or any supported catalog variant, shows
-preflight checks directly in the recommendation detail, requires a separate
-license review, reports installation progress, starts the model when requested,
-and displays OpenAI-compatible endpoint details. Changing the model selection
-updates one shared detail panel; incompatible catalog entries remain visible
-with their rejection reasons.
+attributed external overall tiers when present, uses higher tiers to promote
+compatible choices, shows preflight checks directly in the recommendation
+detail, requires a separate license review, reports installation progress,
+starts the model when requested, and displays OpenAI-compatible endpoint
+details. Changing the model selection updates one shared detail panel;
+incompatible catalog entries remain visible with their rejection reasons.
 
 The installation step includes a **Start model after installation** checkbox,
 enabled by default. Clearing it installs the model without loading it; the
@@ -170,13 +171,16 @@ The wizard selects from saved non-secret target
 profiles; **Add target machine** opens the connection-settings dialog and
 selects the new target after saving. SSH keys and agents are preferred; a
 password can remain session-only or be saved securely for automatic reconnects
-on Unix controllers; Windows controllers currently require key authentication.
+on Linux and Windows controllers. Passwords are passed to OpenSSH through a
+private Unix socket or local Windows named pipe and can be saved in the
+operating-system credential store.
 Remove stops the selected model when necessary,
 deletes it from the selected Ollama model store, and clears its Lumen Source entries. See
 [current implementation](../../docs/current-implementation.md) for the complete
 behavior and limitations.
 
-Desktop and mobile packaging icons are generated from the repository's current
-Lumen Source `icon.png`. The desktop process also applies the generated default
-icon explicitly to its main window so Linux development sessions do not use a
-generic fallback icon.
+Desktop and mobile packaging icons are generated from the approved high-resolution
+`apps/desktop/app-icon.png` source with `npm run tauri -- icon app-icon.png`. The
+repository-level `icon.png` is the optimized UI export used by the navigation
+brand mark. The desktop process also applies the generated default icon explicitly
+to its main window so Linux development sessions do not use a generic fallback icon.

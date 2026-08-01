@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use lumen_source_catalog::License;
+use lumen_source_catalog::{ExternalEvaluation, License};
 use lumen_source_hardware::{AcceleratorKind, HardwareFacts, UsageSnapshot};
 use serde::{Deserialize, Serialize};
 
@@ -412,6 +412,7 @@ pub struct Recommendation {
     pub context_window: u32,
     pub runtime_digest: Option<String>,
     pub labels: Vec<String>,
+    pub external_evaluations: Vec<ExternalEvaluationSummary>,
     pub estimated_loaded_memory_min_bytes: u64,
     pub estimated_loaded_memory_max_bytes: u64,
     pub fit: String,
@@ -419,6 +420,32 @@ pub struct Recommendation {
     pub recommended: bool,
     pub compatible: bool,
     pub license: LicenseSummary,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalEvaluationSummary {
+    pub publisher: String,
+    pub leaderboard_name: String,
+    pub source_model_name: String,
+    pub overall_tier: String,
+    pub notes: String,
+    pub source_url: String,
+    pub retrieved_at: String,
+}
+
+impl From<&ExternalEvaluation> for ExternalEvaluationSummary {
+    fn from(evaluation: &ExternalEvaluation) -> Self {
+        Self {
+            publisher: evaluation.publisher.clone(),
+            leaderboard_name: evaluation.leaderboard_name.clone(),
+            source_model_name: evaluation.source_model_name.clone(),
+            overall_tier: evaluation.overall_tier.as_str().to_owned(),
+            notes: evaluation.notes.clone(),
+            source_url: evaluation.source.url.clone(),
+            retrieved_at: evaluation.source.retrieved_at.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]

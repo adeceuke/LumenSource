@@ -28,7 +28,8 @@ pub use crate::bridge_types::*;
 use crate::credential_store;
 use crate::managed_vllm::{self, ManagedVllmSpec, ManagedVllmSupport};
 use crate::model_reconciliation::{
-    reconcile_models, reconcile_unavailable_models, same_ollama_reference, with_remote_models,
+    reconcile_models, reconcile_remote_models, reconcile_unavailable_models, same_ollama_reference,
+    with_remote_models,
 };
 use crate::remote::{
     connect as connect_remote, probe_hardware as probe_remote_hardware,
@@ -51,13 +52,16 @@ use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, Te
 const BUNDLED_CATALOG: &[u8] = include_bytes!("../../../../catalog/model-list.json");
 const PRODUCTION_CATALOG_URL: &str = "https://lumensource.dev/v2/model-list.json";
 const PRODUCTION_CATALOG_SIGNATURE_URL: &str = "https://lumensource.dev/v2/model-list.json.sig";
-const PRODUCTION_CATALOG_PUBLIC_KEY: &str = "r3ICuFyaSuGGQwO/xKO6sxjEiJJHAqjO+FSknV583q0=";
+const PRODUCTION_CATALOG_PUBLIC_KEY: &str = "2DmtSGlkHNVg0Ktm6fYb4VVNQdg6QM2V2a5BuDeW/QI=";
 #[cfg(test)]
 const TEST_CATALOG: &[u8] = include_bytes!("../../../../catalog/fixtures/catalog.v1.valid.json");
 #[cfg(debug_assertions)]
 const DEVELOPMENT_CATALOG: &[u8] =
     include_bytes!("../../../../catalog/fixtures/catalog.v1.valid.json");
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+const VALIDATION_TIMEOUT_SECS: u64 = 180;
+const VALIDATION_INFERENCE_TIMEOUT_SECS: u64 = 150;
+const VALIDATION_CLEANUP_TIMEOUT_SECS: u64 = 5;
 
 struct LoadedCatalog {
     catalog: Catalog,
@@ -948,6 +952,18 @@ impl SharedCoreAdapter {
         variant_id: Option<&str>,
     ) -> Result<Vec<PersistedModelEntry>, String> {
         if action == "rescan" || action == "reconnect" {
+            let entry = self
+                .state
+                .read()
+                .await
+                .models
+                .iter()
+                .find(|model| model.id == entry_id)
+                .cloned()
+                .ok_or_else(|| "The inventory entry no longer exists.".to_owned())?;
+            if entry.target_id != "local" && entry.runtime_id == OLLAMA_RUNTIME {
+                return self.refresh_remote_inventory(&entry.target_id).await;
+            }
             return self.load_models().await;
         }
         if action == "forget" {
@@ -1142,6 +1158,110 @@ impl SharedCoreAdapter {
         Ok(self.test_ollama_connection(settings).await)
     }
 
+    pub async fn repair_managed_ollama(
+        &self,
+        app: &AppHandle,
+    ) -> Result<OllamaConnectionReport, String> {
+        let current_executable = self.runtime.executable_path().await;
+        let catalog = self.catalog_clone().await?;
+        let (artifact, version) = runtime_artifact(&catalog, OLLAMA_RUNTIME)?;
+        let install_dir = managed_ollama_root()?.join(OLLAMA_RUNTIME).join(version);
+        let managed_executable = install_dir.join(if cfg!(target_os = "windows") {
+            "ollama.exe"
+        } else {
+            "bin/ollama"
+        });
+        if managed_ollama_install_dir(&current_executable).is_none()
+            && !managed_executable.is_file()
+        {
+            return Err(
+                "No Lumen Source-managed Ollama installation was found. This Ollama service is installed outside Lumen Source and must be repaired by its owner."
+                    .to_owned(),
+            );
+        }
+        let stopped = self
+            .runtime
+            .stop_managed_server()
+            .await
+            .map_err(|error| error.to_string())?;
+        if !stopped && self.runtime.health().await.is_ok() {
+            return Err(
+                "Ollama is running outside this Lumen Source session. Close that Ollama process, then retry the managed-runtime repair."
+                    .to_owned(),
+            );
+        }
+
+        let repair_id = "ollama-runtime-repair";
+        app.emit(
+            "install-progress",
+            progress(
+                repair_id,
+                "preparing",
+                0,
+                0,
+                None,
+                None,
+                "prepareRuntimeRepair",
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+        let progress_app = app.clone();
+        let pull_items = StdMutex::new(PullItemTracker::default());
+        let reporter = move |event| {
+            let payload = runtime_progress(repair_id, 0, None, &pull_items, event);
+            let _ = progress_app.emit("install-progress", payload);
+        };
+        let installer = ArtifactInstaller::default();
+        let cancellation = CancellationToken::new();
+        let executable = if artifact.executable_name.ends_with(".zip") {
+            installer
+                .install_zip_cancellable(
+                    &artifact,
+                    &install_dir,
+                    std::path::Path::new("ollama.exe"),
+                    &reporter,
+                    &cancellation,
+                )
+                .await
+        } else {
+            installer
+                .install_tar_zst_cancellable(
+                    &artifact,
+                    &install_dir,
+                    std::path::Path::new("bin/ollama"),
+                    &reporter,
+                    &cancellation,
+                )
+                .await
+        }
+        .map_err(|error| {
+            format!(
+                "Could not repair the managed Ollama runtime: {error}. Close any process using the managed runtime files and retry."
+            )
+        })?;
+        ensure_managed_ollama_distribution_complete(&executable)?;
+        self.runtime.set_executable(executable).await;
+        self.persist_state().await?;
+        self.runtime
+            .ensure_running()
+            .await
+            .map_err(|error| error.to_string())?;
+        app.emit(
+            "install-progress",
+            progress(
+                repair_id,
+                "complete",
+                1,
+                1,
+                None,
+                None,
+                "runtimeRepairComplete",
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(self.test_ollama_connection(self.settings().await?).await)
+    }
+
     pub async fn test_vllm_connection(
         &self,
         config: ExternalVllmConfig,
@@ -1314,7 +1434,8 @@ impl SharedCoreAdapter {
         } else {
             let response_bytes = StdMutex::new(0_usize);
             let reporter = |progress| {
-                if let ChatProgress::Content(content) = progress {
+                if let ChatProgress::Content(content) | ChatProgress::Reasoning(content) = progress
+                {
                     if let Ok(mut total) = response_bytes.lock() {
                         *total = total.saturating_add(content.trim().len());
                     }
@@ -1847,6 +1968,7 @@ impl SharedCoreAdapter {
                         .await
                 }
                 .map_err(|error| format!("Could not install the runtime candidate: {error}"))?;
+                ensure_managed_ollama_distribution_complete(&candidate)?;
                 self.runtime.set_executable(candidate).await;
                 if let Err(error) = self.runtime.restart_managed_server().await {
                     self.runtime.set_executable(previous.clone()).await;
@@ -2727,7 +2849,7 @@ impl SharedCoreAdapter {
             } else {
                 let response_bytes = StdMutex::new(0_usize);
                 let reporter = |progress| {
-                    if let ChatProgress::Content(content) = progress {
+                    if let ChatProgress::Content(content) | ChatProgress::Reasoning(content) = progress {
                         if let Ok(mut total) = response_bytes.lock() {
                             *total = total.saturating_add(content.trim().len());
                         }
@@ -2965,6 +3087,118 @@ impl SharedCoreAdapter {
         }
         self.flush_state().await?;
         Ok(profile)
+    }
+
+    pub async fn update_remote_target(
+        &self,
+        original_target_id: &str,
+        config: RemoteTargetConfig,
+    ) -> Result<RemoteTargetProfile, String> {
+        let config = config.normalized();
+        config.validate()?;
+        let profile = RemoteTargetProfile::from(config.clone());
+        let new_authentication = config.authentication;
+        let existing = {
+            let state = self.state.read().await;
+            if state.remote_targets.iter().any(|target| {
+                target.target_id() == profile.target_id && target.target_id() != original_target_id
+            }) {
+                return Err("Another machine already uses these SSH connection details.".to_owned());
+            }
+            state
+                .remote_targets
+                .iter()
+                .find(|target| target.target_id() == original_target_id)
+                .cloned()
+                .ok_or_else(|| "The machine is no longer configured.".to_owned())?
+        };
+
+        let target_id_changed = profile.target_id != original_target_id;
+        let saved_password = if target_id_changed
+            && existing.authentication == RemoteAuthentication::Password
+            && config.authentication == RemoteAuthentication::Password
+        {
+            credential_store::load_password(original_target_id.to_owned()).await?
+        } else {
+            None
+        };
+        if let Some(password) = saved_password {
+            credential_store::save_password(profile.target_id.clone(), password).await?;
+        }
+
+        {
+            let mut state = self.state.write().await;
+            let target = state
+                .remote_targets
+                .iter_mut()
+                .find(|target| target.target_id() == original_target_id)
+                .ok_or_else(|| "The machine is no longer configured.".to_owned())?;
+            *target = config;
+            for model in state
+                .models
+                .iter_mut()
+                .filter(|model| model.target_id == original_target_id)
+            {
+                model.target_id = profile.target_id.clone();
+                model.target_name = Some(profile.target_name.clone());
+            }
+        }
+        if self
+            .remote_session
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|session| session.target_id() == original_target_id)
+        {
+            *self.remote_session.write().await = None;
+        }
+        self.flush_state().await?;
+
+        if target_id_changed || new_authentication != RemoteAuthentication::Password {
+            credential_store::delete_password(original_target_id.to_owned()).await?;
+        }
+        Ok(profile)
+    }
+
+    pub async fn remove_remote_target(&self, target_id: &str) -> Result<(), String> {
+        let model_count = {
+            let state = self.state.read().await;
+            if !state
+                .remote_targets
+                .iter()
+                .any(|target| target.target_id() == target_id)
+            {
+                return Err("The machine is no longer configured.".to_owned());
+            }
+            state
+                .models
+                .iter()
+                .filter(|model| model.target_id == target_id)
+                .count()
+        };
+        if model_count > 0 {
+            return Err(format!(
+                "Remove the {model_count} model{} installed on this machine before removing the machine.",
+                if model_count == 1 { "" } else { "s" }
+            ));
+        }
+
+        credential_store::delete_password(target_id.to_owned()).await?;
+        self.state
+            .write()
+            .await
+            .remote_targets
+            .retain(|target| target.target_id() != target_id);
+        if self
+            .remote_session
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|session| session.target_id() == target_id)
+        {
+            *self.remote_session.write().await = None;
+        }
+        self.flush_state().await
     }
 
     pub async fn check_remote_target(
@@ -3289,6 +3523,11 @@ impl SharedCoreAdapter {
                 context_window: variant.context_window_tokens.unwrap_or(32_768),
                 runtime_digest: variant.runtime_digest.clone(),
                 labels: recommendation_labels(model, variant, true),
+                external_evaluations: variant
+                    .external_evaluations
+                    .iter()
+                    .map(ExternalEvaluationSummary::from)
+                    .collect(),
                 estimated_loaded_memory_min_bytes: estimated_loaded_memory(variant).0,
                 estimated_loaded_memory_max_bytes: estimated_loaded_memory(variant).1,
                 fit: if item.score >= 60.0 {
@@ -3332,6 +3571,11 @@ impl SharedCoreAdapter {
                 context_window: variant.context_window_tokens.unwrap_or(32_768),
                 runtime_digest: variant.runtime_digest.clone(),
                 labels: recommendation_labels(model, variant, false),
+                external_evaluations: variant
+                    .external_evaluations
+                    .iter()
+                    .map(ExternalEvaluationSummary::from)
+                    .collect(),
                 estimated_loaded_memory_min_bytes: estimated_loaded_memory(variant).0,
                 estimated_loaded_memory_max_bytes: estimated_loaded_memory(variant).1,
                 fit: "incompatible".to_owned(),
@@ -3446,9 +3690,14 @@ impl SharedCoreAdapter {
         let required = (variant.requirements.min_storage_gb * GIB).ceil() as u64;
         let available = facts.storage.available_bytes;
         let is_dummy = variant.runtime == DUMMY_RUNTIME;
+        let configured_executable = self.runtime.executable_path().await;
+        let managed_runtime_incomplete = managed_ollama_install_dir(&configured_executable)
+            .is_some()
+            && ensure_managed_ollama_distribution_complete(&configured_executable).is_err();
         let runtime_available = is_dummy
-            || self.runtime.health().await.is_ok()
-            || self.runtime.executable_available().await;
+            || (!managed_runtime_incomplete
+                && (self.runtime.health().await.is_ok()
+                    || self.runtime.executable_available().await));
         let runtime_artifact = (!is_dummy).then(|| runtime_artifact(&catalog, &variant.runtime));
         let runtime_installable = runtime_artifact.as_ref().is_some_and(Result::is_ok);
         let (runtime_key, runtime_detail) = if is_dummy {
@@ -3740,6 +3989,10 @@ impl SharedCoreAdapter {
                 .map_err(|error| error.to_string())?;
         } else if target_id == "local" {
             cancellation.check().map_err(|error| error.to_string())?;
+            let configured_executable = self.runtime.executable_path().await;
+            let managed_runtime_incomplete = managed_ollama_install_dir(&configured_executable)
+                .is_some()
+                && ensure_managed_ollama_distribution_complete(&configured_executable).is_err();
             let runtime_healthy = tokio::select! {
                 _ = cancellation.cancelled() => return Err("installation cancelled".to_owned()),
                 result = self.runtime.health() => result.is_ok(),
@@ -3752,12 +4005,25 @@ impl SharedCoreAdapter {
                     available = self.runtime.executable_available() => available,
                 }
             };
-            if !runtime_healthy && !executable_available {
-                if !install_runtime {
+            if managed_runtime_incomplete || (!runtime_healthy && !executable_available) {
+                if !managed_runtime_incomplete && !install_runtime {
                     return Err(
                         "Ollama is not installed. Select the option to install Ollama, or install it separately and retry."
                             .to_owned(),
                     );
+                }
+                if managed_runtime_incomplete {
+                    let stopped = self
+                        .runtime
+                        .stop_managed_server()
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    if !stopped && runtime_healthy {
+                        return Err(
+                            "The managed Ollama runtime is incomplete, but its server is running outside this Lumen Source session. Close that Ollama process and retry so Lumen Source can repair the verified runtime files."
+                                .to_owned(),
+                        );
+                    }
                 }
                 let (artifact, version) = runtime_artifact(&catalog, &variant.runtime)?;
                 let data_root = dirs::data_local_dir()
@@ -3789,6 +4055,7 @@ impl SharedCoreAdapter {
                         .await
                 }
                 .map_err(|error| error.to_string())?;
+                ensure_managed_ollama_distribution_complete(&executable)?;
                 self.runtime.set_executable(executable).await;
             }
             cancellation.check().map_err(|error| error.to_string())?;
@@ -3957,6 +4224,10 @@ impl SharedCoreAdapter {
                     .runtime_for_target_with_password(&target_id, password)
                     .await?;
                 if target_id == "local" {
+                    let executable = self.runtime.executable_path().await;
+                    if managed_ollama_install_dir(&executable).is_some() {
+                        ensure_managed_ollama_distribution_complete(&executable)?;
+                    }
                     runtime
                         .ensure_running()
                         .await
@@ -4134,6 +4405,26 @@ impl SharedCoreAdapter {
         profile: PerformanceProfile,
         leave_running: bool,
     ) -> Result<InstallationValidationReport, String> {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(VALIDATION_TIMEOUT_SECS),
+            self.validate_installation_inner(variant_id, target_id, profile, leave_running),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "Validation stopped after {VALIDATION_TIMEOUT_SECS} seconds. The model download was retained, but Lumen Source did not receive a complete first response from the runtime."
+            )),
+        }
+    }
+
+    async fn validate_installation_inner(
+        &self,
+        variant_id: &str,
+        target_id: &str,
+        profile: PerformanceProfile,
+        leave_running: bool,
+    ) -> Result<InstallationValidationReport, String> {
         let catalog = self.catalog_clone().await?;
         let (model, variant) = find_variant(&catalog, variant_id)?;
         ensure_supported_runtime(variant)?;
@@ -4198,8 +4489,33 @@ impl SharedCoreAdapter {
                 variant.runtime
             ));
         }
+        if target_id == "local" {
+            let executable = self.runtime.executable_path().await;
+            if managed_ollama_install_dir(&executable).is_some() {
+                if let Err(error) = ensure_managed_ollama_distribution_complete(&executable) {
+                    checks.push(validation_check("runtime", "fail", &error));
+                    return Ok(failed_validation_report(
+                        variant,
+                        capability,
+                        settings,
+                        checks,
+                        "The managed Ollama runtime is incomplete. Repair it in Settings; the downloaded model will be retained.",
+                    ));
+                }
+            }
+        }
         let runtime = self.runtime_for_target(target_id).await?;
-        if let Err(error) = runtime.health().await {
+        let health_error = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            runtime.health(),
+        )
+        .await
+        {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some("the health check timed out after 15 seconds".to_owned()),
+        };
+        if let Some(error) = health_error {
             checks.push(validation_check(
                 "runtime",
                 "fail",
@@ -4219,13 +4535,32 @@ impl SharedCoreAdapter {
             "Ollama responded to its health check.",
         ));
 
-        let installed = match runtime.installed_models().await {
-            Ok(installed) => installed,
-            Err(error) => {
+        let installed = match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            runtime.installed_models(),
+        )
+        .await
+        {
+            Ok(Ok(installed)) => installed,
+            Ok(Err(error)) => {
                 checks.push(validation_check(
                     "identity",
                     "fail",
                     &format!("The installed-model list could not be read: {error}"),
+                ));
+                return Ok(failed_validation_report(
+                    variant,
+                    capability,
+                    settings,
+                    checks,
+                    "The runtime model identity could not be verified.",
+                ));
+            }
+            Err(_) => {
+                checks.push(validation_check(
+                    "identity",
+                    "fail",
+                    "The installed-model list timed out after 30 seconds.",
                 ));
                 return Ok(failed_validation_report(
                     variant,
@@ -4259,80 +4594,102 @@ impl SharedCoreAdapter {
             "Ollama reported the expected model identity.",
         ));
 
-        let inference_result = if model_is_embedding_only(model) {
-            runtime
-                .embedding_dimensions(&variant.runtime_ref, -1)
-                .await
-                .map(|dimensions| {
-                    checks.push(validation_check(
-                        "inference",
-                        "pass",
-                        &format!("Ollama returned a non-empty {dimensions}-dimension embedding."),
-                    ));
-                })
-        } else {
-            let response_bytes = StdMutex::new(0_usize);
-            let reporter = |progress| {
-                if let ChatProgress::Content(content) = progress {
-                    if let Ok(mut total) = response_bytes.lock() {
-                        *total = total.saturating_add(content.trim().len());
-                    }
-                }
-            };
-            let mut options = chat_options(&settings);
-            options.temperature = Some(0.0);
-            options.max_output_tokens = Some(8);
-            options.keep_alive = Some("-1".to_owned());
-            let cancellation = CancellationToken::new();
-            runtime
-                .chat_with_options_cancellable(
-                    &variant.runtime_ref,
-                    &[ChatMessage {
-                        role: "user".to_owned(),
-                        content: "Reply with OK.".to_owned(),
-                    }],
-                    &options,
-                    &reporter,
-                    &cancellation,
-                )
-                .await
-                .and_then(|()| {
-                    let response_bytes = response_bytes
-                        .lock()
-                        .map(|total| *total)
-                        .unwrap_or_default();
-                    if response_bytes == 0 {
-                        Err(RuntimeError::Remote(
-                            "Ollama returned an empty validation response".to_owned(),
-                        ))
-                    } else {
+        let inference_result = tokio::time::timeout(
+            std::time::Duration::from_secs(VALIDATION_INFERENCE_TIMEOUT_SECS),
+            async {
+            if model_is_embedding_only(model) {
+                runtime
+                    .embedding_dimensions(&variant.runtime_ref, -1)
+                    .await
+                    .map(|dimensions| {
                         checks.push(validation_check(
                             "inference",
                             "pass",
-                            "Ollama returned a non-empty deterministic validation response.",
+                            &format!(
+                                "Ollama returned a non-empty {dimensions}-dimension embedding."
+                            ),
                         ));
-                        Ok(())
+                    })
+            } else {
+                let response_bytes = StdMutex::new(0_usize);
+                let reporter = |progress| {
+                    if let ChatProgress::Content(content) | ChatProgress::Reasoning(content) = progress {
+                        if let Ok(mut total) = response_bytes.lock() {
+                            *total = total.saturating_add(content.trim().len());
+                        }
                     }
-                })
-        };
+                };
+                let mut options = chat_options(&settings);
+                options.temperature = Some(0.0);
+                options.max_output_tokens = Some(8);
+                options.keep_alive = Some("-1".to_owned());
+                let cancellation = CancellationToken::new();
+                runtime
+                    .chat_with_options_cancellable(
+                        &variant.runtime_ref,
+                        &[ChatMessage {
+                            role: "user".to_owned(),
+                            content: "Reply with OK.".to_owned(),
+                        }],
+                        &options,
+                        &reporter,
+                        &cancellation,
+                    )
+                    .await
+                    .and_then(|()| {
+                        let response_bytes = response_bytes
+                            .lock()
+                            .map(|total| *total)
+                            .unwrap_or_default();
+                        if response_bytes == 0 {
+                            Err(RuntimeError::Remote(
+                                "Ollama returned an empty validation response".to_owned(),
+                            ))
+                        } else {
+                            checks.push(validation_check(
+                                "inference",
+                                "pass",
+                                "Ollama returned a non-empty deterministic validation response.",
+                            ));
+                            Ok(())
+                        }
+                    })
+            }
+            },
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(RuntimeError::Remote(
+                format!(
+                    "Ollama did not return the first validation response within {VALIDATION_INFERENCE_TIMEOUT_SECS} seconds"
+                ),
+            ))
+        });
 
         if let Err(error) = inference_result {
+            let validation_message = inference_validation_failure_message(&error.to_string());
             checks.push(validation_check(
                 "inference",
                 "fail",
                 &format!("The validation request failed: {error}"),
             ));
-            let _ = if model_is_embedding_only(model) {
-                runtime.stop_embedding(&variant.runtime_ref).await
-            } else {
-                runtime.stop(&variant.runtime_ref).await
-            };
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(VALIDATION_CLEANUP_TIMEOUT_SECS),
+                async {
+                    if model_is_embedding_only(model) {
+                        runtime.stop_embedding(&variant.runtime_ref).await
+                    } else {
+                        runtime.stop(&variant.runtime_ref).await
+                    }
+                },
+            )
+            .await;
             return Ok(failed_validation_report(
                 variant,
                 capability,
                 settings,
                 checks,
-                "The model was downloaded, but it did not produce a valid response.",
+                &validation_message,
             ));
         }
 
@@ -4397,16 +4754,28 @@ impl SharedCoreAdapter {
         ));
 
         if !leave_running {
-            let stop_result = if model_is_embedding_only(model) {
-                runtime.stop_embedding(&variant.runtime_ref).await
-            } else {
-                runtime.stop(&variant.runtime_ref).await
-            };
-            if let Err(error) = stop_result {
+            let stop_result = tokio::time::timeout(
+                std::time::Duration::from_secs(VALIDATION_CLEANUP_TIMEOUT_SECS),
+                async {
+                    if model_is_embedding_only(model) {
+                        runtime.stop_embedding(&variant.runtime_ref).await
+                    } else {
+                        runtime.stop(&variant.runtime_ref).await
+                    }
+                },
+            )
+            .await;
+            if let Ok(Err(error)) = stop_result {
                 checks.push(validation_check(
                     "unload",
                     "warning",
                     &format!("Validation passed, but the temporary model load could not be released: {error}"),
+                ));
+            } else if stop_result.is_err() {
+                checks.push(validation_check(
+                    "unload",
+                    "warning",
+                    "Validation passed, but releasing the temporary model load timed out after 5 seconds.",
                 ));
             }
         }
@@ -4683,6 +5052,7 @@ impl SharedCoreAdapter {
 
         let chat_reporter = |progress| match progress {
             ChatProgress::Content(content) => reporter(ChatEvent::Delta { content }),
+            ChatProgress::Reasoning(_) => {}
             ChatProgress::Done => reporter(ChatEvent::Done),
         };
         let options = self
@@ -4764,6 +5134,7 @@ impl SharedCoreAdapter {
         }
         let chat_reporter = |progress| match progress {
             ChatProgress::Content(content) => reporter(ChatEvent::Delta { content }),
+            ChatProgress::Reasoning(_) => {}
             ChatProgress::Done => reporter(ChatEvent::Done),
         };
         let result = runtime
@@ -4974,6 +5345,60 @@ impl SharedCoreAdapter {
         );
         let mut models = with_remote_models(models, remote_persisted);
         models.extend(vllm_persisted);
+        models.sort_by_key(|model| model.name.to_ascii_lowercase());
+        self.replace_models(models.clone()).await?;
+        Ok(models)
+    }
+
+    async fn refresh_remote_inventory(
+        &self,
+        target_id: &str,
+    ) -> Result<Vec<PersistedModelEntry>, String> {
+        let (target_models, other_models, target_name) = {
+            let state = self.state.read().await;
+            let (target_models, other_models): (Vec<_>, Vec<_>) = state
+                .models
+                .iter()
+                .cloned()
+                .partition(|model| model.target_id == target_id);
+            let target_name = target_models
+                .first()
+                .and_then(|model| model.target_name.clone())
+                .or_else(|| {
+                    state
+                        .remote_targets
+                        .iter()
+                        .find(|target| target.target_id() == target_id)
+                        .cloned()
+                        .map(RemoteTargetProfile::from)
+                        .map(|profile| profile.target_name)
+                })
+                .unwrap_or_else(|| target_id.to_owned());
+            (target_models, other_models, target_name)
+        };
+        if target_models.is_empty() {
+            return Err("No models are associated with this remote machine.".to_owned());
+        }
+
+        let runtime = self.runtime_for_target(target_id).await?;
+        let installed = runtime
+            .installed_models()
+            .await
+            .map_err(|error| error.to_string())?;
+        let running = match runtime.status().await.map_err(|error| error.to_string())? {
+            CoreRuntimeStatus::Running { models } => models,
+            CoreRuntimeStatus::Unavailable | CoreRuntimeStatus::Idle => Vec::new(),
+        };
+        let catalog = self.catalog_clone().await?;
+        let refreshed = reconcile_remote_models(
+            catalog,
+            target_models,
+            installed,
+            &running,
+            target_id,
+            &target_name,
+        );
+        let mut models = with_remote_models(other_models, refreshed);
         models.sort_by_key(|model| model.name.to_ascii_lowercase());
         self.replace_models(models.clone()).await?;
         Ok(models)
@@ -5537,6 +5962,44 @@ fn default_ollama_executable() -> PathBuf {
     PathBuf::from("ollama")
 }
 
+fn managed_ollama_root() -> Result<PathBuf, String> {
+    dirs::data_local_dir()
+        .map(|directory| directory.join("lumen-source").join("runtimes"))
+        .ok_or_else(|| "No local application data directory is available".to_owned())
+}
+
+fn managed_ollama_install_dir(executable: &std::path::Path) -> Option<PathBuf> {
+    let root = managed_ollama_root().ok()?.join(OLLAMA_RUNTIME);
+    let parent = executable.parent()?;
+    (parent != root && parent.starts_with(&root)).then(|| parent.to_path_buf())
+}
+
+fn ensure_managed_ollama_distribution_complete(executable: &std::path::Path) -> Result<(), String> {
+    if !executable.is_file() {
+        return Err(format!(
+            "The managed Ollama executable is missing at {}.",
+            executable.display()
+        ));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let install_dir = executable.parent().ok_or_else(|| {
+            "The managed Ollama executable has no installation directory.".to_owned()
+        })?;
+        let llama_server = install_dir
+            .join("lib")
+            .join("ollama")
+            .join("llama-server.exe");
+        if !llama_server.is_file() {
+            return Err(format!(
+                "The managed Ollama distribution is incomplete: {} is missing. Repair managed Ollama in Settings before starting a model.",
+                llama_server.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn shareable_model(model: &PersistedModelEntry) -> bool {
     model.managed
         && model.target_id == "local"
@@ -6016,6 +6479,35 @@ fn validation_check(id: &str, status: &str, detail: &str) -> InstallationValidat
         status: status.to_owned(),
         detail: detail.to_owned(),
     }
+}
+
+fn inference_validation_failure_message(detail: &str) -> String {
+    let normalized = detail.to_ascii_lowercase();
+    if normalized.contains("llama-server binary not found") {
+        return "The model download is complete, but Ollama is missing its llama-server backend. Repair managed Ollama in Settings; if Ollama is managed outside Lumen Source, reinstall that Ollama service. The downloaded model will be retained.".to_owned();
+    }
+    if normalized.contains("out of memory")
+        || normalized.contains("memory allocation")
+        || normalized.contains("requires more system memory")
+    {
+        return "The model download is complete, but Ollama could not allocate enough memory for the first response. Retry with the Safe profile or close other memory-intensive applications. The downloaded model will be retained.".to_owned();
+    }
+    if normalized.contains("timed out") || normalized.contains("did not return") {
+        return "The model download is complete, but Ollama did not finish the first private validation response before the timeout. The downloaded model will be retained; retry validation after checking Ollama and available memory.".to_owned();
+    }
+    if normalized.contains("empty validation response") {
+        return "The model download is complete, but Ollama returned an empty response to the first private validation prompt. The downloaded model will be retained.".to_owned();
+    }
+
+    let concise = detail.chars().take(320).collect::<String>();
+    let suffix = if detail.chars().count() > 320 {
+        "..."
+    } else {
+        ""
+    };
+    format!(
+        "The model download is complete, but the first private validation request failed: {concise}{suffix}"
+    )
 }
 
 fn failed_validation_report(
@@ -6665,6 +7157,33 @@ mod tests {
     }
 
     #[test]
+    fn remote_reconciliation_preserves_target_and_live_runtime_state() {
+        let Ok(catalog) = Catalog::from_slice(TEST_CATALOG) else {
+            panic!("bundled test catalog should parse");
+        };
+        let models = reconcile_remote_models(
+            catalog,
+            Vec::new(),
+            vec![InstalledModel {
+                name: "qwen2.5-coder:14b".to_owned(),
+                digest: Some("sha256:qwen".to_owned()),
+                size_bytes: Some(9_000),
+            }],
+            &["qwen2.5-coder:14b".to_owned()],
+            "ssh:lumen@192.168.2.111:22",
+            "Ubuntu workstation",
+        );
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].inventory_status, "available");
+        assert_eq!(models[0].location, "remote");
+        assert_eq!(models[0].target_id, "ssh:lumen@192.168.2.111:22");
+        assert_eq!(models[0].target_name.as_deref(), Some("Ubuntu workstation"));
+        assert!(models[0].running);
+        assert!(models[0].last_seen_at.is_some());
+    }
+
+    #[test]
     fn reconciliation_preserves_multiple_entries_for_the_same_ollama_model() {
         let Ok(catalog) = Catalog::from_slice(TEST_CATALOG) else {
             panic!("bundled test catalog should parse");
@@ -7068,5 +7587,51 @@ mod tests {
         assert!(!serialized.contains("\"password\""));
         assert!(!serialized.contains("\"apiKey\""));
         assert!(!serialized.contains("\"secret\""));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn managed_windows_ollama_requires_its_llama_server_companion() {
+        let Ok(directory) = tempfile::tempdir() else {
+            panic!("temporary directory should be available");
+        };
+        let executable = directory.path().join("ollama.exe");
+        assert!(std::fs::write(&executable, b"ollama").is_ok());
+
+        let incomplete = ensure_managed_ollama_distribution_complete(&executable);
+
+        assert!(incomplete.is_err());
+        let companion = directory
+            .path()
+            .join("lib")
+            .join("ollama")
+            .join("llama-server.exe");
+        let Some(parent) = companion.parent() else {
+            panic!("companion should have a parent directory");
+        };
+        assert!(std::fs::create_dir_all(parent).is_ok());
+        assert!(std::fs::write(companion, b"llama-server").is_ok());
+        assert!(ensure_managed_ollama_distribution_complete(&executable).is_ok());
+    }
+
+    #[test]
+    fn validation_explains_a_missing_ollama_backend() {
+        let message = inference_validation_failure_message(
+            "runtime returned HTTP 500: llama-server binary not found",
+        );
+
+        assert!(message.contains("missing its llama-server backend"));
+        assert!(message.contains("Repair managed Ollama"));
+        assert!(message.contains("downloaded model will be retained"));
+    }
+
+    #[test]
+    fn validation_preserves_a_concise_unknown_runtime_error() {
+        let detail = format!("runtime rejected the request: {}", "x".repeat(400));
+        let message = inference_validation_failure_message(&detail);
+
+        assert!(message.contains("runtime rejected the request"));
+        assert!(message.ends_with("..."));
+        assert!(message.len() < detail.len());
     }
 }

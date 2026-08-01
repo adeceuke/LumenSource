@@ -35,6 +35,12 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
+    },
     "category": "DeveloperTool",
     "shortDescription": "Private local AI, made simple.",
     "longDescription": "Choose, install, and run local AI models matched to your computer."

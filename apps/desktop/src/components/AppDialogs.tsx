@@ -49,7 +49,10 @@ interface RemoteTargetDialogProps {
   saving: boolean;
   error?: string;
   context?: "wizard" | "machines";
+  editing?: boolean;
   password?: string;
+  passwordSaved?: boolean;
+  passwordRequired?: boolean;
   setPassword?: (password: string) => void;
   rememberPassword?: boolean;
   setRememberPassword?: (remember: boolean) => void;
@@ -63,7 +66,10 @@ export function RemoteTargetDialog({
   saving,
   error,
   context = "wizard",
+  editing = false,
   password = "",
+  passwordSaved = false,
+  passwordRequired = true,
   setPassword,
   rememberPassword = true,
   setRememberPassword,
@@ -72,6 +78,10 @@ export function RemoteTargetDialog({
   onSave,
 }: RemoteTargetDialogProps) {
   const dialogRef = useModalFocus<HTMLFormElement>(onClose);
+  const machineDialogTitle = editing ? text.machines.editDialogTitle : text.machines.addDialogTitle;
+  const machineDialogDescription = editing
+    ? text.machines.editDialogDescription
+    : text.machines.addDialogDescription;
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <form
@@ -90,15 +100,15 @@ export function RemoteTargetDialog({
         <div className="remote-target-dialog-heading">
           <div>
             <span className="eyebrow">{context === "machines" ? text.machines.addDialogEyebrow : text.remoteDialog.eyebrow}</span>
-            <h3 id="remote-target-dialog-title">{context === "machines" ? text.machines.addDialogTitle : text.wizard.location.addTarget}</h3>
+            <h3 id="remote-target-dialog-title">{context === "machines" ? machineDialogTitle : text.wizard.location.addTarget}</h3>
           </div>
           <button className="icon-button" type="button" onClick={onClose} disabled={saving} aria-label={text.remoteDialog.closeAria}>✕</button>
         </div>
-        <p>{context === "machines" ? text.machines.addDialogDescription : text.remoteDialog.description}</p>
+        <p>{context === "machines" ? machineDialogDescription : text.remoteDialog.description}</p>
         <div className="wizard-form remote-target-form">
           <label>
             <span>{text.remoteDialog.targetName}</span>
-            <input value={config.name} maxLength={80} onChange={(event) => setConfig((current) => ({ ...current, name: event.target.value }))} placeholder={text.remoteDialog.targetPlaceholder} />
+            <input data-modal-initial-focus value={config.name} maxLength={80} onChange={(event) => setConfig((current) => ({ ...current, name: event.target.value }))} placeholder={text.remoteDialog.targetPlaceholder} />
             <small>{text.remoteDialog.targetHint}</small>
           </label>
           <label>
@@ -138,8 +148,9 @@ export function RemoteTargetDialog({
                 <input
                   type="password"
                   value={password}
-                  required
+                  required={passwordRequired}
                   autoComplete="off"
+                  placeholder={passwordSaved && !password ? "********" : undefined}
                   onChange={(event) => setPassword(event.target.value)}
                 />
                 <small>{text.remoteDialog.passwordHint}</small>
@@ -163,7 +174,7 @@ export function RemoteTargetDialog({
         {error && <div className="inline-error" role="alert">{error}</div>}
         <div className="modal-actions">
           <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>{text.common.cancel}</button>
-          <button className="primary-button" type="submit" disabled={saving || !config.host.trim() || !config.username.trim() || !Number.isInteger(config.port) || config.port < 1 || config.port > 65535 || (config.authentication === "password" && Boolean(setPassword) && !password)}>
+          <button className="primary-button" type="submit" disabled={saving || !config.host.trim() || !config.username.trim() || !Number.isInteger(config.port) || config.port < 1 || config.port > 65535 || (config.authentication === "password" && Boolean(setPassword) && passwordRequired && !password)}>
             {saving ? text.common.saving : text.common.save}
           </button>
         </div>

@@ -140,6 +140,47 @@ fn informational_ui_notice() -> String {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ExternalEvaluationSource {
+    pub url: String,
+    pub retrieved_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalEvaluation {
+    pub publisher: String,
+    pub leaderboard_name: String,
+    pub source_model_name: String,
+    pub overall_tier: OverallTier,
+    pub notes: String,
+    pub source: ExternalEvaluationSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OverallTier {
+    S,
+    A,
+    B,
+    C,
+    D,
+}
+
+impl OverallTier {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::S => "S",
+            Self::A => "A",
+            Self::B => "B",
+            Self::C => "C",
+            Self::D => "D",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelVariant {
     pub id: String,
     pub runtime: String,
@@ -175,6 +216,8 @@ pub struct ModelVariant {
     pub artifact: Option<Artifact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub performance_hint: Option<PerformanceHint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_evaluations: Vec<ExternalEvaluation>,
     pub recommended_for: Vec<String>,
 }
 
@@ -247,6 +290,8 @@ struct ModelListVariant {
     recommended_for: Vec<String>,
     #[serde(default)]
     benchmarks: Vec<ModelListBenchmark>,
+    #[serde(default)]
+    external_evaluations: Vec<ExternalEvaluation>,
     sources: Vec<ModelListSource>,
 }
 
@@ -417,6 +462,7 @@ impl ModelListVariant {
                 size_bytes: Some(self.model_size_bytes),
             }),
             performance_hint,
+            external_evaluations: self.external_evaluations,
             recommended_for: self.recommended_for,
         }
     }
@@ -570,7 +616,7 @@ mod tests {
     fn parses_generated_model_list_as_a_catalog() {
         let catalog = Catalog::from_slice(MODEL_LIST).unwrap();
 
-        assert_eq!(catalog.catalog_version, "2026.07.30.1");
+        assert_eq!(catalog.catalog_version, "2026.08.01.3");
         assert_eq!(catalog.models.len(), 36);
         assert_eq!(
             catalog
@@ -578,7 +624,7 @@ mod tests {
                 .iter()
                 .map(|model| model.variants.len())
                 .sum::<usize>(),
-            91
+            90
         );
         assert_eq!(catalog.models[0].variants[0].runtime_ref, "bge-m3:567m");
         assert_eq!(catalog.models[0].provider.as_deref(), Some("BAAI"));
@@ -596,21 +642,24 @@ mod tests {
         );
         assert_eq!(catalog.models[0].license.profile_id.as_deref(), Some("mit"));
         assert_eq!(catalog.models[0].license.commercial_use, "permitted");
-        let Some(vllm) = catalog
+        let Some(evaluated) = catalog
             .models
             .iter()
             .flat_map(|model| &model.variants)
-            .find(|variant| variant.id == "qwen-qwen2.5-0.5b-vllm-f16")
+            .find(|variant| variant.runtime_ref == "deepseek-r1:14b")
         else {
-            panic!("the pinned vLLM acceptance variant should be present");
+            panic!("the evaluated DeepSeek variant should be present");
         };
-        assert_eq!(vllm.runtime, "vllm");
+        assert_eq!(evaluated.external_evaluations.len(), 1);
+        assert_eq!(evaluated.external_evaluations[0].publisher, "Onyx");
         assert_eq!(
-            vllm.model_revision.as_deref(),
-            Some("7ae557604adf67be50417f59c2c2f167def9a775")
+            evaluated.external_evaluations[0].overall_tier,
+            OverallTier::D
         );
-        assert_eq!(vllm.model_revision, vllm.tokenizer_revision);
-        assert!(!vllm.gated);
+        assert_eq!(
+            evaluated.external_evaluations[0].source.url,
+            "https://onyx.app/self-hosted-llm-leaderboard"
+        );
         let ollama = &catalog.runtimes[0];
         assert_eq!(ollama.install.strategy.0, "archive");
         assert_eq!(ollama.install.version, "0.32.1");

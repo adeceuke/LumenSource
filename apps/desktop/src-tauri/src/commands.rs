@@ -8,6 +8,7 @@ use crate::bridge::{
 use crate::managed_vllm::ManagedVllmSupport;
 use lumen_source_runtime::ChatMessage;
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
 use tauri::{ipc::Channel, AppHandle, State};
 use zeroize::Zeroizing;
 
@@ -103,8 +104,48 @@ pub async fn diagnostic_bundle(core: State<'_, SharedCoreAdapter>) -> Result<Str
 }
 
 #[tauri::command]
+pub async fn export_diagnostic_bundle_file(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<String, String> {
+    let document = core.diagnostic_bundle().await?;
+    export_document_to_downloads("lumen-source-diagnostics", &document).await
+}
+
+#[tauri::command]
 pub async fn export_state_backup(core: State<'_, SharedCoreAdapter>) -> Result<String, String> {
     core.export_state_backup().await
+}
+
+#[tauri::command]
+pub async fn export_state_backup_file(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<String, String> {
+    let document = core.export_state_backup().await?;
+    export_document_to_downloads("lumen-source-state-backup", &document).await
+}
+
+async fn export_document_to_downloads(file_stem: &str, document: &str) -> Result<String, String> {
+    let downloads = dirs::download_dir()
+        .ok_or_else(|| "Windows did not provide a Downloads folder for this account.".to_owned())?;
+    write_export_document(&downloads, file_stem, document).await
+}
+
+async fn write_export_document(
+    directory: &Path,
+    file_stem: &str,
+    document: &str,
+) -> Result<String, String> {
+    tokio::fs::create_dir_all(directory)
+        .await
+        .map_err(|error| format!("Could not open the export folder: {error}"))?;
+    let path: PathBuf = directory.join(format!(
+        "{file_stem}-{}.json",
+        chrono::Utc::now().timestamp_millis()
+    ));
+    tokio::fs::write(&path, document)
+        .await
+        .map_err(|error| format!("Could not save {}: {error}", path.display()))?;
+    Ok(path.display().to_string())
 }
 
 #[tauri::command]
@@ -201,6 +242,14 @@ pub async fn restart_managed_ollama(
     core: State<'_, SharedCoreAdapter>,
 ) -> Result<OllamaConnectionReport, String> {
     core.restart_managed_ollama().await
+}
+
+#[tauri::command]
+pub async fn repair_managed_ollama(
+    app: AppHandle,
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<OllamaConnectionReport, String> {
+    core.repair_managed_ollama(&app).await
 }
 
 #[tauri::command]
@@ -408,6 +457,23 @@ pub async fn save_remote_target(
     config: RemoteTargetConfig,
 ) -> Result<RemoteTargetProfile, String> {
     core.save_remote_target(config).await
+}
+
+#[tauri::command]
+pub async fn update_remote_target(
+    core: State<'_, SharedCoreAdapter>,
+    original_target_id: String,
+    config: RemoteTargetConfig,
+) -> Result<RemoteTargetProfile, String> {
+    core.update_remote_target(&original_target_id, config).await
+}
+
+#[tauri::command]
+pub async fn remove_remote_target(
+    core: State<'_, SharedCoreAdapter>,
+    target_id: String,
+) -> Result<(), String> {
+    core.remove_remote_target(&target_id).await
 }
 
 #[tauri::command]
@@ -701,4 +767,28 @@ pub async fn remove_model(
     model_id: String,
 ) -> Result<Vec<PersistedModelEntry>, String> {
     core.remove_model(&model_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn export_document_writes_a_timestamped_json_file() {
+        let Ok(directory) = tempfile::tempdir() else {
+            panic!("temporary directory should be available");
+        };
+
+        let Ok(path) =
+            write_export_document(directory.path(), "diagnostics", "{\"ok\":true}").await
+        else {
+            panic!("export should succeed");
+        };
+
+        assert!(path.ends_with(".json"));
+        let Ok(contents) = tokio::fs::read_to_string(path).await else {
+            panic!("exported file should be readable");
+        };
+        assert_eq!(contents, "{\"ok\":true}");
+    }
 }

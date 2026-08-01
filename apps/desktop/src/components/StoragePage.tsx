@@ -21,17 +21,27 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
   const [profiles, setProfiles] = useState("");
   const [interrupted, setInterrupted] = useState<InterruptedInstall>();
   const [queued, setQueued] = useState<QueuedOperation[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState<string>();
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (announce = false) => {
+    setScanning(true);
+    if (announce) setScanStatus("Scanning storage…");
     try {
       setReport(await desktopCommands.storageReport());
+      if (announce) {
+        setScanStatus(`Scan completed at ${new Date().toLocaleTimeString()}.`);
+      }
     } catch (error) {
+      if (announce) setScanStatus("Scan failed.");
       onError(messageFromError(error, "Could not scan storage."));
+    } finally {
+      setScanning(false);
     }
   }, [onError]);
 
   useEffect(() => {
-    void refresh();
+    void refresh(false);
     void desktopCommands.interruptedInstall().then((operation) => {
       setInterrupted(operation ?? undefined);
     }).catch(() => setInterrupted(undefined));
@@ -45,7 +55,7 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
     try {
       const result = await desktopCommands.cleanupStorage(entryId, true);
       setNotice(`${result.scope}: ${formatBytes(result.removedBytes)} reclaimed. ${result.effect}`);
-      await refresh();
+      await refresh(false);
     } catch (error) {
       onError(messageFromError(error, "Storage cleanup failed."));
     } finally {
@@ -82,7 +92,7 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
       onModelsChanged(await desktopCommands.loadModels());
       setInterrupted(undefined);
       setNotice("The interrupted installation resumed and passed its validation request.");
-      await refresh();
+      await refresh(false);
     } catch (error) {
       onError(messageFromError(error, "Could not resume the interrupted installation."));
       onModelsChanged(await desktopCommands.loadModels().catch(() => []));
@@ -103,16 +113,24 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
   };
 
   return (
-    <section className="management-page storage-page" aria-labelledby="storage-title">
-      <header className="management-header">
+    <div className="settings-page storage-page" aria-labelledby="storage-title" aria-busy={scanning}>
+      <header className="settings-heading">
         <div>
-          <span>Storage manager</span>
+          <span className="eyebrow">Storage manager</span>
           <h1 id="storage-title">Storage</h1>
           <p>See where model data is stored and what each cleanup action affects.</p>
         </div>
-        <button className="secondary-button" type="button" onClick={() => void refresh()}>
-          Rescan
-        </button>
+        <div className="storage-scan-action">
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={scanning}
+            onClick={() => void refresh(true)}
+          >
+            {scanning ? "Scanning…" : "Rescan"}
+          </button>
+          <span role="status" aria-live="polite">{scanStatus ?? ""}</span>
+        </div>
       </header>
 
       {interrupted && (
@@ -148,60 +166,79 @@ export function StoragePage({ onError, onModelsChanged }: StoragePageProps) {
         </section>
       )}
 
-      {!report ? <p>Scanning storage…</p> : (
+      {!report ? <div className="settings-notice" role="status">Scanning storage…</div> : (
         <>
-          <div className="storage-summary">
-            <div><span>Managed and shared storage</span><strong>{formatBytes(report.totalBytes)}</strong></div>
-            <div><span>Safely reclaimable caches</span><strong>{formatBytes(report.reclaimableBytes)}</strong></div>
-          </div>
           {notice && <div className="connection-report success" role="status">{notice}</div>}
-          <div className="storage-list">
-            {report.entries.map((entry) => (
-              <article className="storage-entry" key={entry.id}>
-                <div className="storage-entry-heading">
-                  <div>
-                    <h2>{entry.label}</h2>
-                    <p>{entry.path ?? "Reported by the runtime"}</p>
+          <section className="settings-section" aria-labelledby="storage-overview-title">
+            <div className="settings-section-heading">
+              <h2 id="storage-overview-title">Overview</h2>
+              <p>The space currently used by Lumen Source and caches that are safe to recreate.</p>
+            </div>
+            <div className="storage-summary">
+              <div><span>Managed and shared storage</span><strong>{formatBytes(report.totalBytes)}</strong></div>
+              <div><span>Safely reclaimable caches</span><strong>{formatBytes(report.reclaimableBytes)}</strong></div>
+            </div>
+          </section>
+
+          <section className="settings-section" aria-labelledby="storage-locations-title">
+            <div className="settings-section-heading">
+              <h2 id="storage-locations-title">Storage locations</h2>
+              <p>Review each location before cleaning it. Installed models and runtimes are kept unless explicitly stated.</p>
+            </div>
+            <div className="storage-list">
+              {report.entries.map((entry) => (
+                <article className="storage-entry" key={entry.id}>
+                  <div className="storage-entry-heading">
+                    <div>
+                      <h3>{entry.label}</h3>
+                      <p>{entry.path ?? "Reported by the runtime"}</p>
+                    </div>
+                    <strong>{entry.exact ? "" : "≈ "}{formatBytes(entry.sizeBytes)}</strong>
                   </div>
-                  <strong>{entry.exact ? "" : "≈ "}{formatBytes(entry.sizeBytes)}</strong>
-                </div>
-                <div className="storage-badges">
-                  <span>{entry.exact ? "Exact" : "Estimate"}</span>
-                  {entry.shared && <span>Shared cache</span>}
-                  {entry.owners.length > 0 && <span>{entry.owners.length} model owner{entry.owners.length === 1 ? "" : "s"}</span>}
-                </div>
-                {entry.owners.length > 0 && <p>Used by: {entry.owners.join(", ")}</p>}
-                <p>{entry.cleanupEffect}</p>
-                {entry.cleanupEligible && (
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={busy !== undefined}
-                    onClick={() => void cleanup(entry.id, entry.label, entry.cleanupEffect)}
-                  >
-                    {busy === entry.id ? "Cleaning…" : "Clean this cache"}
-                  </button>
-                )}
-              </article>
-            ))}
-          </div>
-          <section className="connection-profile-transfer" aria-labelledby="profile-transfer-title">
-            <h2 id="profile-transfer-title">Connection profiles</h2>
-            <p>Export or import external vLLM and remote Ollama connection details. API keys, passwords, and tokens are never included.</p>
-            <textarea
-              aria-label="Connection-profile JSON"
-              rows={8}
-              value={profiles}
-              onChange={(event) => setProfiles(event.target.value)}
-              placeholder="Exported connection-profile JSON appears here, or paste a profile to import."
-            />
-            <div className="runtime-actions">
-              <button className="secondary-button" type="button" onClick={() => void exportProfiles()}>Export and copy</button>
-              <button className="secondary-button" type="button" disabled={!profiles.trim()} onClick={() => void importProfiles()}>Import profiles</button>
+                  <div className="storage-badges">
+                    <span>{entry.exact ? "Exact" : "Estimate"}</span>
+                    {entry.shared && <span>Shared cache</span>}
+                    {entry.owners.length > 0 && <span>{entry.owners.length} model owner{entry.owners.length === 1 ? "" : "s"}</span>}
+                  </div>
+                  {entry.owners.length > 0 && <p>Used by: {entry.owners.join(", ")}</p>}
+                  <p>{entry.cleanupEffect}</p>
+                  {entry.cleanupEligible && (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={busy !== undefined}
+                      onClick={() => void cleanup(entry.id, entry.label, entry.cleanupEffect)}
+                    >
+                      {busy === entry.id ? "Cleaning…" : "Clean this cache"}
+                    </button>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="settings-section" aria-labelledby="profile-transfer-title">
+            <div className="settings-section-heading">
+              <h2 id="profile-transfer-title">Connection profiles</h2>
+              <p>Move external runtime connections between Lumen Source installations without exporting credentials.</p>
+            </div>
+            <div className="connection-profile-transfer">
+              <p>Export or import external vLLM and remote Ollama connection details. API keys, passwords, and tokens are never included.</p>
+              <textarea
+                aria-label="Connection-profile JSON"
+                rows={8}
+                value={profiles}
+                onChange={(event) => setProfiles(event.target.value)}
+                placeholder="Exported connection-profile JSON appears here, or paste a profile to import."
+              />
+              <div className="runtime-actions">
+                <button className="secondary-button" type="button" onClick={() => void exportProfiles()}>Export and copy</button>
+                <button className="secondary-button" type="button" disabled={!profiles.trim()} onClick={() => void importProfiles()}>Import profiles</button>
+              </div>
             </div>
           </section>
         </>
       )}
-    </section>
+    </div>
   );
 }

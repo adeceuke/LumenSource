@@ -70,19 +70,13 @@
           "runtime": {
             "engine": "ollama",
             "model_ref": "example-model:8b-q4_K_M",
-            "digest": null,
-            "hugging_face_model_id": null,
-            "model_revision": null,
-            "tokenizer_revision": null,
-            "gated": false,
-            "task": "generate",
-            "runner": null,
-            "compatibility": ["ollama"]
+            "digest": null
           },
           "parameters_billion": 8.0,
           "quantization": "Q4_K_M",
           "context_window_tokens": 32768,
           "model_size_bytes": 5000000000,
+          "download_item_count": 5,
           "size_is_estimate": true,
           "requirements": {
             "minimum_system_ram_bytes": 8589934592,
@@ -106,6 +100,20 @@
                 "url": "https://example.com/benchmarks/example-model",
                 "retrieved_at": "2026-01-01T00:00:00Z",
                 "notes": null
+              }
+            }
+          ],
+          "external_evaluations": [
+            {
+              "publisher": "Example leaderboard publisher",
+              "leaderboard_name": "Example model leaderboard",
+              "source_model_name": "Example Model 8B",
+              "overall_tier": "A",
+              "notes": "Remove this array when no exact external model mapping is available; a model-level tier is not a benchmark of this quantization.",
+              "source": {
+                "url": "https://example.com/leaderboards/models",
+                "retrieved_at": "2026-01-01T00:00:00Z",
+                "notes": "Source for the external model label and overall tier."
               }
             }
           ],

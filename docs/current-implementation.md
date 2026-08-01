@@ -54,7 +54,10 @@ control and is reconciled through `/api/tags` later.
 
 The recommendation is not hard-coded to a model name. Compatible variants are
 ranked by selected use case, variant profile, detected accelerator, RAM
-headroom, storage headroom, and (when required) VRAM headroom. The bundled
+headroom, storage headroom, and (when required) VRAM headroom. When a catalog
+variant carries a reviewed external overall tier, higher tiers promote that
+variant among compatible choices and remain visible as attributed,
+informational evaluation metadata in the recommendation detail. The bundled
 catalog is `catalog/model-list.json`; every supported variant in that generated
 artifact participates in compatibility filtering and ranking. Debug builds add
 the fixture's dummy model; release builds do not.
@@ -299,7 +302,8 @@ errors remain visible through the application error banner.
   target profiles; adding a target happens in a dialog and selects the saved
   target. SSH keys/agents are preferred; a password can remain session-only or
   be saved in the operating system credential store for automatic reconnects
-  on Unix controllers. Windows controllers currently require SSH keys.
+  on Linux and Windows controllers. The password is passed to OpenSSH through
+  a private Unix socket or one-time local Windows named pipe.
   Remote runtime installation is not implemented. See
   [`remote-hosts.md`](remote-hosts.md).
 - Linux and Windows hardware probing are implemented; macOS remains a planned
