@@ -32,7 +32,7 @@ Find more information on our website:
 [Lumen Source](https://lumensource.app)
 
 Questions, feedback, or ideas? Contact us at
-[contact@lumensource.de](mailto:contact@lumensource.de).
+[contact@lumensource.de](mailto:contact@lumensource.dev).
 
 ## Platform availability
 
