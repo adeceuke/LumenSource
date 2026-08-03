@@ -236,7 +236,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   overflow: hidden;
   background: rgba(11,16,22,.42);
 }
-.sidebar { min-width: 0; border-right: 1px solid var(--line); background: rgba(16,22,29,.6); padding: 28px 16px; }
+.sidebar { min-width: 0; border-right: 1px solid var(--line); background: rgba(22,29,38,.72); padding: 28px 16px; }
 .sidebar-navigation { display: grid; gap: 7px; }
 .sidebar-navigation button {
   display: flex; align-items: center; gap: 11px; width: 100%; padding: 11px 13px;
@@ -732,11 +732,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   padding: 0 30px; border-top: 1px solid var(--line); background: rgba(9,13,18,.9);
   color: #5f6972; font: 400 10px ui-monospace, monospace;
 }
-.telemetry-settings-button {
-  border: 0; padding: 0; color: #7c8790; background: transparent;
-  font: inherit; cursor: pointer;
-}
-.telemetry-settings-button:hover { color: #b6c0c8; }
+.app-version { color: #7c8790; }
 .telemetry-dialog { max-width: 560px; }
 .telemetry-dialog > p { margin: 12px 0 0; color: var(--muted); font-size: 10px; line-height: 1.65; }
 .telemetry-dialog .modal-actions { margin-top: 22px; }
@@ -817,24 +813,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .check-setting { display: flex; align-items: flex-start; gap: 10px; min-width: 0; color: #aab3ba; font-size: 10px; }
 .check-setting input { width: 15px; height: 15px; flex: none; accent-color: var(--accent); }
 .check-setting strong { display: block; color: var(--ink); font-size: 10px; line-height: 1.4; }
-.telemetry-setting-target { border-radius: 7px; }
-.telemetry-setting-target.highlighted {
-  animation: telemetry-setting-highlight 2.4s ease-out;
-}
-@keyframes telemetry-setting-highlight {
-  0%, 30% {
-    outline: 2px solid var(--accent);
-    outline-offset: 8px;
-    background: color-mix(in srgb, var(--accent) 13%, transparent);
-    box-shadow: 0 0 24px color-mix(in srgb, var(--accent) 24%, transparent);
-  }
-  100% {
-    outline: 2px solid transparent;
-    outline-offset: 8px;
-    background: transparent;
-    box-shadow: none;
-  }
-}
 .field-error { margin: 0; color: #ee9b73; font-size: 9px; font-weight: 500; line-height: 1.45; }
 .runtime-card { grid-column: 2; display: grid; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: #0d131a; }
 .runtime-card + .runtime-card { margin-top: -12px; }

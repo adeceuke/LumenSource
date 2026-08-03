@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import appIcon from "../../../icon.png";
+import { APP_VERSION } from "./appVersion";
 import {
   LeaveWizardDialog,
   RemotePasswordDialog,
@@ -30,7 +31,6 @@ function App() {
   const [section, setSection] = useState<"models" | "machines" | "storage" | "settings">("models");
   const [settings, setSettings] = useState<ApplicationSettings>();
   const [settingsDirty, setSettingsDirty] = useState(false);
-  const [telemetryFocusRequest, setTelemetryFocusRequest] = useState(0);
   const [vllmDialogOpen, setVllmDialogOpen] = useState(false);
   const [catalog, setCatalog] = useState<CatalogSummary>();
   const [error, setError] = useState<string>();
@@ -234,11 +234,6 @@ function App() {
     setDetailModelId(undefined);
   };
 
-  const openTelemetrySettings = () => {
-    navigate("settings");
-    setTelemetryFocusRequest((current) => current + 1);
-  };
-
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -325,7 +320,6 @@ function App() {
             ) : section === "settings" && settings ? (
               <SettingsPage
                 settings={settings}
-                telemetryFocusRequest={telemetryFocusRequest}
                 onSaved={setSettings}
                 onDirtyChange={setSettingsDirty}
                 onError={setError}
@@ -381,13 +375,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <button
-          className="telemetry-settings-button"
-          type="button"
-          onClick={openTelemetrySettings}
-        >
-          {text.footer.usageStatistics(Boolean(settings?.privacy.telemetryEnabled))}
-        </button>
+        <span className="app-version">{text.footer.version(APP_VERSION)}</span>
         {catalog && (
           <div
             className={`catalog-status ${catalog.source}`}

@@ -731,7 +731,7 @@ export const en = {
     editDialogDescription: "Update this machine's SSH connection settings. Existing models and saved credentials follow the updated connection.",
   },
   footer: {
-    usageStatistics: (enabled: boolean) => `Usage statistics: ${enabled ? "on" : "off"}`,
+    version: (version: string) => `Lumen Source v${version}`,
     catalog: (revision: string, count: number) => `Catalog ${revision} · ${count} models`,
     catalogSourceLabels,
     catalogSourceDetails,

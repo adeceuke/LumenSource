@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { APP_VERSION } from "../appVersion";
 import { desktopCommands, messageFromError } from "../commands";
 import { browserMessages } from "../i18n";
 import { installProgressMessage, progressPercent } from "../modelUi";
@@ -17,7 +18,6 @@ const text = browserMessages();
 
 interface SettingsPageProps {
   settings: ApplicationSettings;
-  telemetryFocusRequest: number;
   onSaved: (settings: ApplicationSettings) => void;
   onDirtyChange: (dirty: boolean) => void;
   onError: (error: string) => void;
@@ -53,7 +53,6 @@ async function writeClipboardText(value: string): Promise<void> {
 
 export function SettingsPage({
   settings,
-  telemetryFocusRequest,
   onSaved,
   onDirtyChange,
   onError,
@@ -82,9 +81,6 @@ export function SettingsPage({
   const [sharingPort, setSharingPort] = useState(settings.sharing.port);
   const [exposedModelIds, setExposedModelIds] = useState(settings.sharing.exposedModelIds);
   const restoreInput = useRef<HTMLInputElement>(null);
-  const telemetrySetting = useRef<HTMLLabelElement>(null);
-  const telemetryInput = useRef<HTMLInputElement>(null);
-  const [telemetryHighlighted, setTelemetryHighlighted] = useState(false);
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportNotice, setSupportNotice] = useState("");
   const dirty = useMemo(
@@ -103,22 +99,6 @@ export function SettingsPage({
     setSharingPort(settings.sharing.port);
     setExposedModelIds(settings.sharing.exposedModelIds);
   }, [settings]);
-
-  useEffect(() => {
-    if (telemetryFocusRequest === 0) return;
-
-    setTelemetryHighlighted(true);
-    const frame = window.requestAnimationFrame(() => {
-      telemetrySetting.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      telemetryInput.current?.focus({ preventScroll: true });
-    });
-    const highlightTimer = window.setTimeout(() => setTelemetryHighlighted(false), 2_400);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(highlightTimer);
-    };
-  }, [telemetryFocusRequest]);
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -881,12 +861,8 @@ export function SettingsPage({
           <p>{text.settings.privacy.description}</p>
         </div>
         <div className="settings-grid">
-          <label
-            ref={telemetrySetting}
-            className={`check-setting telemetry-setting-target${telemetryHighlighted ? " highlighted" : ""}`}
-          >
+          <label className="check-setting">
             <input
-              ref={telemetryInput}
               type="checkbox"
               checked={draft.privacy.telemetryEnabled}
               onChange={(event) => update((next) => { next.privacy.telemetryEnabled = event.target.checked; })}
@@ -961,7 +937,7 @@ export function SettingsPage({
           <h2 id="settings-about">{text.settings.about.title}</h2>
           <p>{text.settings.about.description}</p>
         </div>
-        <dl><div><dt>{text.settings.about.version}</dt><dd>1.0.0</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
+        <dl><div><dt>{text.settings.about.version}</dt><dd>{APP_VERSION}</dd></div><div><dt>{text.settings.about.settingsSchema}</dt><dd>{draft.schemaVersion}</dd></div></dl>
       </section>
     </div>
   );
