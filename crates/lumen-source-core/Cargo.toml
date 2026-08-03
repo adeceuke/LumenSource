@@ -9,11 +9,11 @@ workspace = true
 
 [dependencies]
 async-trait = "0.1.91"
-lumen-source-catalog = { version = "1.0.1", path = "../lumen-source-catalog" }
-lumen-source-hardware = { version = "1.0.1", path = "../lumen-source-hardware" }
-lumen-source-host = { version = "1.0.1", path = "../lumen-source-host" }
-lumen-source-recommend = { version = "1.0.1", path = "../lumen-source-recommend" }
-lumen-source-runtime = { version = "1.0.1", path = "../lumen-source-runtime" }
+lumen-source-catalog = { version = "1.0.2", path = "../lumen-source-catalog" }
+lumen-source-hardware = { version = "1.0.2", path = "../lumen-source-hardware" }
+lumen-source-host = { version = "1.0.2", path = "../lumen-source-host" }
+lumen-source-recommend = { version = "1.0.2", path = "../lumen-source-recommend" }
+lumen-source-runtime = { version = "1.0.2", path = "../lumen-source-runtime" }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.19"
 tokio = { version = "1.53.0", features = ["sync", "macros", "rt-multi-thread"] }
