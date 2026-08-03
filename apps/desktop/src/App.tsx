@@ -20,6 +20,7 @@ import { desktopCommands, messageFromError } from "./commands";
 import { useModels } from "./hooks/useModels";
 import { useModelWizard } from "./hooks/useModelWizard";
 import { browserMessages } from "./i18n";
+import { lifecycleLog } from "./modelUi";
 import type { ApplicationSettings, CatalogSummary, RunningModelEntry } from "./types";
 
 const text = browserMessages();
@@ -55,7 +56,7 @@ function App() {
   const [menuOpenId, setMenuOpenId] = useState<string>();
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [detailModelId, setDetailModelId] = useState<string>();
-  const [detailTab, setDetailTab] = useState<DetailTab>("logs");
+  const [detailTab, setDetailTab] = useState<DetailTab>("chat");
   const [renameId, setRenameId] = useState<string>();
   const [renameValue, setRenameValue] = useState("");
   const [pendingRemovalId, setPendingRemovalId] = useState<string>();
@@ -81,6 +82,12 @@ function App() {
       setError(localizedError(copyError));
     }
   }, []);
+
+  const appendModelLog = useCallback((modelId: string, message: string) => {
+    setRunningModels((current) => current.map((model) => model.id === modelId
+      ? { ...model, logs: [...model.logs, lifecycleLog(message)] }
+      : model));
+  }, [setRunningModels]);
 
   const wizard = useModelWizard({
     catalog,
@@ -329,7 +336,10 @@ function App() {
             </nav>
           </aside>
 
-          <div ref={contentPanelRef} className={`content-panel ${detailModel ? "detail-open" : ""}`}>
+          <div
+            ref={contentPanelRef}
+            className={`content-panel ${detailModel ? "detail-open" : ""} ${section === "lumenChat" || (detailModel && detailTab === "chat") ? "chat-open" : ""}`}
+          >
             {wizard.open ? (
               <ModelSetupWizard {...wizard.props} />
             ) : section === "settings" && settings ? (
@@ -346,6 +356,7 @@ function App() {
                 copiedField={copiedField}
                 errorFrom={localizedError}
                 onCopy={(value, key) => void copyText(value, key)}
+                onModelLog={appendModelLog}
                 onSettingsChanged={setSettings}
                 onStartModel={(modelId) => void toggleRunning(modelId)}
               />
@@ -367,6 +378,7 @@ function App() {
                 onToggleRunning={() => void toggleRunning(detailModel.id)}
                 onClearLogs={clearLogs}
                 onCopy={(value, key) => void copyText(value, key)}
+                onModelLog={appendModelLog}
                 onSettingsChanged={setSettings}
                 onStartModel={(modelId) => void toggleRunning(modelId)}
                 onModelSaved={(savedModel) => {
@@ -385,7 +397,7 @@ function App() {
                 menuPosition={menuPosition}
                 onAdd={wizard.openWizard}
                 onConnectVllm={() => setVllmDialogOpen(true)}
-                onOpen={(model) => openDetail(model, "logs")}
+                onOpen={(model) => openDetail(model, "chat")}
                 onToggleRunning={(id) => void toggleRunning(id)}
                 onToggleMenu={toggleMenu}
                 onRename={openRename}

@@ -2,7 +2,11 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex as StdMutex,
+};
+use std::time::Instant;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use lumen_source_catalog::{
@@ -5054,7 +5058,7 @@ impl SharedCoreAdapter {
         messages: Vec<ChatMessage>,
         request_options: ChatRequestOptions,
         reporter: &(dyn Fn(ChatEvent) + Send + Sync),
-    ) -> Result<(), String> {
+    ) -> Result<ChatCompletionResult, String> {
         validate_request_id(request_id)?;
         validate_chat_request_options(&request_options)?;
         validate_chat_messages(&messages)?;
@@ -5125,12 +5129,36 @@ impl SharedCoreAdapter {
         }
 
         let event_request_id = request_id.to_owned();
+        let started_at = Instant::now();
+        let reasoning_observed = AtomicBool::new(false);
+        let content_observed = AtomicBool::new(false);
+        let generated_content = StdMutex::new(String::new());
         let chat_reporter = |progress| match progress {
-            ChatProgress::Content(content) => reporter(ChatEvent::Delta {
-                request_id: event_request_id.clone(),
-                content,
-            }),
-            ChatProgress::Reasoning(_) => {}
+            ChatProgress::Content(content) => {
+                if let Ok(mut generated) = generated_content.lock() {
+                    generated.push_str(&content);
+                }
+                if !content_observed.swap(true, Ordering::Relaxed) {
+                    reporter(ChatEvent::Status {
+                        request_id: event_request_id.clone(),
+                        status: "firstDelta".to_owned(),
+                        elapsed_ms: elapsed_millis(started_at),
+                    });
+                }
+                reporter(ChatEvent::Delta {
+                    request_id: event_request_id.clone(),
+                    content,
+                });
+            }
+            ChatProgress::Reasoning(_) => {
+                if !reasoning_observed.swap(true, Ordering::Relaxed) {
+                    reporter(ChatEvent::Status {
+                        request_id: event_request_id.clone(),
+                        status: "reasoning".to_owned(),
+                        elapsed_ms: elapsed_millis(started_at),
+                    });
+                }
+            }
             ChatProgress::Done => reporter(ChatEvent::Done {
                 request_id: event_request_id.clone(),
             }),
@@ -5173,7 +5201,7 @@ impl SharedCoreAdapter {
                 Err(_) => ChatOutcome::Failed,
             },
         });
-        result
+        result.map(|()| chat_completion_result(request_id, &generated_content))
     }
 
     async fn chat_with_vllm(
@@ -5184,7 +5212,7 @@ impl SharedCoreAdapter {
         messages: Vec<ChatMessage>,
         request_options: ChatRequestOptions,
         reporter: &(dyn Fn(ChatEvent) + Send + Sync),
-    ) -> Result<(), String> {
+    ) -> Result<ChatCompletionResult, String> {
         if !entry.runtime_capabilities.chat {
             return Err("This vLLM endpoint does not expose chat completions.".to_owned());
         }
@@ -5218,12 +5246,36 @@ impl SharedCoreAdapter {
             });
         }
         let event_request_id = request_id.to_owned();
+        let started_at = Instant::now();
+        let reasoning_observed = AtomicBool::new(false);
+        let content_observed = AtomicBool::new(false);
+        let generated_content = StdMutex::new(String::new());
         let chat_reporter = |progress| match progress {
-            ChatProgress::Content(content) => reporter(ChatEvent::Delta {
-                request_id: event_request_id.clone(),
-                content,
-            }),
-            ChatProgress::Reasoning(_) => {}
+            ChatProgress::Content(content) => {
+                if let Ok(mut generated) = generated_content.lock() {
+                    generated.push_str(&content);
+                }
+                if !content_observed.swap(true, Ordering::Relaxed) {
+                    reporter(ChatEvent::Status {
+                        request_id: event_request_id.clone(),
+                        status: "firstDelta".to_owned(),
+                        elapsed_ms: elapsed_millis(started_at),
+                    });
+                }
+                reporter(ChatEvent::Delta {
+                    request_id: event_request_id.clone(),
+                    content,
+                });
+            }
+            ChatProgress::Reasoning(_) => {
+                if !reasoning_observed.swap(true, Ordering::Relaxed) {
+                    reporter(ChatEvent::Status {
+                        request_id: event_request_id.clone(),
+                        status: "reasoning".to_owned(),
+                        elapsed_ms: elapsed_millis(started_at),
+                    });
+                }
+            }
             ChatProgress::Done => reporter(ChatEvent::Done {
                 request_id: event_request_id.clone(),
             }),
@@ -5256,7 +5308,7 @@ impl SharedCoreAdapter {
                 Err(_) => ChatOutcome::Failed,
             },
         });
-        result
+        result.map(|()| chat_completion_result(request_id, &generated_content))
     }
 
     async fn finish_chat_request(&self, request_id: &str) {
@@ -5277,6 +5329,14 @@ impl SharedCoreAdapter {
         } else {
             false
         }
+    }
+
+    pub async fn chat_request_active(&self, request_id: &str) -> bool {
+        self.active_chat
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|chat| chat.request_id == request_id)
     }
 
     pub async fn endpoint(&self, target_id: &str) -> Result<EndpointDetails, String> {
@@ -6422,6 +6482,23 @@ fn validate_chat_messages(messages: &[ChatMessage]) -> Result<(), String> {
         return Err("Clear the chat before the conversation exceeds 512 KiB".to_owned());
     }
     Ok(())
+}
+
+fn elapsed_millis(started_at: Instant) -> u64 {
+    started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn chat_completion_result(
+    request_id: &str,
+    generated_content: &StdMutex<String>,
+) -> ChatCompletionResult {
+    ChatCompletionResult {
+        request_id: request_id.to_owned(),
+        content: generated_content
+            .lock()
+            .map(|content| content.clone())
+            .unwrap_or_default(),
+    }
 }
 
 fn validate_request_id(request_id: &str) -> Result<(), String> {

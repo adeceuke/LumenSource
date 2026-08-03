@@ -404,6 +404,7 @@ export function ModelSettingsPanel({
               })}
             >
               <option value="">{text.modelSettings.runtimeDefault}</option>
+              {model.runtimeId === "ollama" && <option value="off">Off</option>}
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>

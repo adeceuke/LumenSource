@@ -1,9 +1,9 @@
 use crate::bridge::{
-    CatalogSummary, ChatEvent, ChatRequestOptions, EndpointDetails, HardwareProfile,
-    InstallOptions, InstallationValidationReport, MachineUsageSnapshot, PerformanceProfileReport,
-    PerformanceSnapshot, PersistedModelEntry, PreflightReport, Recommendation,
-    RemoteCredentialStatus, RuntimeDiagnostics, RuntimeMigrationOption, RuntimeMigrationReport,
-    RuntimeStatus, SharedCoreAdapter,
+    CatalogSummary, ChatCompletionResult, ChatEvent, ChatRequestOptions, EndpointDetails,
+    HardwareProfile, InstallOptions, InstallationValidationReport, MachineUsageSnapshot,
+    PerformanceProfileReport, PerformanceSnapshot, PersistedModelEntry, PreflightReport,
+    Recommendation, RemoteCredentialStatus, RuntimeDiagnostics, RuntimeMigrationOption,
+    RuntimeMigrationReport, RuntimeStatus, SharedCoreAdapter,
 };
 use crate::conversations::Conversation;
 use crate::managed_vllm::ManagedVllmSupport;
@@ -762,7 +762,7 @@ pub async fn chat_with_model(
     messages: Vec<ChatMessage>,
     options: ChatRequestOptions,
     on_event: Channel<ChatEvent>,
-) -> Result<(), String> {
+) -> Result<ChatCompletionResult, String> {
     let reporter = |event| {
         let _ = on_event.send(event);
     };
@@ -785,6 +785,14 @@ pub async fn cancel_chat(
     request_id: String,
 ) -> Result<bool, String> {
     Ok(core.cancel_chat(&request_id).await)
+}
+
+#[tauri::command]
+pub async fn chat_request_active(
+    core: State<'_, SharedCoreAdapter>,
+    request_id: String,
+) -> Result<bool, String> {
+    Ok(core.chat_request_active(&request_id).await)
 }
 
 #[tauri::command]

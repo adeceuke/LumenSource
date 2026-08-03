@@ -2104,11 +2104,13 @@ mod tests {
 
     #[test]
     fn ollama_chat_thinking_control_uses_the_native_request_field() {
-        assert_eq!(
-            serde_json::to_value(ollama_think(Some("none")))
-                .unwrap_or_else(|error| panic!("thinking control should serialize: {error}")),
-            serde_json::json!(false)
-        );
+        for disabled in ["none", "off"] {
+            assert_eq!(
+                serde_json::to_value(ollama_think(Some(disabled)))
+                    .unwrap_or_else(|error| panic!("thinking control should serialize: {error}")),
+                serde_json::json!(false)
+            );
+        }
         assert_eq!(
             serde_json::to_value(ollama_think(Some("medium")))
                 .unwrap_or_else(|error| panic!("reasoning level should serialize: {error}")),

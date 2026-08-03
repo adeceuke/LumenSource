@@ -27,6 +27,7 @@ pub enum ModelInferenceTask {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReasoningLevel {
+    Off,
     Low,
     Medium,
     High,

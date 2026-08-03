@@ -289,7 +289,13 @@ export interface ChatMessage {
 
 export type ChatEvent =
   | { event: "delta"; requestId: string; content: string }
+  | { event: "status"; requestId: string; status: "reasoning" | "firstDelta"; elapsedMs: number }
   | { event: "done"; requestId: string };
+
+export interface ChatCompletionResult {
+  requestId: string;
+  content: string;
+}
 
 export interface ChatRequestOptions {
   systemPrompt?: string;
@@ -299,6 +305,7 @@ export interface ChatRequestOptions {
 
 export interface ConversationMessage {
   id: string;
+  requestId?: string;
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   createdAt: string;
@@ -312,6 +319,7 @@ export interface Conversation {
   modelEntryId?: string;
   modelNameSnapshot?: string;
   systemPrompt: string;
+  systemPromptName?: string;
   saveHistory: boolean;
   createdAt: string;
   updatedAt: string;
@@ -518,7 +526,7 @@ export interface ModelSettings {
   seed?: number;
   stopSequences: string[];
   structuredOutput?: boolean;
-  reasoningLevel?: "low" | "medium" | "high";
+  reasoningLevel?: "off" | "low" | "medium" | "high";
   contextLength?: number;
   keepAlive?: string;
   loadOnStartup?: boolean;

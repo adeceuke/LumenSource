@@ -15,6 +15,7 @@ const MAX_CONVERSATION_BYTES: usize = 4 * 1024 * 1024;
 #[serde(rename_all = "camelCase")]
 pub struct ConversationMessage {
     pub id: String,
+    pub request_id: Option<String>,
     pub role: String,
     pub content: String,
     pub created_at: String,
@@ -37,6 +38,7 @@ pub struct Conversation {
     pub model_entry_id: Option<String>,
     pub model_name_snapshot: Option<String>,
     pub system_prompt: String,
+    pub system_prompt_name: Option<String>,
     pub save_history: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -196,6 +198,15 @@ fn validate_conversation(conversation: &Conversation) -> Result<(), String> {
     if conversation.system_prompt.len() > MAX_MESSAGE_BYTES {
         return Err("The system prompt is too large.".to_owned());
     }
+    if conversation
+        .system_prompt_name
+        .as_ref()
+        .is_some_and(|name| name.trim().is_empty() || name.chars().count() > 255)
+    {
+        return Err(
+            "The system prompt filename must contain between 1 and 255 characters.".to_owned(),
+        );
+    }
     if conversation.messages.len() > MAX_MESSAGES {
         return Err(format!(
             "A conversation cannot contain more than {MAX_MESSAGES} messages."
@@ -204,6 +215,10 @@ fn validate_conversation(conversation: &Conversation) -> Result<(), String> {
     let mut total_bytes = conversation.system_prompt.len();
     for message in &conversation.messages {
         if message.id.trim().is_empty()
+            || message
+                .request_id
+                .as_ref()
+                .is_some_and(|request_id| request_id.trim().is_empty() || request_id.len() > 128)
             || !matches!(
                 message.role.as_str(),
                 "system" | "user" | "assistant" | "tool"
@@ -246,12 +261,14 @@ mod tests {
             model_entry_id: Some("model".to_owned()),
             model_name_snapshot: Some("Model".to_owned()),
             system_prompt: String::new(),
+            system_prompt_name: None,
             save_history: true,
             created_at: "2026-08-03T00:00:00Z".to_owned(),
             updated_at: "2026-08-03T00:00:00Z".to_owned(),
             parameters: ConversationParameters::default(),
             messages: vec![ConversationMessage {
                 id: "message".to_owned(),
+                request_id: None,
                 role: "user".to_owned(),
                 content: "Hello".to_owned(),
                 created_at: "2026-08-03T00:00:00Z".to_owned(),
@@ -264,8 +281,11 @@ mod tests {
     async fn conversations_survive_reload_and_recover_from_a_truncated_primary() {
         let directory = tempfile::tempdir().expect("temporary directory should exist");
         let store = ConversationStore::new(directory.path());
+        let mut first = conversation("first");
+        first.system_prompt = "Answer as a careful reviewer.".to_owned();
+        first.system_prompt_name = Some("reviewer.md".to_owned());
         store
-            .save(conversation("first"))
+            .save(first)
             .await
             .expect("first conversation should save");
         store
@@ -279,7 +299,9 @@ mod tests {
         assert_eq!(recovered.len(), 2);
         assert!(recovered
             .iter()
-            .any(|conversation| conversation.id == "first"));
+            .any(|conversation| conversation.id == "first"
+                && conversation.system_prompt == "Answer as a careful reviewer."
+                && conversation.system_prompt_name.as_deref() == Some("reviewer.md")));
         assert!(recovered
             .iter()
             .any(|conversation| conversation.id == "second"));

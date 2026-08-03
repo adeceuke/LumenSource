@@ -28,6 +28,7 @@ interface ModelDetailsProps {
   onToggleRunning: () => void;
   onClearLogs: () => void;
   onCopy: (value: string, feedbackKey: string) => void;
+  onModelLog: (modelId: string, message: string) => void;
   onSettingsChanged: (settings: ApplicationSettings) => void;
   onStartModel: (modelId: string) => void;
   onModelSaved: (model: RunningModelEntry) => void;
@@ -47,6 +48,7 @@ export function ModelDetails({
   onToggleRunning,
   onClearLogs,
   onCopy,
+  onModelLog,
   onSettingsChanged,
   onStartModel,
   onModelSaved,
@@ -56,7 +58,7 @@ export function ModelDetails({
   const chat = useModelChat(model, tab === "api", errorFrom);
 
   return (
-    <section className="model-detail-page" aria-label={text.details.aria(model.name)}>
+    <section className={`model-detail-page ${tab === "chat" ? "chat-detail-open" : ""}`} aria-label={text.details.aria(model.name)}>
       <div className="models-toolbar detail-toolbar">
         <div>
           <span className="eyebrow">{text.details.label}</span>
@@ -105,6 +107,7 @@ export function ModelDetails({
           copiedField={copiedField}
           errorFrom={errorFrom}
           onCopy={onCopy}
+          onModelLog={onModelLog}
           onSettingsChanged={onSettingsChanged}
           onStartModel={onStartModel}
         />

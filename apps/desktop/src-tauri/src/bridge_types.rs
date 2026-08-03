@@ -542,8 +542,25 @@ pub struct ChatRequestOptions {
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 pub enum ChatEvent {
-    Delta { request_id: String, content: String },
-    Done { request_id: String },
+    Delta {
+        request_id: String,
+        content: String,
+    },
+    Status {
+        request_id: String,
+        status: String,
+        elapsed_ms: u64,
+    },
+    Done {
+        request_id: String,
+    },
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatCompletionResult {
+    pub request_id: String,
+    pub content: String,
 }
 
 #[derive(Clone, Serialize)]

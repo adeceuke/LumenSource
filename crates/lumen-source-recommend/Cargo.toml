@@ -8,6 +8,6 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-lumen-source-catalog = { version = "1.0.2", path = "../lumen-source-catalog" }
-lumen-source-hardware = { version = "1.0.2", path = "../lumen-source-hardware" }
+lumen-source-catalog = { version = "1.0.3", path = "../lumen-source-catalog" }
+lumen-source-hardware = { version = "1.0.3", path = "../lumen-source-hardware" }
 serde = { version = "1.0.229", features = ["derive"] }

@@ -83,9 +83,10 @@ export function useModelChat(
     setBusyModelId(model.id);
     const requestId = crypto.randomUUID();
     setBusyRequestId(requestId);
+    let streamFinalized = false;
 
     try {
-      await desktopCommands.chat(
+      const completion = await desktopCommands.chat(
         requestId,
         model.modelId,
         model.id,
@@ -94,7 +95,8 @@ export function useModelChat(
         requestMessages,
         {},
         (event) => {
-          if (event.requestId !== requestId) return;
+          if (event.requestId !== requestId || streamFinalized) return;
+          if (event.event === "status") return;
           setSessions((current) => {
             const nextMessages = [...(current[model.id] ?? [])];
             const last = nextMessages.at(-1);
@@ -108,7 +110,21 @@ export function useModelChat(
           });
         },
       );
+      streamFinalized = true;
+      if (completion.requestId !== requestId) throw new Error("The runtime returned a mismatched chat completion.");
+      setSessions((current) => {
+        const nextMessages = [...(current[model.id] ?? [])];
+        const last = nextMessages.at(-1);
+        if (!last || last.role !== "assistant") return current;
+        if (completion.content) {
+          nextMessages[nextMessages.length - 1] = { ...last, content: completion.content };
+        } else {
+          nextMessages.pop();
+        }
+        return { ...current, [model.id]: nextMessages };
+      });
     } catch (chatFailure) {
+      streamFinalized = true;
       const message = errorFrom(chatFailure);
       setSessions((current) => {
         const nextMessages = [...(current[model.id] ?? [])];
@@ -117,6 +133,7 @@ export function useModelChat(
       });
       if (!isChatCancellationMessage(message)) setError(message);
     } finally {
+      streamFinalized = true;
       setBusyModelId((current) => current === model.id ? undefined : current);
       setBusyRequestId((current) => current === requestId ? undefined : current);
       setCancelBusy(false);

@@ -126,6 +126,7 @@ pub fn run() {
             commands::model_endpoint_details,
             commands::chat_with_model,
             commands::cancel_chat,
+            commands::chat_request_active,
             commands::load_models,
             commands::save_models,
             commands::remove_model,

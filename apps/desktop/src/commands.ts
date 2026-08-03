@@ -4,6 +4,7 @@ import type {
   ApplicationSettings,
   CatalogSummary,
   ChatEvent,
+  ChatCompletionResult,
   ChatMessage,
   ChatRequestOptions,
   Conversation,
@@ -231,9 +232,10 @@ export const desktopCommands = {
   ) => {
     const onEvent = new Channel<ChatEvent>();
     onEvent.onmessage = handler;
-    return invoke<void>("chat_with_model", { requestId, entryId, modelId, runtimeModelId, targetId, messages, options, onEvent });
+    return invoke<ChatCompletionResult>("chat_with_model", { requestId, entryId, modelId, runtimeModelId, targetId, messages, options, onEvent });
   },
   cancelChat: (requestId: string) => invoke<boolean>("cancel_chat", { requestId }),
+  chatRequestActive: (requestId: string) => invoke<boolean>("chat_request_active", { requestId }),
   loadModels: () => invoke<RunningModelEntry[]>("load_models"),
   saveModels: (models: RunningModelEntry[]) => invoke<void>("save_models", { models }),
   removeModel: (modelId: string) => invoke<RunningModelEntry[]>("remove_model", { modelId }),
