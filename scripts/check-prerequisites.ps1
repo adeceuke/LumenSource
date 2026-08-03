@@ -50,6 +50,18 @@ else {
     Write-Host "ok  linker       $($Linker.Source)"
 }
 
+$VbScript = Get-WindowsOptionalFeature -Online -FeatureName VBSCRIPT -ErrorAction SilentlyContinue
+if ($VbScript -and $VbScript.State -ne "Enabled") {
+    Write-Error "missing  VBSCRIPT optional feature required to build MSI packages." -ErrorAction Continue
+    $Failed = $true
+}
+elseif ($VbScript) {
+    Write-Host "ok  VBSCRIPT     enabled"
+}
+else {
+    Write-Warning "Could not query the VBSCRIPT optional feature. MSI packaging will verify whether WiX can use it."
+}
+
 $WebView2 = Get-ItemProperty `
     "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F1E7E50D-5E14-44A1-A17F-3D7B9D3B7C28}" `
     -ErrorAction SilentlyContinue

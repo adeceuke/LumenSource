@@ -80,6 +80,7 @@ Storage, Settings, update/rollback, recovery, and sharing:
 2. No open critical/high data-loss, secret-exposure, install, update, rollback,
    removal, or accessibility defect remains.
 3. Failures and unsupported combinations appear in Known limitations.
-4. Windows artifacts are validly signed; Linux hashes match.
+4. Windows signature status is recorded accurately; all published package
+   hashes match. Unsigned Windows packages carry an explicit release warning.
 5. The release commit, catalog revision, package hashes, and completed evidence
    reports are immutable and linked from the release record.

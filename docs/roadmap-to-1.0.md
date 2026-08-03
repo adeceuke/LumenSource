@@ -294,12 +294,13 @@ stable public release.
 ### Remaining 0.9 release evidence
 
 The application-side 0.9 implementation is complete. The release workflow
-refuses unsigned Windows packages, verifies Linux package structure, and emits
+records Windows signature status, verifies Linux package structure, and emits
 checksums, but the following items require release identities, clean machines,
 and assistive-technology or scaled-display test environments:
 
-- Build the MSI and NSIS installers with the protected Authenticode identity
-  and verify their signatures on a clean Windows machine.
+- Build and exercise the MSI and NSIS installers on a clean Windows machine;
+  repeat signature verification when the protected Authenticode identity is
+  enabled.
 - Build and exercise the deb and AppImage on the supported Ubuntu matrix.
 - Record clean install, in-place upgrade, repair, retain-data uninstall, and
   remove-data uninstall results.

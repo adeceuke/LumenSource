@@ -25,8 +25,8 @@ The Markdown documentation describes the current implementation:
 - [`release-checklist.md`](release-checklist.md) — final release decision gates
 - [`sharing-and-security.md`](sharing-and-security.md) — authenticated gateway,
   firewall boundary, and TLS deployment
-- [`release-packaging.md`](release-packaging.md) — signed/verified packages and
-  data retention
+- [`release-packaging.md`](release-packaging.md) — package signatures,
+  checksums, publishing, and data retention
 
 The product and architecture source documents are stored at the repository
 root:

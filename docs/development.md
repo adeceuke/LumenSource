@@ -65,6 +65,7 @@ Install these prerequisites:
   `clippy`
 - the Node.js version pinned in `.node-version`
 - Microsoft Edge WebView2 Runtime (normally already present on current Windows)
+- the Windows VBSCRIPT optional feature used by the WiX MSI builder
 
 Then open a Visual Studio Developer PowerShell at the repository root:
 
@@ -122,10 +123,11 @@ are not 1.0 release targets; see
 
 ## Release and acceptance
 
-Development packages can be built with `container.ps1 package` or
-`container.sh package`. Stable Windows packages must instead pass
-`scripts/package-release.ps1` with the release Authenticode identity. Linux
-release candidates use `scripts/package-release.sh`.
+Windows MSI and NSIS packages can be built unsigned with
+`container.ps1 package`. When the release Authenticode identity is available,
+`scripts/package-release.ps1` applies and verifies its signature. Linux
+development packages use `container.sh package`; release candidates use
+`scripts/package-release.sh`.
 
 Before manual clean-machine testing, run `scripts/acceptance.ps1` on Windows or
 `scripts/acceptance.sh` on Ubuntu. Each command runs the automated suite and

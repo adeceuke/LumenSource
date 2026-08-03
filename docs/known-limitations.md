@@ -22,4 +22,5 @@
 - Lumen Source does not delete model weights, caches, or credential-store
   entries merely because the application package is uninstalled.
 - Application self-update delivery is not automatic; users explicitly install
-  a signed newer application package.
+  a newer application package. Unsigned Windows packages trigger
+  unknown-publisher warnings and may be blocked by managed security policy.

@@ -21,11 +21,9 @@ if (-not (Test-Path -LiteralPath $CertificatePath)) {
 }
 
 $ReleaseConfig = Get-Content -LiteralPath $BaseConfigPath -Raw | ConvertFrom-Json
-$ReleaseConfig.bundle | Add-Member -NotePropertyName windows -NotePropertyValue @{
-    certificateThumbprint = $CertificateThumbprint
-    digestAlgorithm = "sha256"
-    timestampUrl = $TimestampUrl
-} -Force
+$ReleaseConfig.bundle.windows | Add-Member -NotePropertyName certificateThumbprint -NotePropertyValue $CertificateThumbprint -Force
+$ReleaseConfig.bundle.windows | Add-Member -NotePropertyName digestAlgorithm -NotePropertyValue "sha256" -Force
+$ReleaseConfig.bundle.windows | Add-Member -NotePropertyName timestampUrl -NotePropertyValue $TimestampUrl -Force
 $ReleaseConfig | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $ReleaseConfigPath -Encoding UTF8
 
 try {

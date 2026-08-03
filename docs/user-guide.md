@@ -7,10 +7,11 @@ whether it is the first model or the fiftieth.
 
 ## Install Lumen Source
 
-On Windows, run the signed MSI or NSIS installer. On Ubuntu 24.04 x86_64,
-install the deb package or run the verified AppImage. Stable packages and their
-checksums are published together. Development or unsigned builds should not be
-treated as stable releases.
+On Windows, run the MSI or NSIS setup installer. On Ubuntu 24.04 x86_64,
+install the deb package or run the verified AppImage. Packages and their
+SHA-256 checksums are published together. When a Windows installer is unsigned,
+the release notes and signature report say so explicitly; verify its checksum
+and expect an unknown-publisher warning before installation.
 
 Lumen Source can use an existing Ollama installation. If Ollama is missing,
 the installation assistant can download the catalog-pinned runtime after you

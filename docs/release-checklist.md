@@ -2,7 +2,9 @@
 
 - [ ] Freeze runtime and orchestration features.
 - [ ] Run the full automated Windows and Ubuntu checks from clean clones.
-- [ ] Build signed Windows and verified Ubuntu packages from the release tag.
+- [ ] Build Windows MSI/NSIS and verified Ubuntu packages from the release tag.
+- [ ] Verify Windows signature status is accurately reported; if unsigned,
+      retain the unknown-publisher warning in the release notes.
 - [ ] Complete every required case in `acceptance-1.0.md`.
 - [ ] Triage all failures and publish remaining non-blocking limitations.
 - [ ] Confirm no critical/high release blocker remains.

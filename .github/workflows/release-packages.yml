@@ -72,7 +72,6 @@ jobs:
   windows:
     name: Test and package Windows
     needs: release-metadata
-    if: ${{ vars.WINDOWS_SIGNING_ENABLED == 'true' }}
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +86,11 @@ jobs:
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
+      - name: Check Windows packaging prerequisites
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\check-prerequisites.ps1
       - name: Import release identity
+        if: ${{ vars.WINDOWS_SIGNING_ENABLED == 'true' }}
         shell: pwsh
         env:
           WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
@@ -103,12 +106,18 @@ jobs:
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts\container.ps1 check
       - name: Build and verify signed installers
+        if: ${{ vars.WINDOWS_SIGNING_ENABLED == 'true' }}
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 -CertificateThumbprint $env:WINDOWS_CERTIFICATE_THUMBPRINT
+      - name: Build unsigned installers
+        if: ${{ vars.WINDOWS_SIGNING_ENABLED != 'true' }}
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts\container.ps1 package
       - name: Stage versioned release files
         shell: pwsh
         env:
           RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+          WINDOWS_SIGNING_ENABLED: ${{ vars.WINDOWS_SIGNING_ENABLED }}
         run: |
           $releaseDirectory = (New-Item -ItemType Directory -Force release).FullName
           $msi = @(Get-ChildItem target\release\bundle\msi\*.msi)
@@ -118,7 +127,17 @@ jobs:
           }
           Copy-Item $msi[0].FullName (Join-Path $releaseDirectory "LumenSource-$env:RELEASE_TAG-windows-x86_64.msi")
           Copy-Item $nsis[0].FullName (Join-Path $releaseDirectory "LumenSource-$env:RELEASE_TAG-windows-x86_64-setup.exe")
-          Get-ChildItem $releaseDirectory -File | ForEach-Object {
+          $installers = @(Get-ChildItem $releaseDirectory -File | Where-Object { $_.Extension -in ".exe", ".msi" })
+          $expectedSignature = if ($env:WINDOWS_SIGNING_ENABLED -eq "true") { "Valid" } else { "NotSigned" }
+          $signatureReport = foreach ($installer in $installers) {
+            $status = (Get-AuthenticodeSignature -LiteralPath $installer.FullName).Status.ToString()
+            if ($status -ne $expectedSignature) {
+              throw "Unexpected signature status for '$($installer.Name)': expected $expectedSignature, found $status."
+            }
+            "$($installer.Name)  $status"
+          }
+          $signatureReport | Set-Content (Join-Path $releaseDirectory "SIGNATURES-windows-x86_64.txt")
+          $installers | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           } | Set-Content (Join-Path $releaseDirectory "SHA256SUMS-windows-x86_64.txt")
@@ -170,7 +189,7 @@ jobs:
         always() &&
         needs.release-metadata.result == 'success' &&
         needs.ubuntu.result == 'success' &&
-        (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+        needs.windows.result == 'success'
       }}
     runs-on: ubuntu-24.04
     permissions:
@@ -195,9 +214,14 @@ jobs:
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" release/* --clobber
           else
+            if [[ "${{ vars.WINDOWS_SIGNING_ENABLED }}" == "true" ]]; then
+              windows_note="Signed Windows MSI and NSIS installers are attached."
+            else
+              windows_note="Unsigned Windows MSI and NSIS installers are attached. Windows will show an unknown-publisher warning and may block them under managed security policy. Verify the published SHA-256 checksums before installation."
+            fi
             gh release create "$RELEASE_TAG" release/* \
               --verify-tag \
               --generate-notes \
-              --notes "Official Linux packages are attached for this release. Windows remains supported from source; no unsigned Windows installer is distributed." \
+              --notes "$windows_note Linux deb and AppImage packages are also attached." \
               --title "Lumen Source $RELEASE_TAG"
           fi
