@@ -33,7 +33,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
     #090d12;
 }
 .app-header {
-  height: 72px; display: flex; align-items: center; justify-content: space-between;
+  height: 64px; display: flex; align-items: center; justify-content: space-between;
   padding: 0 36px; border-bottom: 1px solid var(--line); background: rgba(9,13,18,.78);
 }
 .brand { display: flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: -.02em; }
@@ -43,7 +43,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 .local-badge { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; }
 .local-badge i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
-.workspace { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 72px); }
+.workspace { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 64px); }
 
 .step-rail {
   border-right: 1px solid var(--line); padding: 52px 38px 30px; display: flex; flex-direction: column;
@@ -257,11 +257,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   stroke-linecap: round; stroke-linejoin: round;
 }
 .content-panel {
-  display: grid; gap: 20px; align-content: start; min-width: 0; width: 100%; min-height: 0; padding: 32px 38px; overflow-x: hidden; overflow-y: auto;
+  display: grid; gap: 20px; align-content: start; min-width: 0; width: 100%; min-height: 0; padding: 26px 38px 32px; overflow-x: hidden; overflow-y: auto;
 }
 .content-panel.detail-open { align-content: start; overflow-y: auto; }
 .models-page.wizard-open .content-panel { place-items: center; align-content: center; }
-.models-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.models-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .models-toolbar h1 { margin: 7px 0 0; font-size: 28px; letter-spacing: -.04em; }
 .models-toolbar-actions { display: flex; align-items: center; gap: 9px; }
 .wizard-card {
