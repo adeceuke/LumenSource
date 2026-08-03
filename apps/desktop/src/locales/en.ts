@@ -59,6 +59,7 @@ export const en = {
   navigation: {
     label: "Main navigation",
     models: "Models",
+    lumenChat: "Lumen Chat",
     machines: "Machines",
     storage: "Storage",
     settings: "Settings",

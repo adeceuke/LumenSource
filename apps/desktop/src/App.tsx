@@ -11,6 +11,7 @@ import {
 import { ModelDetails, type DetailTab } from "./components/ModelDetails";
 import { ModelSetupWizard } from "./components/ModelSetupWizard";
 import { MachinesPage } from "./components/MachinesPage";
+import { LumenChatWorkspace } from "./components/LumenChatWorkspace";
 import { ModelsList } from "./components/ModelsList";
 import { SettingsPage } from "./components/SettingsPage";
 import { StoragePage } from "./components/StoragePage";
@@ -28,7 +29,7 @@ function localizedError(error: unknown): string {
 }
 
 function App() {
-  const [section, setSection] = useState<"models" | "machines" | "storage" | "settings">("models");
+  const [section, setSection] = useState<"models" | "lumenChat" | "machines" | "storage" | "settings">("models");
   const [settings, setSettings] = useState<ApplicationSettings>();
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [vllmDialogOpen, setVllmDialogOpen] = useState(false);
@@ -227,7 +228,7 @@ function App() {
     if (pendingRemovalId) await performRemoval(pendingRemovalId);
   };
 
-  const navigate = (next: "models" | "machines" | "storage" | "settings") => {
+  const navigate = (next: "models" | "lumenChat" | "machines" | "storage" | "settings") => {
     if (section === "settings" && settingsDirty && next !== "settings"
       && !window.confirm(text.settings.unsavedConfirmation)) return;
     setSection(next);
@@ -269,6 +270,20 @@ function App() {
                   </svg>
                 </span>
                 {text.navigation.models}
+              </button>
+              <button
+                type="button"
+                className={section === "lumenChat" ? "active" : ""}
+                onClick={() => navigate("lumenChat")}
+                disabled={wizard.open}
+              >
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M4 5h16v11H8l-4 4V5Z" />
+                    <path d="M8 9h8M8 12h5" />
+                  </svg>
+                </span>
+                {text.navigation.lumenChat}
               </button>
               <button
                 type="button"
@@ -324,6 +339,16 @@ function App() {
                 onDirtyChange={setSettingsDirty}
                 onError={setError}
               />
+            ) : section === "lumenChat" ? (
+              <LumenChatWorkspace
+                models={runningModels}
+                settings={settings}
+                copiedField={copiedField}
+                errorFrom={localizedError}
+                onCopy={(value, key) => void copyText(value, key)}
+                onSettingsChanged={setSettings}
+                onStartModel={(modelId) => void toggleRunning(modelId)}
+              />
             ) : section === "machines" ? (
               <MachinesPage />
             ) : section === "storage" ? (
@@ -331,6 +356,7 @@ function App() {
             ) : detailModel ? (
               <ModelDetails
                 model={detailModel}
+                models={runningModels}
                 applicationSettings={settings}
                 tab={detailTab}
                 modelAction={modelAction}
@@ -341,6 +367,8 @@ function App() {
                 onToggleRunning={() => void toggleRunning(detailModel.id)}
                 onClearLogs={clearLogs}
                 onCopy={(value, key) => void copyText(value, key)}
+                onSettingsChanged={setSettings}
+                onStartModel={(modelId) => void toggleRunning(modelId)}
                 onModelSaved={(savedModel) => {
                   setRunningModels((current) => [
                     savedModel,

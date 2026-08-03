@@ -288,8 +288,39 @@ export interface ChatMessage {
 }
 
 export type ChatEvent =
-  | { event: "delta"; content: string }
-  | { event: "done" };
+  | { event: "delta"; requestId: string; content: string }
+  | { event: "done"; requestId: string };
+
+export interface ChatRequestOptions {
+  systemPrompt?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  createdAt: string;
+  status: "complete" | "generating" | "failed" | "stopped";
+}
+
+export interface Conversation {
+  schemaVersion: 1;
+  id: string;
+  title: string;
+  modelEntryId?: string;
+  modelNameSnapshot?: string;
+  systemPrompt: string;
+  saveHistory: boolean;
+  createdAt: string;
+  updatedAt: string;
+  parameters: {
+    temperature?: number;
+    maxOutputTokens?: number;
+  };
+  messages: ConversationMessage[];
+}
 
 export interface RunningModelEntry {
   id: string;
@@ -389,6 +420,8 @@ export interface ApplicationSettings {
   defaultPerformanceProfile: PerformanceProfile;
   startAfterInstall: boolean;
   autoStartManagedRuntimes: boolean;
+  defaultModelEntryId?: string;
+  lastUsedModelEntryId?: string;
   storage: {
     modelDirectory?: string;
     cacheDirectory?: string;

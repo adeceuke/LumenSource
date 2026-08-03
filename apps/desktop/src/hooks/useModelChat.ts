@@ -13,6 +13,7 @@ export function useModelChat(
   const [sessions, setSessions] = useState<Record<string, ChatMessage[]>>({});
   const [draft, setDraft] = useState("");
   const [busyModelId, setBusyModelId] = useState<string>();
+  const [busyRequestId, setBusyRequestId] = useState<string>();
   const [cancelBusy, setCancelBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [endpoint, setEndpoint] = useState<EndpointDetails>();
@@ -80,15 +81,20 @@ export function useModelChat(
     setDraft("");
     setError(undefined);
     setBusyModelId(model.id);
+    const requestId = crypto.randomUUID();
+    setBusyRequestId(requestId);
 
     try {
       await desktopCommands.chat(
+        requestId,
         model.modelId,
         model.id,
         model.runtimeModelId,
         model.targetId,
         requestMessages,
+        {},
         (event) => {
+          if (event.requestId !== requestId) return;
           setSessions((current) => {
             const nextMessages = [...(current[model.id] ?? [])];
             const last = nextMessages.at(-1);
@@ -111,16 +117,17 @@ export function useModelChat(
       });
       if (!isChatCancellationMessage(message)) setError(message);
     } finally {
-      setBusyModelId(undefined);
+      setBusyModelId((current) => current === model.id ? undefined : current);
+      setBusyRequestId((current) => current === requestId ? undefined : current);
       setCancelBusy(false);
     }
   };
 
   const stop = async () => {
-    if (!busyModelId || cancelBusy) return;
+    if (!busyModelId || !busyRequestId || cancelBusy) return;
     setCancelBusy(true);
     try {
-      await desktopCommands.cancelChat();
+      await desktopCommands.cancelChat(busyRequestId);
     } catch (cancelError) {
       setError(errorFrom(cancelError));
       setCancelBusy(false);

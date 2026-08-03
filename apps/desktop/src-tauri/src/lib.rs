@@ -1,6 +1,7 @@
 pub mod bridge;
 mod bridge_types;
 pub mod commands;
+mod conversations;
 mod credential_store;
 mod managed_vllm;
 mod model_reconciliation;
@@ -54,6 +55,10 @@ pub fn run() {
             commands::validate_settings,
             commands::save_settings,
             commands::reset_settings,
+            commands::list_conversations,
+            commands::save_conversation,
+            commands::delete_conversation,
+            commands::set_chat_model_preferences,
             commands::sharing_status,
             commands::generate_sharing_token,
             commands::revoke_sharing_token,

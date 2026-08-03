@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 import { useModelChat } from "../hooks/useModelChat";
 import { usePerformanceMonitor } from "../hooks/usePerformanceMonitor";
 import { browserMessages } from "../i18n";
@@ -6,6 +6,7 @@ import { curlExample, formatBytes, inferenceLabel, inferenceUrl } from "../model
 import type { RunningModelEntry } from "../types";
 import type { ApplicationSettings } from "../types";
 import { IntegrationPanel } from "./IntegrationPanel";
+import { LumenChatWorkspace } from "./LumenChatWorkspace";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import { PerformanceChart } from "./PerformanceChart";
 import { VllmModelSettings } from "./VllmModelSettings";
@@ -16,6 +17,7 @@ export type DetailTab = "chat" | "logs" | "performance" | "api" | "integration" 
 
 interface ModelDetailsProps {
   model: RunningModelEntry;
+  models: RunningModelEntry[];
   applicationSettings?: ApplicationSettings;
   tab: DetailTab;
   modelAction?: { id: string; action: "starting" | "stopping" };
@@ -26,12 +28,15 @@ interface ModelDetailsProps {
   onToggleRunning: () => void;
   onClearLogs: () => void;
   onCopy: (value: string, feedbackKey: string) => void;
+  onSettingsChanged: (settings: ApplicationSettings) => void;
+  onStartModel: (modelId: string) => void;
   onModelSaved: (model: RunningModelEntry) => void;
   onInventoryChanged: (models: RunningModelEntry[]) => void;
 }
 
 export function ModelDetails({
   model,
+  models,
   applicationSettings,
   tab,
   modelAction,
@@ -42,29 +47,13 @@ export function ModelDetails({
   onToggleRunning,
   onClearLogs,
   onCopy,
+  onSettingsChanged,
+  onStartModel,
   onModelSaved,
   onInventoryChanged,
 }: ModelDetailsProps) {
   const performance = usePerformanceMonitor(model, errorFrom);
-  const chat = useModelChat(model, tab === "api" || tab === "chat", errorFrom);
-  const transcriptRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (tab !== "chat") return;
-    const frame = window.requestAnimationFrame(() => {
-      transcriptRef.current?.scrollTo({
-        top: transcriptRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [chat.messages, model.id, tab]);
-
-  const handleChatKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== "Enter" || event.shiftKey) return;
-    event.preventDefault();
-    void chat.send();
-  };
+  const chat = useModelChat(model, tab === "api", errorFrom);
 
   return (
     <section className="model-detail-page" aria-label={text.details.aria(model.name)}>
@@ -109,7 +98,16 @@ export function ModelDetails({
       ) : tab === "performance" ? (
         <PerformancePanel model={model} performance={performance} />
       ) : tab === "chat" ? (
-        <ChatPanel model={model} chat={chat} transcriptRef={transcriptRef} onKeyDown={handleChatKeyDown} />
+        <LumenChatWorkspace
+          models={models}
+          settings={applicationSettings}
+          initialModelId={model.id}
+          copiedField={copiedField}
+          errorFrom={errorFrom}
+          onCopy={onCopy}
+          onSettingsChanged={onSettingsChanged}
+          onStartModel={onStartModel}
+        />
       ) : tab === "api" ? (
         <ApiPanel model={model} chat={chat} copiedField={copiedField} onCopy={onCopy} />
       ) : tab === "integration" ? (

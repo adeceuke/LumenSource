@@ -1,10 +1,11 @@
 use crate::bridge::{
-    CatalogSummary, ChatEvent, EndpointDetails, HardwareProfile, InstallOptions,
-    InstallationValidationReport, MachineUsageSnapshot, PerformanceProfileReport,
+    CatalogSummary, ChatEvent, ChatRequestOptions, EndpointDetails, HardwareProfile,
+    InstallOptions, InstallationValidationReport, MachineUsageSnapshot, PerformanceProfileReport,
     PerformanceSnapshot, PersistedModelEntry, PreflightReport, Recommendation,
     RemoteCredentialStatus, RuntimeDiagnostics, RuntimeMigrationOption, RuntimeMigrationReport,
     RuntimeStatus, SharedCoreAdapter,
 };
+use crate::conversations::Conversation;
 use crate::managed_vllm::ManagedVllmSupport;
 use lumen_source_runtime::ChatMessage;
 use serde::Deserialize;
@@ -62,6 +63,37 @@ pub async fn reset_settings(
     core: State<'_, SharedCoreAdapter>,
 ) -> Result<SettingsSaveReport, String> {
     core.reset_settings().await
+}
+
+#[tauri::command]
+pub async fn list_conversations(core: State<'_, SharedCoreAdapter>) -> Vec<Conversation> {
+    core.list_conversations().await
+}
+
+#[tauri::command]
+pub async fn save_conversation(
+    core: State<'_, SharedCoreAdapter>,
+    conversation: Conversation,
+) -> Result<Conversation, String> {
+    core.save_conversation(conversation).await
+}
+
+#[tauri::command]
+pub async fn delete_conversation(
+    core: State<'_, SharedCoreAdapter>,
+    conversation_id: String,
+) -> Result<bool, String> {
+    core.delete_conversation(&conversation_id).await
+}
+
+#[tauri::command]
+pub async fn set_chat_model_preferences(
+    core: State<'_, SharedCoreAdapter>,
+    default_model_entry_id: Option<String>,
+    last_used_model_entry_id: Option<String>,
+) -> Result<ApplicationSettings, String> {
+    core.set_chat_model_preferences(default_model_entry_id, last_used_model_entry_id)
+        .await
 }
 
 #[tauri::command]
@@ -720,30 +752,37 @@ pub async fn model_endpoint_details(
 #[tauri::command]
 pub async fn chat_with_model(
     core: State<'_, SharedCoreAdapter>,
+    request_id: String,
     entry_id: String,
     model_id: String,
     runtime_model_id: String,
     target_id: Option<String>,
     messages: Vec<ChatMessage>,
+    options: ChatRequestOptions,
     on_event: Channel<ChatEvent>,
 ) -> Result<(), String> {
     let reporter = |event| {
         let _ = on_event.send(event);
     };
     core.chat(
+        &request_id,
         &entry_id,
         &model_id,
         &runtime_model_id,
         &normalize_target_id(target_id),
         messages,
+        options,
         &reporter,
     )
     .await
 }
 
 #[tauri::command]
-pub async fn cancel_chat(core: State<'_, SharedCoreAdapter>) -> Result<bool, String> {
-    Ok(core.cancel_chat().await)
+pub async fn cancel_chat(
+    core: State<'_, SharedCoreAdapter>,
+    request_id: String,
+) -> Result<bool, String> {
+    Ok(core.cancel_chat(&request_id).await)
 }
 
 #[tauri::command]

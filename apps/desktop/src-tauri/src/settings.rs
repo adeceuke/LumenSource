@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::runtime_registry::RuntimeId;
 
-pub const SETTINGS_SCHEMA_VERSION: u32 = 6;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +70,8 @@ pub struct ApplicationSettings {
     pub default_performance_profile: PerformanceProfile,
     pub start_after_install: bool,
     pub auto_start_managed_runtimes: bool,
+    pub default_model_entry_id: Option<String>,
+    pub last_used_model_entry_id: Option<String>,
     pub storage: StorageSettings,
     pub privacy: PrivacySettings,
     pub sharing: SharingSettings,
@@ -87,6 +89,8 @@ impl Default for ApplicationSettings {
             default_performance_profile: PerformanceProfile::Balanced,
             start_after_install: true,
             auto_start_managed_runtimes: true,
+            default_model_entry_id: None,
+            last_used_model_entry_id: None,
             storage: StorageSettings::default(),
             privacy: PrivacySettings::default(),
             sharing: SharingSettings::default(),
@@ -482,6 +486,10 @@ pub fn migrate_settings(mut settings: ApplicationSettings) -> ApplicationSetting
         settings.ollama.allowed_origins.clear();
         settings.vllm.bind_address = defaults.vllm.bind_address.clone();
         settings.sharing = SharingSettings::default();
+    }
+    if previous_version < 7 {
+        settings.default_model_entry_id = None;
+        settings.last_used_model_entry_id = None;
     }
     if settings.schema_version < SETTINGS_SCHEMA_VERSION {
         settings.schema_version = SETTINGS_SCHEMA_VERSION;
@@ -1040,9 +1048,15 @@ mod tests {
             let migrated = migrate_settings(settings);
 
             assert_eq!(migrated.schema_version, SETTINGS_SCHEMA_VERSION);
-            assert!(!migrated.sharing.enabled);
-            assert!(!migrated.ollama.exposes_network());
-            assert!(migrated.ollama.allowed_origins.is_empty());
+            if schema_version < 6 {
+                assert!(!migrated.sharing.enabled);
+                assert!(!migrated.ollama.exposes_network());
+                assert!(migrated.ollama.allowed_origins.is_empty());
+            } else {
+                assert!(migrated.sharing.enabled);
+            }
+            assert!(migrated.default_model_entry_id.is_none());
+            assert!(migrated.last_used_model_entry_id.is_none());
             assert!(validate_settings(&migrated).is_empty());
         }
     }

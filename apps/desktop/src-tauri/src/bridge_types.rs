@@ -531,11 +531,19 @@ pub struct InstallProgress {
     pub detail: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ChatRequestOptions {
+    pub system_prompt: Option<String>,
+    pub temperature: Option<f32>,
+    pub max_output_tokens: Option<u32>,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "event", rename_all = "camelCase")]
 pub enum ChatEvent {
-    Delta { content: String },
-    Done,
+    Delta { request_id: String, content: String },
+    Done { request_id: String },
 }
 
 #[derive(Clone, Serialize)]

@@ -25,6 +25,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 pub use crate::bridge_types::*;
+use crate::conversations::{Conversation, ConversationStore};
 use crate::credential_store;
 use crate::managed_vllm::{self, ManagedVllmSpec, ManagedVllmSupport};
 use crate::model_reconciliation::{
@@ -116,6 +117,7 @@ struct ActiveInstall {
 }
 
 struct ActiveChat {
+    request_id: String,
     runtime_model_id: String,
     cancellation: CancellationToken,
 }
@@ -173,6 +175,7 @@ pub struct SharedCoreAdapter {
     state_write: Mutex<()>,
     active_install: Mutex<Option<ActiveInstall>>,
     active_chat: Mutex<Option<ActiveChat>>,
+    conversations: ConversationStore,
     recent_install: RwLock<Option<RecentInstall>>,
     managed_ports: Mutex<BTreeSet<u16>>,
     model_operations: Arc<Mutex<BTreeSet<String>>>,
@@ -250,6 +253,7 @@ impl SharedCoreAdapter {
             state_write: Mutex::new(()),
             active_install: Mutex::new(None),
             active_chat: Mutex::new(None),
+            conversations: ConversationStore::new(&data_root),
             recent_install: RwLock::new(None),
             managed_ports: Mutex::new(managed_ports),
             model_operations: Arc::new(Mutex::new(BTreeSet::new())),
@@ -274,6 +278,54 @@ impl SharedCoreAdapter {
             settings.privacy.telemetry_enabled = enabled;
         }
         Ok(settings)
+    }
+
+    pub async fn list_conversations(&self) -> Vec<Conversation> {
+        self.conversations.list().await
+    }
+
+    pub async fn save_conversation(
+        &self,
+        conversation: Conversation,
+    ) -> Result<Conversation, String> {
+        self.conversations.save(conversation).await
+    }
+
+    pub async fn delete_conversation(&self, conversation_id: &str) -> Result<bool, String> {
+        self.conversations.delete(conversation_id).await
+    }
+
+    pub async fn set_chat_model_preferences(
+        &self,
+        default_model_entry_id: Option<String>,
+        last_used_model_entry_id: Option<String>,
+    ) -> Result<ApplicationSettings, String> {
+        {
+            let state = self.state.read().await;
+            for entry_id in [
+                default_model_entry_id.as_deref(),
+                last_used_model_entry_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let compatible = state.models.iter().any(|model| {
+                    model.id == entry_id
+                        && model.inventory_status == "available"
+                        && model.runtime_capabilities.chat
+                });
+                if !compatible {
+                    return Err("Choose an available chat-capable model.".to_owned());
+                }
+            }
+        }
+        {
+            let mut state = self.state.write().await;
+            state.settings.default_model_entry_id = default_model_entry_id;
+            state.settings.last_used_model_entry_id = last_used_model_entry_id;
+        }
+        self.flush_state().await?;
+        self.settings().await
     }
 
     pub async fn sharing_status(&self) -> Result<SharingStatus, String> {
@@ -4994,13 +5046,17 @@ impl SharedCoreAdapter {
 
     pub async fn chat(
         &self,
+        request_id: &str,
         entry_id: &str,
         model_id: &str,
         runtime_model_id: &str,
         target_id: &str,
         messages: Vec<ChatMessage>,
+        request_options: ChatRequestOptions,
         reporter: &(dyn Fn(ChatEvent) + Send + Sync),
     ) -> Result<(), String> {
+        validate_request_id(request_id)?;
+        validate_chat_request_options(&request_options)?;
         validate_chat_messages(&messages)?;
         if let Some(entry) = self
             .state
@@ -5012,7 +5068,14 @@ impl SharedCoreAdapter {
             .cloned()
         {
             return self
-                .chat_with_vllm(entry, runtime_model_id, messages, reporter)
+                .chat_with_vllm(
+                    request_id,
+                    entry,
+                    runtime_model_id,
+                    messages,
+                    request_options,
+                    reporter,
+                )
                 .await;
         }
         let catalog = self.catalog_clone().await?;
@@ -5055,17 +5118,24 @@ impl SharedCoreAdapter {
                 return Err("Another chat response is already being generated".to_owned());
             }
             *active = Some(ActiveChat {
+                request_id: request_id.to_owned(),
                 runtime_model_id: runtime_model_id.to_owned(),
                 cancellation: cancellation.clone(),
             });
         }
 
+        let event_request_id = request_id.to_owned();
         let chat_reporter = |progress| match progress {
-            ChatProgress::Content(content) => reporter(ChatEvent::Delta { content }),
+            ChatProgress::Content(content) => reporter(ChatEvent::Delta {
+                request_id: event_request_id.clone(),
+                content,
+            }),
             ChatProgress::Reasoning(_) => {}
-            ChatProgress::Done => reporter(ChatEvent::Done),
+            ChatProgress::Done => reporter(ChatEvent::Done {
+                request_id: event_request_id.clone(),
+            }),
         };
-        let options = self
+        let base_options = self
             .state
             .read()
             .await
@@ -5075,6 +5145,7 @@ impl SharedCoreAdapter {
             .and_then(|entry| entry.model_settings.as_ref())
             .map(chat_options)
             .unwrap_or_default();
+        let options = apply_chat_request_options(base_options, request_options);
         let result = runtime
             .chat_with_options_cancellable(
                 runtime_model_id,
@@ -5091,7 +5162,7 @@ impl SharedCoreAdapter {
                     error.to_string()
                 }
             });
-        self.active_chat.lock().await.take();
+        self.finish_chat_request(request_id).await;
         self.telemetry.record(TelemetryEvent::Chat {
             model_id: model.id.clone(),
             variant_id: variant.id.clone(),
@@ -5107,9 +5178,11 @@ impl SharedCoreAdapter {
 
     async fn chat_with_vllm(
         &self,
+        request_id: &str,
         entry: PersistedModelEntry,
         runtime_model_id: &str,
         messages: Vec<ChatMessage>,
+        request_options: ChatRequestOptions,
         reporter: &(dyn Fn(ChatEvent) + Send + Sync),
     ) -> Result<(), String> {
         if !entry.runtime_capabilities.chat {
@@ -5126,11 +5199,12 @@ impl SharedCoreAdapter {
         )
         .await?;
         let runtime = vllm_runtime(&config).map_err(|error| error.to_string())?;
-        let options = entry
+        let base_options = entry
             .model_settings
             .as_ref()
             .map(chat_options)
             .unwrap_or_default();
+        let options = apply_chat_request_options(base_options, request_options);
         let cancellation = CancellationToken::new();
         {
             let mut active = self.active_chat.lock().await;
@@ -5138,14 +5212,21 @@ impl SharedCoreAdapter {
                 return Err("Another chat response is already being generated".to_owned());
             }
             *active = Some(ActiveChat {
+                request_id: request_id.to_owned(),
                 runtime_model_id: runtime_model_id.to_owned(),
                 cancellation: cancellation.clone(),
             });
         }
+        let event_request_id = request_id.to_owned();
         let chat_reporter = |progress| match progress {
-            ChatProgress::Content(content) => reporter(ChatEvent::Delta { content }),
+            ChatProgress::Content(content) => reporter(ChatEvent::Delta {
+                request_id: event_request_id.clone(),
+                content,
+            }),
             ChatProgress::Reasoning(_) => {}
-            ChatProgress::Done => reporter(ChatEvent::Done),
+            ChatProgress::Done => reporter(ChatEvent::Done {
+                request_id: event_request_id.clone(),
+            }),
         };
         let result = runtime
             .chat_with_options(
@@ -5164,7 +5245,7 @@ impl SharedCoreAdapter {
                     error.to_string()
                 }
             });
-        self.active_chat.lock().await.take();
+        self.finish_chat_request(request_id).await;
         self.telemetry.record(TelemetryEvent::Chat {
             model_id: "external-vllm".to_owned(),
             variant_id: "external".to_owned(),
@@ -5178,9 +5259,19 @@ impl SharedCoreAdapter {
         result
     }
 
-    pub async fn cancel_chat(&self) -> bool {
+    async fn finish_chat_request(&self, request_id: &str) {
+        let mut active = self.active_chat.lock().await;
+        if active
+            .as_ref()
+            .is_some_and(|chat| chat.request_id == request_id)
+        {
+            active.take();
+        }
+    }
+
+    pub async fn cancel_chat(&self, request_id: &str) -> bool {
         let active = self.active_chat.lock().await;
-        if let Some(chat) = active.as_ref() {
+        if let Some(chat) = active.as_ref().filter(|chat| chat.request_id == request_id) {
             chat.cancellation.cancel();
             true
         } else {
@@ -6105,6 +6196,25 @@ fn chat_options(settings: &crate::settings::ModelSettings) -> ChatOptions {
     }
 }
 
+fn apply_chat_request_options(
+    mut options: ChatOptions,
+    request: ChatRequestOptions,
+) -> ChatOptions {
+    if let Some(system_prompt) = request
+        .system_prompt
+        .filter(|prompt| !prompt.trim().is_empty())
+    {
+        options.system_prompt = Some(system_prompt);
+    }
+    if request.temperature.is_some() {
+        options.temperature = request.temperature;
+    }
+    if request.max_output_tokens.is_some() {
+        options.max_output_tokens = request.max_output_tokens;
+    }
+    options
+}
+
 fn load_settings_changed(previous: &ModelSettings, next: &ModelSettings, runtime_id: &str) -> bool {
     if previous.context_length != next.context_length
         || previous.load_on_startup != next.load_on_startup
@@ -6310,6 +6420,33 @@ fn validate_chat_messages(messages: &[ChatMessage]) -> Result<(), String> {
     }
     if conversation_bytes > MAX_CONVERSATION_BYTES {
         return Err("Clear the chat before the conversation exceeds 512 KiB".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_request_id(request_id: &str) -> Result<(), String> {
+    if request_id.trim().is_empty() || request_id.len() > 128 {
+        return Err("A valid chat request ID is required.".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_chat_request_options(options: &ChatRequestOptions) -> Result<(), String> {
+    if options
+        .temperature
+        .is_some_and(|temperature| !(0.0..=2.0).contains(&temperature))
+    {
+        return Err("Chat temperature must be between 0 and 2.".to_owned());
+    }
+    if options.max_output_tokens == Some(0) {
+        return Err("Maximum output tokens must be greater than zero.".to_owned());
+    }
+    if options
+        .system_prompt
+        .as_ref()
+        .is_some_and(|prompt| prompt.len() > 64 * 1024)
+    {
+        return Err("The system prompt is too large.".to_owned());
     }
     Ok(())
 }

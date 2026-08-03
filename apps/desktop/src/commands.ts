@@ -5,6 +5,8 @@ import type {
   CatalogSummary,
   ChatEvent,
   ChatMessage,
+  ChatRequestOptions,
+  Conversation,
   EndpointDetails,
   ExternalVllmConfig,
   HardwareProfile,
@@ -54,6 +56,13 @@ export const desktopCommands = {
   saveSettings: (settings: ApplicationSettings, confirmNetworkExposure: boolean) =>
     invoke<SettingsSaveReport>("save_settings", { settings, confirmNetworkExposure }),
   resetSettings: () => invoke<SettingsSaveReport>("reset_settings"),
+  listConversations: () => invoke<Conversation[]>("list_conversations"),
+  saveConversation: (conversation: Conversation) =>
+    invoke<Conversation>("save_conversation", { conversation }),
+  deleteConversation: (conversationId: string) =>
+    invoke<boolean>("delete_conversation", { conversationId }),
+  setChatModelPreferences: (defaultModelEntryId?: string, lastUsedModelEntryId?: string) =>
+    invoke<ApplicationSettings>("set_chat_model_preferences", { defaultModelEntryId, lastUsedModelEntryId }),
   sharingStatus: () => invoke<SharingStatus>("sharing_status"),
   generateSharingToken: () => invoke<string>("generate_sharing_token"),
   revokeSharingToken: () => invoke<void>("revoke_sharing_token"),
@@ -211,18 +220,20 @@ export const desktopCommands = {
   modelEndpoint: (entryId: string, modelId: string, runtimeModelId: string, targetId: string) =>
     invoke<EndpointDetails>("model_endpoint_details", { entryId, modelId, runtimeModelId, targetId }),
   chat: (
+    requestId: string,
     modelId: string,
     entryId: string,
     runtimeModelId: string,
     targetId: string,
     messages: ChatMessage[],
+    options: ChatRequestOptions,
     handler: (event: ChatEvent) => void,
   ) => {
     const onEvent = new Channel<ChatEvent>();
     onEvent.onmessage = handler;
-    return invoke<void>("chat_with_model", { entryId, modelId, runtimeModelId, targetId, messages, onEvent });
+    return invoke<void>("chat_with_model", { requestId, entryId, modelId, runtimeModelId, targetId, messages, options, onEvent });
   },
-  cancelChat: () => invoke<boolean>("cancel_chat"),
+  cancelChat: (requestId: string) => invoke<boolean>("cancel_chat", { requestId }),
   loadModels: () => invoke<RunningModelEntry[]>("load_models"),
   saveModels: (models: RunningModelEntry[]) => invoke<void>("save_models", { models }),
   removeModel: (modelId: string) => invoke<RunningModelEntry[]>("remove_model", { modelId }),
