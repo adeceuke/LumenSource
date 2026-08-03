@@ -22,7 +22,7 @@ lumen-source-hardware = { version = "1.0.2", path = "../../../crates/lumen-sourc
 lumen-source-host = { version = "1.0.2", path = "../../../crates/lumen-source-host" }
 lumen-source-recommend = { version = "1.0.2", path = "../../../crates/lumen-source-recommend" }
 lumen-source-runtime = { version = "1.0.2", path = "../../../crates/lumen-source-runtime" }
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
 tauri = { version = "2", features = [], default-features = false }
@@ -33,6 +33,7 @@ zeroize = { version = "1.8.2", features = ["std"] }
 uuid = { version = "1.24.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
+futures-util = "0.3.31"
 tempfile = "3.27.0"
 
 [lints]

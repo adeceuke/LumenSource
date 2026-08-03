@@ -45,7 +45,7 @@ use crate::settings::{
     ModelSettingsSaveReport, OllamaConnectionReport, PerformanceProfile, RuntimeSecretKind,
     SettingsSaveReport, VllmConnectionReport,
 };
-use crate::sharing::{SharedModel, SharingServer, SharingStatus};
+use crate::sharing::{ExposedModelStatus, SharedModel, SharingServer, SharingStatus};
 use crate::storage::{self, CleanupReport, StorageReport};
 use crate::telemetry::{failure_category, memory_tier, ChatOutcome, Telemetry, TelemetryEvent};
 
@@ -281,7 +281,7 @@ impl SharedCoreAdapter {
         let token_saved =
             credential_store::runtime_secret_is_saved(RuntimeSecretKind::SharingApiToken).await?;
         let server = self.sharing_server.lock().await;
-        let exposed_models = state
+        let exposed_model_details = state
             .settings
             .sharing
             .exposed_model_ids
@@ -291,8 +291,17 @@ impl SharedCoreAdapter {
                     .models
                     .iter()
                     .find(|model| &model.id == entry_id)
-                    .map(|model| model.name.clone())
+                    .and_then(|model| shared_model(&state.settings, model).ok())
+                    .map(|model| ExposedModelStatus {
+                        entry_id: model.entry_id,
+                        display_name: model.display_name,
+                        public_name: model.public_name,
+                    })
             })
+            .collect::<Vec<_>>();
+        let exposed_models = exposed_model_details
+            .iter()
+            .map(|model| model.display_name.clone())
             .collect();
         Ok(SharingStatus {
             enabled: state.settings.sharing.enabled,
@@ -301,6 +310,7 @@ impl SharedCoreAdapter {
             token_saved,
             address: server.as_ref().map(|server| server.address.clone()),
             exposed_models,
+            exposed_model_details,
             transport_warning: state
                 .settings
                 .sharing

@@ -45,6 +45,14 @@ impl SharingServer {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExposedModelStatus {
+    pub entry_id: String,
+    pub display_name: String,
+    pub public_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SharingStatus {
     pub enabled: bool,
     pub running: bool,
@@ -52,6 +60,7 @@ pub struct SharingStatus {
     pub token_saved: bool,
     pub address: Option<String>,
     pub exposed_models: Vec<String>,
+    pub exposed_model_details: Vec<ExposedModelStatus>,
     pub transport_warning: Option<String>,
 }
 
@@ -72,6 +81,10 @@ pub(crate) async fn start(
     let listener = TcpListener::bind(SocketAddr::new(ip, port))
         .await
         .map_err(|error| format!("Could not bind the sharing gateway on port {port}: {error}"))?;
+    let bound_port = listener
+        .local_addr()
+        .map_err(|error| format!("Could not read the sharing gateway address: {error}"))?
+        .port();
     let state = GatewayState {
         token: Arc::new(token),
         models: Arc::new(models),
@@ -99,7 +112,7 @@ pub(crate) async fn start(
         "127.0.0.1".to_owned()
     };
     Ok(SharingServer {
-        address: format!("http://{host}:{port}/v1"),
+        address: format!("http://{host}:{bound_port}/v1"),
         stop: Some(stop),
     })
 }
@@ -177,22 +190,13 @@ async fn forward(
         }
     };
     let status = response.status();
-    let content_type = response.headers().get(header::CONTENT_TYPE).cloned();
-    let bytes = match response.bytes().await {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            return api_error(
-                StatusCode::BAD_GATEWAY,
-                "The selected local model returned an unreadable response.",
-            )
-        }
-    };
-    let mut forwarded = Response::new(Body::from(bytes));
+    let response_headers = response.headers().clone();
+    let mut forwarded = Response::new(Body::from_stream(response.bytes_stream()));
     *forwarded.status_mut() = status;
-    if let Some(content_type) = content_type {
-        forwarded
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, content_type);
+    for name in [header::CONTENT_TYPE, header::CACHE_CONTROL] {
+        if let Some(value) = response_headers.get(&name).cloned() {
+            forwarded.headers_mut().insert(name, value);
+        }
     }
     forwarded
 }
@@ -229,6 +233,12 @@ fn local_network_address() -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+    use std::time::Duration;
+
+    use axum::body::Bytes;
+    use futures_util::stream;
+
     use super::*;
 
     #[test]
@@ -245,5 +255,91 @@ mod tests {
             header::HeaderValue::from_static("Basic secret"),
         );
         assert!(!authorized(&headers, "secret"));
+    }
+
+    #[tokio::test]
+    async fn gateway_forwards_stream_chunks_without_buffering_the_response() {
+        async fn stream_response() -> Response {
+            let chunks = stream::unfold(0, |step| async move {
+                match step {
+                    0 => Some((
+                        Ok::<Bytes, Infallible>(Bytes::from_static(b"data: first\n\n")),
+                        1,
+                    )),
+                    1 => {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        Some((
+                            Ok::<Bytes, Infallible>(Bytes::from_static(b"data: second\n\n")),
+                            2,
+                        ))
+                    }
+                    _ => None,
+                }
+            });
+            let mut response = Response::new(Body::from_stream(chunks));
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("text/event-stream"),
+            );
+            response.headers_mut().insert(
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("no-cache"),
+            );
+            response
+        }
+
+        let upstream_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("upstream test listener should bind");
+        let upstream_address = upstream_listener
+            .local_addr()
+            .expect("upstream test address should resolve");
+        let upstream = tokio::spawn(async move {
+            let _ = axum::serve(
+                upstream_listener,
+                Router::new().route("/v1/chat/completions", post(stream_response)),
+            )
+            .await;
+        });
+
+        let gateway = start(
+            0,
+            false,
+            Zeroizing::new("secret".to_owned()),
+            vec![SharedModel {
+                entry_id: "entry".to_owned(),
+                display_name: "Test model".to_owned(),
+                public_name: "public-model".to_owned(),
+                backend_model: "backend-model".to_owned(),
+                endpoint: format!("http://{upstream_address}"),
+            }],
+        )
+        .await
+        .expect("gateway should start");
+
+        let response = tokio::time::timeout(
+            Duration::from_millis(400),
+            Client::new()
+                .post(format!("{}/chat/completions", gateway.address))
+                .bearer_auth("secret")
+                .json(&json!({"model": "public-model", "stream": true}))
+                .send(),
+        )
+        .await
+        .expect("gateway should return response headers before the delayed chunk")
+        .expect("streaming request should succeed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static("text/event-stream"))
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&header::HeaderValue::from_static("no-cache"))
+        );
+
+        gateway.stop();
+        upstream.abort();
     }
 }

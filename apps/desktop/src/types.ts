@@ -445,6 +445,11 @@ export interface SharingStatus {
   tokenSaved: boolean;
   address?: string;
   exposedModels: string[];
+  exposedModelDetails: Array<{
+    entryId: string;
+    displayName: string;
+    publicName: string;
+  }>;
   transportWarning?: string;
 }
 

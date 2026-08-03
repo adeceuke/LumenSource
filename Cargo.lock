@@ -2263,6 +2263,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs",
+ "futures-util",
  "keyring",
  "lumen-source-catalog",
  "lumen-source-hardware",

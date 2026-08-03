@@ -5,13 +5,14 @@ import { browserMessages } from "../i18n";
 import { curlExample, formatBytes, inferenceLabel, inferenceUrl } from "../modelUi";
 import type { RunningModelEntry } from "../types";
 import type { ApplicationSettings } from "../types";
+import { IntegrationPanel } from "./IntegrationPanel";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import { PerformanceChart } from "./PerformanceChart";
 import { VllmModelSettings } from "./VllmModelSettings";
 
 const text = browserMessages();
 
-export type DetailTab = "chat" | "logs" | "performance" | "api" | "settings";
+export type DetailTab = "chat" | "logs" | "performance" | "api" | "integration" | "settings";
 
 interface ModelDetailsProps {
   model: RunningModelEntry;
@@ -95,12 +96,11 @@ export function ModelDetails({
       </div>
 
       <nav className="detail-tabs" aria-label={text.details.tabsLabel}>
-        {model.runtimeCapabilities.chat && (
-          <button type="button" className={tab === "chat" ? "active" : ""} onClick={() => onTab("chat")}>{text.chat.tab}</button>
-        )}
+        <button type="button" className={tab === "chat" ? "active" : ""} onClick={() => onTab("chat")}>{text.chat.tab}</button>
         <button type="button" className={tab === "logs" ? "active" : ""} onClick={() => onTab("logs")}>{text.common.logs}</button>
         <button type="button" className={tab === "performance" ? "active" : ""} onClick={() => onTab("performance")}>{text.common.performance}</button>
         <button type="button" className={tab === "api" ? "active" : ""} onClick={() => onTab("api")}>{text.common.api}</button>
+        <button type="button" className={tab === "integration" ? "active" : ""} onClick={() => onTab("integration")}>Integration</button>
         <button type="button" className={tab === "settings" ? "active" : ""} onClick={() => onTab("settings")}>{text.navigation.settings}</button>
       </nav>
 
@@ -112,6 +112,8 @@ export function ModelDetails({
         <ChatPanel model={model} chat={chat} transcriptRef={transcriptRef} onKeyDown={handleChatKeyDown} />
       ) : tab === "api" ? (
         <ApiPanel model={model} chat={chat} copiedField={copiedField} onCopy={onCopy} />
+      ) : tab === "integration" ? (
+        <IntegrationPanel model={model} copiedField={copiedField} errorFrom={errorFrom} onCopy={onCopy} />
       ) : (
         <div className="model-settings-stack">
           {applicationSettings ? (

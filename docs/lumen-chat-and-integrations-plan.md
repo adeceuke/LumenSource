@@ -18,6 +18,10 @@ This plan incorporates the following decisions:
   model selected; it is not a second chat implementation.
 - Every model detail page gains an **Integration** tab with **Add in Codex**,
   **Add in Copilot**, and **Add in Cursor** actions.
+- The Integration tab exposes exactly those three actions initially, but its
+  cards, compatibility rules, and setup flows are data-driven. Adding future
+  integrations must not require redesigning the tab or duplicating its common
+  connection and review UI.
 - Integration actions show the exact endpoint, model identifier,
   authentication, protocol, and proposed configuration before changing or
   launching another tool.
@@ -225,6 +229,12 @@ Store probe outcomes and timestamps, not prompts or generated content.
 Add `integration` to the model detail tab type and render **Integration** for
 every model. The page contains three integration cards and a common connection
 summary:
+
+Treat Codex, Copilot, and Cursor as the initial entries in an extensible
+integration registry, not as hard-coded layout branches. The registry owns the
+label, compatibility requirements, status, configuration fields, and setup
+flow for each tool so more integrations can be added without changing the tab
+structure.
 
 - provider status;
 - base URL;

@@ -501,8 +501,8 @@ export const en = {
     empty: "No Lumen Source lifecycle events have been recorded for this entry. A running model does not generate log entries simply by serving inference requests.",
   },
   chat: {
-    tab: "Chat",
-    title: (name: string) => `Chat with ${name}`,
+    tab: "Lumen Chat",
+    title: (name: string) => `Lumen Chat with ${name}`,
     privacy: "This conversation stays in application memory and is not added to lifecycle logs or saved when LumenSource closes.",
     stoppedTitle: "Model stopped",
     stoppedDescription: "Start this model before sending a message.",

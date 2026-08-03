@@ -346,9 +346,6 @@ function App() {
                     savedModel,
                     ...current.filter((model) => model.id !== savedModel.id),
                   ]);
-                  if (detailTab === "chat" && !savedModel.runtimeCapabilities.chat) {
-                    setDetailTab("api");
-                  }
                 }}
                 onInventoryChanged={setRunningModels}
               />
