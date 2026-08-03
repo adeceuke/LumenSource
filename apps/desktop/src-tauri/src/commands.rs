@@ -66,8 +66,10 @@ pub async fn reset_settings(
 }
 
 #[tauri::command]
-pub async fn list_conversations(core: State<'_, SharedCoreAdapter>) -> Vec<Conversation> {
-    core.list_conversations().await
+pub async fn list_conversations(
+    core: State<'_, SharedCoreAdapter>,
+) -> Result<Vec<Conversation>, String> {
+    Ok(core.list_conversations().await)
 }
 
 #[tauri::command]
