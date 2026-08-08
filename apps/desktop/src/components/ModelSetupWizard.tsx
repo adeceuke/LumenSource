@@ -18,6 +18,7 @@ import type {
   InstallationValidationReport,
   PerformanceProfile,
   PerformanceProfileReport,
+  PerformanceTestResult,
   PreflightReport,
   Recommendation,
   RemoteConnectionReport,
@@ -25,6 +26,7 @@ import type {
   UseIntent,
   WizardStep,
 } from "../types";
+import { PerformanceTestResults } from "./PerformanceTestPanel";
 
 const text = browserMessages();
 const WIZARD_STEPS: WizardStep[] = [
@@ -80,6 +82,9 @@ export interface ModelSetupWizardProps {
   installProgress?: InstallProgress;
   validationReport?: InstallationValidationReport;
   validationDetailsOpen: boolean;
+  performanceTest?: PerformanceTestResult;
+  performanceTestBusy: boolean;
+  performanceTestError?: string;
   selectedIsDummy: boolean;
   endpoint?: EndpointDetails;
   copiedField?: string;
@@ -113,6 +118,8 @@ export interface ModelSetupWizardProps {
   removeIncompleteInstall: () => void | Promise<void>;
   startInstall: () => void | Promise<void>;
   openInstalledModel: () => void;
+  runPerformanceTest: () => void | Promise<void>;
+  reviewPerformanceAlternative: (modelId: string) => void;
   copyText: (value: string, key: string) => void | Promise<void>;
 }
 
@@ -158,6 +165,9 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     installProgress,
     validationReport,
     validationDetailsOpen,
+    performanceTest,
+    performanceTestBusy,
+    performanceTestError,
     selectedIsDummy,
     endpoint,
     copiedField,
@@ -191,6 +201,8 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
     removeIncompleteInstall,
     startInstall,
     openInstalledModel,
+    runPerformanceTest,
+    reviewPerformanceAlternative,
     copyText,
   } = props;
 
@@ -909,6 +921,29 @@ export function ModelSetupWizard(props: ModelSetupWizardProps) {
                             : ""}
                         </small>
                       </div>
+                    )}
+                    {!selectedIsDummy && validationReport?.runtimeId === "ollama" && (
+                      <section className="wizard-performance-test">
+                        <div>
+                          <strong>Optional performance test</strong>
+                          <span>Measure first-token latency, prompt processing, generation speed, memory, and actual CPU/GPU allocation. Poor performance will not invalidate this installation.</span>
+                        </div>
+                        {!performanceTest && (
+                          <button className="secondary-button" type="button" disabled={performanceTestBusy} onClick={() => void runPerformanceTest()}>
+                            {performanceTestBusy ? "Testing…" : "Run performance test"}
+                          </button>
+                        )}
+                        {performanceTestBusy && (
+                          <p className="performance-test-note" role="status">Running a warm-up and two measured requests. This can take several minutes on CPU-only models.</p>
+                        )}
+                        {performanceTestError && <div className="inline-error" role="alert">{performanceTestError}</div>}
+                        {performanceTest && (
+                          <>
+                            <PerformanceTestResults result={performanceTest} compact onReviewAlternative={reviewPerformanceAlternative} />
+                            <button className="secondary-button" type="button" disabled={performanceTestBusy} onClick={() => void runPerformanceTest()}>Run again</button>
+                          </>
+                        )}
+                      </section>
                     )}
                     <div className={`runtime-hero ${startAfterInstall ? "" : "stopped"}`}>
                       <div><span className="pulse" /> {selectedIsDummy

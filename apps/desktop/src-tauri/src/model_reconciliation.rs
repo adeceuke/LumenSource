@@ -140,6 +140,9 @@ pub(crate) fn reconcile_models(
                     installation_validation: previous
                         .as_ref()
                         .and_then(|entry| entry.installation_validation.clone()),
+                    performance_test: previous
+                        .as_ref()
+                        .and_then(|entry| entry.performance_test.clone()),
                     inventory_status: "available".to_owned(),
                     discovered: previous.is_none(),
                     pinned: previous.as_ref().is_some_and(|entry| entry.pinned),
@@ -208,6 +211,9 @@ pub(crate) fn reconcile_models(
                     installation_validation: previous
                         .as_ref()
                         .and_then(|entry| entry.installation_validation.clone()),
+                    performance_test: previous
+                        .as_ref()
+                        .and_then(|entry| entry.performance_test.clone()),
                     inventory_status: "available".to_owned(),
                     discovered: true,
                     pinned: previous.as_ref().is_some_and(|entry| entry.pinned),
@@ -355,6 +361,7 @@ fn upsert_dummy_models(
             runtime_capabilities: capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            performance_test: None,
             inventory_status: "available".to_owned(),
             discovered: true,
             pinned: false,

@@ -210,15 +210,16 @@ fn score_variant(
         explanations.push("can run on the detected CPU".to_owned());
     }
 
-    let ram_headroom = headroom_ratio(
-        bytes_to_gib(hardware.available_ram_bytes),
-        variant.requirements.min_ram_gb,
+    let (preferred_ram_gb, ram_basis) = variant.requirements.recommended_ram_gb.map_or(
+        (variant.requirements.min_ram_gb, "minimum"),
+        |recommended| (recommended, "recommended"),
     );
+    let ram_headroom = headroom_ratio(bytes_to_gib(hardware.available_ram_bytes), preferred_ram_gb);
     score += 15.0 * ram_headroom;
     explanations.push(format!(
-        "{:.1} GiB RAM remains available against a {:.1} GiB minimum",
+        "{:.1} GiB RAM is available against the {:.1} GiB {ram_basis}",
         bytes_to_gib(hardware.available_ram_bytes),
-        variant.requirements.min_ram_gb
+        preferred_ram_gb
     ));
 
     let storage_headroom = headroom_ratio(
@@ -231,11 +232,20 @@ fn score_variant(
         bytes_to_gib(hardware.storage.available_bytes)
     ));
 
-    if let Some(required_vram) = variant.requirements.min_vram_gb {
+    if let Some(preferred_vram) = variant
+        .requirements
+        .recommended_vram_gb
+        .or(variant.requirements.min_vram_gb)
+    {
         if let Some(vram) = compatible_vram_gb(hardware, &variant.requirements.accelerators) {
-            score += 10.0 * headroom_ratio(vram, required_vram);
+            score += 10.0 * headroom_ratio(vram, preferred_vram);
+            let vram_basis = if variant.requirements.recommended_vram_gb.is_some() {
+                "recommended"
+            } else {
+                "minimum"
+            };
             explanations.push(format!(
-                "{vram:.1} GiB compatible VRAM exceeds the {required_vram:.1} GiB minimum"
+                "{vram:.1} GiB compatible VRAM is available against the {preferred_vram:.1} GiB {vram_basis}"
             ));
         }
     }
@@ -439,7 +449,9 @@ mod tests {
             download_size_bytes: None,
             requirements: Requirements {
                 min_ram_gb,
+                recommended_ram_gb: None,
                 min_vram_gb,
+                recommended_vram_gb: None,
                 min_storage_gb,
                 os: Some(vec![OperatingSystem::Linux]),
                 accelerators,
@@ -590,6 +602,29 @@ mod tests {
             .explanations
             .iter()
             .any(|explanation| explanation.contains("overall tier A")));
+    }
+
+    #[test]
+    fn recommended_memory_distinguishes_models_that_share_a_minimum() {
+        let mut catalog = golden_catalog();
+        let mut model = catalog.models.remove(1);
+        let mut responsive = model.variants[0].clone();
+        responsive.id = "responsive".to_owned();
+        responsive.requirements.recommended_ram_gb = Some(12.0);
+        let mut memory_hungry = responsive.clone();
+        memory_hungry.id = "memory-hungry".to_owned();
+        memory_hungry.requirements.recommended_ram_gb = Some(24.0);
+        model.variants = vec![memory_hungry, responsive];
+        catalog.models = vec![model];
+
+        let report = recommend(
+            &catalog,
+            &golden_hardware(),
+            &RecommendationRequest::default(),
+        );
+
+        assert_eq!(report.recommendations[0].variant_id, "responsive");
+        assert!(report.recommendations[0].score > report.recommendations[1].score);
     }
 
     fn external_evaluation(overall_tier: OverallTier) -> ExternalEvaluation {

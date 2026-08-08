@@ -24,6 +24,7 @@ import type {
   PerformanceProfile,
   PerformanceProfileReport,
   PerformanceSnapshot,
+  PerformanceTestResult,
   PreflightReport,
   Recommendation,
   QueuedOperation,
@@ -217,6 +218,8 @@ export const desktopCommands = {
   status: () => invoke<RuntimeStatus>("runtime_status"),
   performance: (entryId: string, modelId: string, runtimeModelId: string, targetId: string) =>
     invoke<PerformanceSnapshot>("model_performance", { entryId, modelId, runtimeModelId, targetId }),
+  runPerformanceTest: (entryId: string | undefined, modelId: string, runtimeModelId: string, targetId: string) =>
+    invoke<PerformanceTestResult>("run_performance_test", { entryId, modelId, runtimeModelId, targetId }),
   endpoint: (targetId: string) => invoke<EndpointDetails>("endpoint_details", { targetId }),
   modelEndpoint: (entryId: string, modelId: string, runtimeModelId: string, targetId: string) =>
     invoke<EndpointDetails>("model_endpoint_details", { entryId, modelId, runtimeModelId, targetId }),

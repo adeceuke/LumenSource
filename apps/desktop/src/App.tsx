@@ -388,6 +388,7 @@ function App() {
                   ]);
                 }}
                 onInventoryChanged={setRunningModels}
+                onReviewAlternative={(modelId) => wizard.openWizardForModel(modelId, detailModel.targetId)}
               />
             ) : (
               <ModelsList

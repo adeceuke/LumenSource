@@ -24,6 +24,8 @@ pub struct PersistedModelEntry {
     pub model_settings: Option<ModelSettings>,
     #[serde(default)]
     pub installation_validation: Option<InstallationValidationReport>,
+    #[serde(default)]
+    pub performance_test: Option<PerformanceTestResult>,
     #[serde(default = "available_inventory_status")]
     pub inventory_status: String,
     #[serde(default)]
@@ -371,6 +373,43 @@ pub struct PerformanceSnapshot {
     pub allocated_vram_bytes: u64,
     pub allocated_system_memory_bytes: u64,
     pub context_length: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceTestResult {
+    pub benchmark_version: u32,
+    pub tested_at: String,
+    pub assessment: String,
+    pub summary: String,
+    pub first_token_millis: u64,
+    pub first_visible_token_millis: Option<u64>,
+    pub load_millis: u64,
+    pub prompt_tokens_per_second: f64,
+    pub generation_tokens_per_second: f64,
+    pub prompt_token_count: u64,
+    pub generated_token_count: u64,
+    pub allocated_memory_bytes: u64,
+    pub allocated_vram_bytes: u64,
+    pub accelerator: String,
+    pub effective_context_length: Option<u64>,
+    pub expected_generation_tokens_per_second: Option<f64>,
+    pub evidence: String,
+    pub hardware_summary: String,
+    pub workload: String,
+    pub recommendation: Option<PerformanceTestRecommendation>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceTestRecommendation {
+    pub direction: String,
+    pub model_id: String,
+    pub model_name: String,
+    pub runtime_model_id: String,
+    pub estimated_first_visible_token_millis: Option<u64>,
+    pub estimated_generation_tokens_per_second: f64,
+    pub reason: String,
 }
 
 pub(crate) fn current_unix_time_ms() -> u64 {

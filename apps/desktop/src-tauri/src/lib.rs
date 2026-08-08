@@ -122,6 +122,7 @@ pub fn run() {
             commands::stop_runtime,
             commands::runtime_status,
             commands::model_performance,
+            commands::run_performance_test,
             commands::endpoint_details,
             commands::model_endpoint_details,
             commands::chat_with_model,

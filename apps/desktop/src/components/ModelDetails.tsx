@@ -9,11 +9,12 @@ import { IntegrationPanel } from "./IntegrationPanel";
 import { LumenChatWorkspace } from "./LumenChatWorkspace";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import { PerformanceChart } from "./PerformanceChart";
+import { PerformanceTestPanel } from "./PerformanceTestPanel";
 import { VllmModelSettings } from "./VllmModelSettings";
 
 const text = browserMessages();
 
-export type DetailTab = "chat" | "logs" | "performance" | "api" | "integration" | "settings";
+export type DetailTab = "chat" | "logs" | "performance" | "test" | "api" | "integration" | "settings";
 
 interface ModelDetailsProps {
   model: RunningModelEntry;
@@ -33,6 +34,7 @@ interface ModelDetailsProps {
   onStartModel: (modelId: string) => void;
   onModelSaved: (model: RunningModelEntry) => void;
   onInventoryChanged: (models: RunningModelEntry[]) => void;
+  onReviewAlternative: (modelId: string) => void;
 }
 
 export function ModelDetails({
@@ -53,6 +55,7 @@ export function ModelDetails({
   onStartModel,
   onModelSaved,
   onInventoryChanged,
+  onReviewAlternative,
 }: ModelDetailsProps) {
   const performance = usePerformanceMonitor(model, errorFrom);
   const chat = useModelChat(model, tab === "api", errorFrom);
@@ -90,6 +93,7 @@ export function ModelDetails({
         <button type="button" className={tab === "chat" ? "active" : ""} onClick={() => onTab("chat")}>{text.chat.tab}</button>
         <button type="button" className={tab === "logs" ? "active" : ""} onClick={() => onTab("logs")}>{text.common.logs}</button>
         <button type="button" className={tab === "performance" ? "active" : ""} onClick={() => onTab("performance")}>{text.common.performance}</button>
+        <button type="button" className={tab === "test" ? "active" : ""} onClick={() => onTab("test")}>Performance Test</button>
         <button type="button" className={tab === "api" ? "active" : ""} onClick={() => onTab("api")}>{text.common.api}</button>
         <button type="button" className={tab === "integration" ? "active" : ""} onClick={() => onTab("integration")}>Integration</button>
         <button type="button" className={tab === "settings" ? "active" : ""} onClick={() => onTab("settings")}>{text.navigation.settings}</button>
@@ -99,6 +103,8 @@ export function ModelDetails({
         <LogsPanel model={model} copiedField={copiedField} onClear={onClearLogs} onCopy={onCopy} />
       ) : tab === "performance" ? (
         <PerformancePanel model={model} performance={performance} />
+      ) : tab === "test" ? (
+        <PerformanceTestPanel model={model} onSaved={onModelSaved} onReviewAlternative={onReviewAlternative} />
       ) : tab === "chat" ? (
         <LumenChatWorkspace
           models={models}

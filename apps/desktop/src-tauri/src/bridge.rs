@@ -67,6 +67,12 @@ const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 const VALIDATION_TIMEOUT_SECS: u64 = 180;
 const VALIDATION_INFERENCE_TIMEOUT_SECS: u64 = 150;
 const VALIDATION_CLEANUP_TIMEOUT_SECS: u64 = 5;
+const PERFORMANCE_TEST_TIMEOUT_SECS: u64 = 360;
+const PERFORMANCE_TEST_VERSION: u32 = 1;
+const RESPONSIVE_FIRST_TOKEN_MILLIS: u64 = 20_000;
+const FAST_FIRST_TOKEN_MILLIS: u64 = 5_000;
+const RESPONSIVE_GENERATION_TPS: f64 = 5.0;
+const FAST_GENERATION_TPS: f64 = 15.0;
 
 struct LoadedCatalog {
     catalog: Catalog,
@@ -979,6 +985,7 @@ impl SharedCoreAdapter {
                 ),
                 model_settings: Some(profile.config.model_settings()),
                 installation_validation: None,
+                performance_test: None,
                 inventory_status: "needsReconnect".to_owned(),
                 discovered: true,
                 pinned: false,
@@ -1597,6 +1604,9 @@ impl SharedCoreAdapter {
             ),
             model_settings: Some(settings),
             installation_validation: Some(validation),
+            performance_test: existing
+                .as_ref()
+                .and_then(|model| model.performance_test.clone()),
             inventory_status: "available".to_owned(),
             discovered: existing.as_ref().is_some_and(|model| model.discovered),
             pinned: existing.as_ref().is_some_and(|model| model.pinned),
@@ -2746,6 +2756,7 @@ impl SharedCoreAdapter {
                     ),
                     model_settings: Some(ModelSettings::default()),
                     installation_validation: None,
+                    performance_test: None,
                     inventory_status: "available".to_owned(),
                     discovered: false,
                     pinned: source.pinned,
@@ -3003,6 +3014,7 @@ impl SharedCoreAdapter {
             runtime_capabilities: managed_vllm_capabilities(&self.runtime_registry, inference_task),
             model_settings: Some(settings),
             installation_validation: Some(validation),
+            performance_test: None,
             inventory_status: "available".to_owned(),
             discovered: false,
             pinned: source.pinned,
@@ -5048,6 +5060,243 @@ impl SharedCoreAdapter {
         })
     }
 
+    pub async fn performance_test(
+        &self,
+        entry_id: Option<&str>,
+        model_id: &str,
+        runtime_model_id: &str,
+        target_id: &str,
+    ) -> Result<PerformanceTestResult, String> {
+        let result = match tokio::time::timeout(
+            std::time::Duration::from_secs(PERFORMANCE_TEST_TIMEOUT_SECS),
+            self.performance_test_inner(entry_id, model_id, runtime_model_id, target_id),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "The optional performance test stopped after {PERFORMANCE_TEST_TIMEOUT_SECS} seconds. The model remains installed and valid."
+            )),
+        }?;
+
+        let saved = {
+            let mut state = self.state.write().await;
+            let entry = state.models.iter_mut().find(|entry| {
+                entry_id.is_none_or(|expected| entry.id == expected)
+                    && entry.model_id == model_id
+                    && entry.target_id == target_id
+                    && entry
+                        .runtime_model_id
+                        .as_deref()
+                        .is_some_and(|persisted| same_ollama_reference(persisted, runtime_model_id))
+            });
+            if let Some(entry) = entry {
+                entry.performance_test = Some(result.clone());
+                true
+            } else {
+                false
+            }
+        };
+        if saved {
+            self.persist_state().await?;
+        }
+        Ok(result)
+    }
+
+    async fn performance_test_inner(
+        &self,
+        entry_id: Option<&str>,
+        model_id: &str,
+        runtime_model_id: &str,
+        target_id: &str,
+    ) -> Result<PerformanceTestResult, String> {
+        if self.active_chat.lock().await.is_some() {
+            return Err(
+                "Finish the active chat response before running a performance test.".to_owned(),
+            );
+        }
+        let catalog = self.catalog_clone().await?;
+        let (model, variant) = find_variant(&catalog, model_id)?;
+        if variant.runtime != OLLAMA_RUNTIME || !model_supports_chat(model) {
+            return Err(
+                "Standardized performance testing is currently available for Ollama chat models."
+                    .to_owned(),
+            );
+        }
+        let persisted_runtime_matches = self.state.read().await.models.iter().any(|entry| {
+            entry_id.is_none_or(|expected| entry.id == expected)
+                && entry.model_id == model_id
+                && entry.target_id == target_id
+                && entry
+                    .runtime_model_id
+                    .as_deref()
+                    .is_some_and(|persisted| same_ollama_reference(persisted, runtime_model_id))
+        });
+        if !same_ollama_reference(&variant.runtime_ref, runtime_model_id)
+            && !persisted_runtime_matches
+        {
+            return Err(
+                "The runtime model identifier does not match the catalog variant.".to_owned(),
+            );
+        }
+
+        let runtime = self.runtime_for_target(target_id).await?;
+        runtime.health().await.map_err(|error| error.to_string())?;
+        let was_loaded = runtime
+            .model_allocation(runtime_model_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_some();
+
+        let measured = async {
+            let warmup_options = standardized_benchmark_options(8);
+            let warmup = runtime
+                .benchmark_chat(
+                    runtime_model_id,
+                    &[ChatMessage {
+                        role: "user".to_owned(),
+                        content: "Reply with the single word READY.".to_owned(),
+                    }],
+                    &warmup_options,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            let messages = [ChatMessage {
+                role: "user".to_owned(),
+                content: standardized_benchmark_prompt(),
+            }];
+            let measured_options = standardized_benchmark_options(64);
+            let mut samples = Vec::with_capacity(2);
+            for _ in 0..2 {
+                samples.push(
+                    runtime
+                        .benchmark_chat(runtime_model_id, &messages, &measured_options)
+                        .await
+                        .map_err(|error| error.to_string())?,
+                );
+            }
+            Ok::<_, String>((warmup, samples))
+        }
+        .await;
+        let allocation = runtime
+            .model_allocation(runtime_model_id)
+            .await
+            .map_err(|error| error.to_string());
+        if !was_loaded {
+            let _ = runtime.stop(runtime_model_id).await;
+        }
+        let (warmup, samples) = measured?;
+        let allocation = allocation?;
+        let hardware = self.hardware_for_target(target_id).await?;
+        let first_token_millis = median_u64(
+            samples
+                .iter()
+                .filter_map(|sample| sample.first_token_millis)
+                .collect(),
+        )
+        .unwrap_or_default();
+        let first_visible_token_millis = median_u64(
+            samples
+                .iter()
+                .filter_map(|sample| sample.first_visible_token_millis)
+                .collect(),
+        );
+        let prompt_eval_count = samples
+            .iter()
+            .map(|sample| sample.prompt_eval_count)
+            .sum::<u64>();
+        let prompt_eval_duration = samples
+            .iter()
+            .map(|sample| sample.prompt_eval_duration_nanos)
+            .sum::<u64>();
+        let eval_count = samples.iter().map(|sample| sample.eval_count).sum::<u64>();
+        let eval_duration = samples
+            .iter()
+            .map(|sample| sample.eval_duration_nanos)
+            .sum::<u64>();
+        if prompt_eval_count == 0
+            || prompt_eval_duration == 0
+            || eval_count == 0
+            || eval_duration == 0
+        {
+            return Err(
+                "Ollama completed the test but did not return usable prompt and generation counters."
+                    .to_owned(),
+            );
+        }
+        let prompt_tokens_per_second = tokens_per_second(prompt_eval_count, prompt_eval_duration);
+        let generation_tokens_per_second = tokens_per_second(eval_count, eval_duration);
+        let effective_first_visible = first_visible_token_millis.unwrap_or(first_token_millis);
+        let assessment =
+            performance_assessment(effective_first_visible, generation_tokens_per_second);
+        let summary = match assessment {
+            "slow" => "The model works, but measured responses are likely to feel slow for interactive use.",
+            "fast" => "The model is highly responsive on this machine and leaves room to consider a quality-oriented alternative.",
+            _ => "The model provides balanced interactive performance on this machine.",
+        }
+        .to_owned();
+        let allocated_memory_bytes = allocation
+            .as_ref()
+            .map(|value| value.total_memory_bytes)
+            .unwrap_or_default();
+        let allocated_vram_bytes = allocation
+            .as_ref()
+            .map(|value| value.vram_memory_bytes)
+            .unwrap_or_default();
+        let accelerator = allocation.as_ref().map_or("unavailable", |value| {
+            if value.vram_memory_bytes == 0 {
+                "cpu"
+            } else if value.vram_memory_bytes < value.total_memory_bytes {
+                "mixed"
+            } else {
+                "gpu"
+            }
+        });
+        let recommendation = performance_test_recommendation(
+            &catalog,
+            model,
+            variant,
+            &hardware,
+            assessment,
+            effective_first_visible,
+            generation_tokens_per_second,
+        );
+        let expected_generation_tokens_per_second = variant
+            .performance_hint
+            .as_ref()
+            .and_then(|hint| hint.tokens_per_sec_estimate);
+
+        Ok(PerformanceTestResult {
+            benchmark_version: PERFORMANCE_TEST_VERSION,
+            tested_at: chrono::Utc::now().to_rfc3339(),
+            assessment: assessment.to_owned(),
+            summary,
+            first_token_millis,
+            first_visible_token_millis,
+            load_millis: nanos_to_millis(warmup.load_duration_nanos),
+            prompt_tokens_per_second: round_metric(prompt_tokens_per_second),
+            generation_tokens_per_second: round_metric(generation_tokens_per_second),
+            prompt_token_count: prompt_eval_count / samples.len() as u64,
+            generated_token_count: eval_count / samples.len() as u64,
+            allocated_memory_bytes,
+            allocated_vram_bytes,
+            accelerator: accelerator.to_owned(),
+            effective_context_length: allocation.and_then(|value| value.context_length),
+            expected_generation_tokens_per_second,
+            evidence: if expected_generation_tokens_per_second.is_some() {
+                "Catalog benchmark; hardware may differ. Local measurements take priority."
+                    .to_owned()
+            } else {
+                "No comparable catalog benchmark is available; this local result is the primary evidence."
+                    .to_owned()
+            },
+            hardware_summary: hardware_summary(&hardware),
+            workload: "Warm-up plus two measured runs using a fixed prompt, a 2,048-token context, reasoning disabled, temperature 0, and up to 64 generated tokens."
+                .to_owned(),
+            recommendation,
+        })
+    }
+
     pub async fn chat(
         &self,
         request_id: &str,
@@ -5680,6 +5929,7 @@ impl SharedCoreAdapter {
                 ),
                 model_settings: Some(settings),
                 installation_validation: None,
+                performance_test: None,
                 inventory_status: "available".to_owned(),
                 discovered: true,
                 pinned: false,
@@ -6853,6 +7103,180 @@ fn estimated_loaded_memory(variant: &ModelVariant) -> (u64, u64) {
     (minimum, minimum.saturating_add(context_reserve))
 }
 
+fn standardized_benchmark_options(max_output_tokens: u32) -> ChatOptions {
+    ChatOptions {
+        context_length: Some(2_048),
+        temperature: Some(0.0),
+        max_output_tokens: Some(max_output_tokens),
+        seed: Some(42),
+        reasoning_level: Some("off".to_owned()),
+        keep_alive: Some("-1".to_owned()),
+        ..ChatOptions::default()
+    }
+}
+
+fn standardized_benchmark_prompt() -> String {
+    let passage = "A local inference benchmark should be repeatable, private, and independent of current events. Each observation in this synthetic passage uses ordinary vocabulary and a stable sentence structure. The passage exists to create enough input for measuring prompt processing rather than to test factual knowledge. ";
+    let mut prompt = passage.repeat(18);
+    prompt.push_str(
+        "\n\nWrite a concise numbered explanation of the passage's design goals. Continue with distinct observations until the response limit is reached. Do not mention these instructions.",
+    );
+    prompt
+}
+
+fn tokens_per_second(tokens: u64, duration_nanos: u64) -> f64 {
+    if duration_nanos == 0 {
+        0.0
+    } else {
+        tokens as f64 * 1_000_000_000.0 / duration_nanos as f64
+    }
+}
+
+fn nanos_to_millis(nanos: u64) -> u64 {
+    nanos / 1_000_000
+}
+
+fn median_u64(mut values: Vec<u64>) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    let middle = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        Some(values[middle - 1].saturating_add(values[middle]) / 2)
+    } else {
+        Some(values[middle])
+    }
+}
+
+fn round_metric(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
+}
+
+fn performance_assessment(first_visible_millis: u64, generation_tps: f64) -> &'static str {
+    if first_visible_millis > RESPONSIVE_FIRST_TOKEN_MILLIS
+        || generation_tps < RESPONSIVE_GENERATION_TPS
+    {
+        "slow"
+    } else if first_visible_millis <= FAST_FIRST_TOKEN_MILLIS
+        && generation_tps >= FAST_GENERATION_TPS
+    {
+        "fast"
+    } else {
+        "balanced"
+    }
+}
+
+fn performance_test_recommendation(
+    catalog: &Catalog,
+    model: &ModelEntry,
+    current: &ModelVariant,
+    hardware: &HardwareFacts,
+    assessment: &str,
+    first_visible_millis: u64,
+    generation_tps: f64,
+) -> Option<PerformanceTestRecommendation> {
+    if assessment == "balanced" || current.parameters_b <= f64::EPSILON {
+        return None;
+    }
+    let compatible: BTreeSet<String> =
+        recommend(catalog, hardware, &RecommendationRequest::default())
+            .recommendations
+            .iter()
+            .map(|item| item.variant_id.clone())
+            .collect();
+    let memory_limit_gib = hardware.available_ram_bytes as f64 / GIB / 1.25;
+    let mut candidates: Vec<&ModelVariant> = model
+        .variants
+        .iter()
+        .filter(|candidate| {
+            candidate.runtime == current.runtime
+                && compatible.contains(candidate.id.as_str())
+                && candidate
+                    .requirements
+                    .recommended_ram_gb
+                    .unwrap_or(candidate.requirements.min_ram_gb)
+                    <= memory_limit_gib
+        })
+        .collect();
+
+    let candidate = if assessment == "slow" {
+        candidates.retain(|candidate| candidate.parameters_b < current.parameters_b);
+        candidates.sort_by(|left, right| {
+            right
+                .parameters_b
+                .partial_cmp(&left.parameters_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates
+            .iter()
+            .copied()
+            .find(|candidate| {
+                predicted_generation_tps(current, candidate, generation_tps)
+                    >= RESPONSIVE_GENERATION_TPS
+            })
+            .or_else(|| candidates.last().copied())
+    } else {
+        candidates.retain(|candidate| candidate.parameters_b > current.parameters_b);
+        candidates.sort_by(|left, right| {
+            left.parameters_b
+                .partial_cmp(&right.parameters_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates.into_iter().find(|candidate| {
+            predicted_generation_tps(current, candidate, generation_tps)
+                >= RESPONSIVE_GENERATION_TPS
+                && predicted_first_token_millis(current, candidate, first_visible_millis)
+                    <= RESPONSIVE_FIRST_TOKEN_MILLIS
+        })
+    }?;
+
+    let direction = if candidate.parameters_b < current.parameters_b {
+        "faster"
+    } else {
+        "quality"
+    };
+    Some(PerformanceTestRecommendation {
+        direction: direction.to_owned(),
+        model_id: candidate.id.clone(),
+        model_name: format!("{} ({})", model.display_name, candidate.runtime_ref),
+        runtime_model_id: candidate.runtime_ref.clone(),
+        estimated_first_visible_token_millis: Some(predicted_first_token_millis(
+            current,
+            candidate,
+            first_visible_millis,
+        )),
+        estimated_generation_tokens_per_second: round_metric(predicted_generation_tps(
+            current,
+            candidate,
+            generation_tps,
+        )),
+        reason: if direction == "faster" {
+            "This smaller compatible variant is projected from the local measurement to provide a more responsive experience. Review it before choosing to install anything."
+                .to_owned()
+        } else {
+            "The current model substantially exceeds the interactive target. This next larger compatible variant may improve quality while remaining responsive; model size is only a quality signal, not a guarantee."
+                .to_owned()
+        },
+    })
+}
+
+fn predicted_generation_tps(
+    current: &ModelVariant,
+    candidate: &ModelVariant,
+    measured_tps: f64,
+) -> f64 {
+    measured_tps * (current.parameters_b / candidate.parameters_b).powf(0.85)
+}
+
+fn predicted_first_token_millis(
+    current: &ModelVariant,
+    candidate: &ModelVariant,
+    measured_millis: u64,
+) -> u64 {
+    ((measured_millis as f64 * candidate.parameters_b / current.parameters_b).round() as u64).max(1)
+}
+
 fn build_model_update_plan(
     catalog: &Catalog,
     entry: &PersistedModelEntry,
@@ -7422,6 +7846,7 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            performance_test: None,
             inventory_status: "available".to_owned(),
             discovered: false,
             pinned: false,
@@ -7530,6 +7955,7 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
             model_settings: Some(ModelSettings::default()),
             installation_validation: None,
+            performance_test: None,
             inventory_status: "available".to_owned(),
             discovered: false,
             pinned: false,
@@ -7582,6 +8008,7 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            performance_test: None,
             inventory_status: "available".to_owned(),
             discovered: false,
             pinned: false,
@@ -7634,6 +8061,7 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(DUMMY_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            performance_test: None,
             inventory_status: "available".to_owned(),
             discovered: false,
             pinned: false,
@@ -7667,6 +8095,7 @@ mod tests {
             runtime_capabilities: crate::runtime_registry::capabilities_for(OLLAMA_RUNTIME),
             model_settings: None,
             installation_validation: None,
+            performance_test: None,
             inventory_status: "available".to_owned(),
             discovered: false,
             pinned: false,
@@ -7857,5 +8286,21 @@ mod tests {
         assert!(message.contains("runtime rejected the request"));
         assert!(message.ends_with("..."));
         assert!(message.len() < detail.len());
+    }
+
+    #[test]
+    fn performance_assessment_uses_experience_thresholds_not_model_names() {
+        assert_eq!(performance_assessment(25_000, 30.0), "slow");
+        assert_eq!(performance_assessment(2_000, 3.0), "slow");
+        assert_eq!(performance_assessment(8_000, 9.0), "balanced");
+        assert_eq!(performance_assessment(4_000, 18.0), "fast");
+    }
+
+    #[test]
+    fn standardized_workload_is_large_and_stable_enough_for_prompt_processing() {
+        let prompt = standardized_benchmark_prompt();
+        assert!(prompt.len() > 4_000);
+        assert!(prompt.contains("repeatable, private"));
+        assert!(prompt.ends_with("Do not mention these instructions."));
     }
 }

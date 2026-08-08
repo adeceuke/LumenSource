@@ -1,9 +1,9 @@
 use crate::bridge::{
     CatalogSummary, ChatCompletionResult, ChatEvent, ChatRequestOptions, EndpointDetails,
     HardwareProfile, InstallOptions, InstallationValidationReport, MachineUsageSnapshot,
-    PerformanceProfileReport, PerformanceSnapshot, PersistedModelEntry, PreflightReport,
-    Recommendation, RemoteCredentialStatus, RuntimeDiagnostics, RuntimeMigrationOption,
-    RuntimeMigrationReport, RuntimeStatus, SharedCoreAdapter,
+    PerformanceProfileReport, PerformanceSnapshot, PerformanceTestResult, PersistedModelEntry,
+    PreflightReport, Recommendation, RemoteCredentialStatus, RuntimeDiagnostics,
+    RuntimeMigrationOption, RuntimeMigrationReport, RuntimeStatus, SharedCoreAdapter,
 };
 use crate::conversations::Conversation;
 use crate::managed_vllm::ManagedVllmSupport;
@@ -719,6 +719,23 @@ pub async fn model_performance(
 ) -> Result<PerformanceSnapshot, String> {
     core.performance(
         &entry_id,
+        &model_id,
+        &runtime_model_id,
+        &normalize_target_id(target_id),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn run_performance_test(
+    core: State<'_, SharedCoreAdapter>,
+    entry_id: Option<String>,
+    model_id: String,
+    runtime_model_id: String,
+    target_id: Option<String>,
+) -> Result<PerformanceTestResult, String> {
+    core.performance_test(
+        entry_id.as_deref(),
         &model_id,
         &runtime_model_id,
         &normalize_target_id(target_id),

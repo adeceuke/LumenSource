@@ -16,6 +16,7 @@ import type {
   InstallationValidationReport,
   PerformanceProfile,
   PerformanceProfileReport,
+  PerformanceTestResult,
   PreflightReport,
   Recommendation,
   RemoteConnectionReport,
@@ -56,6 +57,7 @@ interface ModelWizardState {
   open: boolean;
   busy: boolean;
   openWizard: () => void;
+  openWizardForModel: (modelId: string, targetId: string) => void;
   closeConfirmationOpen: boolean;
   dismissCloseConfirmation: () => void;
   confirmClose: () => void;
@@ -123,6 +125,9 @@ export function useModelWizard({
   const [validationReport, setValidationReport] = useState<InstallationValidationReport>();
   const [validationDetailsOpen, setValidationDetailsOpen] = useState(false);
   const [installedEntryId, setInstalledEntryId] = useState<string>();
+  const [performanceTest, setPerformanceTest] = useState<PerformanceTestResult>();
+  const [performanceTestBusy, setPerformanceTestBusy] = useState(false);
+  const [performanceTestError, setPerformanceTestError] = useState<string>();
   const [endpoint, setEndpoint] = useState<EndpointDetails>();
   const [busy, setBusy] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -288,6 +293,8 @@ export function useModelWizard({
     setValidationReport(undefined);
     setValidationDetailsOpen(false);
     setInstalledEntryId(undefined);
+    setPerformanceTest(undefined);
+    setPerformanceTestError(undefined);
   }, [selectedModelId]);
 
   const reset = () => {
@@ -323,6 +330,9 @@ export function useModelWizard({
     setInstallProgress(undefined);
     setValidationReport(undefined);
     setValidationDetailsOpen(false);
+    setPerformanceTest(undefined);
+    setPerformanceTestBusy(false);
+    setPerformanceTestError(undefined);
     setEndpoint(undefined);
     setError(undefined);
     setConfirmClose(false);
@@ -338,6 +348,27 @@ export function useModelWizard({
       setError(localizedError(loadError));
     });
     setOpen(true);
+  };
+
+  const openWizardForModel = (modelId: string, targetId: string) => {
+    openWizard();
+    if (targetId !== "local") return;
+    setBusy(true);
+    void Promise.all([
+      desktopCommands.recommendations(defaultUseIntent, "local"),
+      desktopCommands.detectHardware("local"),
+    ])
+      .then(([available, detected]) => {
+        if (!available.some((recommendation) => recommendation.modelId === modelId)) {
+          throw new Error("The suggested alternative is no longer available in the active catalog.");
+        }
+        setHardwareInfo(detected);
+        setRecommendations(available);
+        setSelectedModelId(modelId);
+        setWizardStep("suggestion");
+      })
+      .catch((openError: unknown) => setError(localizedError(openError)))
+      .finally(() => setBusy(false));
   };
 
   const confirmWizardClose = () => {
@@ -591,6 +622,36 @@ export function useModelWizard({
     onOpenInstalledModel(entryId);
   };
 
+  const runPerformanceTest = async () => {
+    if (
+      !selectedRecommendation
+      || !validationReport?.passed
+      || !validationReport.runtimeModelId
+      || !installedEntryId
+      || performanceTestBusy
+    ) return;
+    setPerformanceTestBusy(true);
+    setPerformanceTestError(undefined);
+    try {
+      const result = await desktopCommands.runPerformanceTest(
+        installedEntryId,
+        selectedRecommendation.modelId,
+        validationReport.runtimeModelId,
+        wizardTargetId ?? "local",
+      );
+      setPerformanceTest(result);
+      if (installedEntryId) {
+        setModels((current) => current.map((model) => (
+          model.id === installedEntryId ? { ...model, performanceTest: result } : model
+        )));
+      }
+    } catch (testError) {
+      setPerformanceTestError(localizedError(testError));
+    } finally {
+      setPerformanceTestBusy(false);
+    }
+  };
+
   const validateDownloadedModel = async (
     selected: Recommendation,
     profile: PerformanceProfile,
@@ -749,6 +810,7 @@ export function useModelWizard({
     open,
     busy,
     openWizard,
+    openWizardForModel,
     closeConfirmationOpen: confirmClose,
     dismissCloseConfirmation: () => setConfirmClose(false),
     confirmClose: confirmWizardClose,
@@ -802,6 +864,9 @@ export function useModelWizard({
       installProgress,
       validationReport,
       validationDetailsOpen,
+      performanceTest,
+      performanceTestBusy,
+      performanceTestError,
       selectedIsDummy,
       endpoint,
       copiedField,
@@ -835,6 +900,15 @@ export function useModelWizard({
       removeIncompleteInstall,
       startInstall,
       openInstalledModel,
+      reviewPerformanceAlternative: (modelId: string) => {
+        if (!recommendations.some((recommendation) => recommendation.modelId === modelId)) {
+          setPerformanceTestError("The suggested alternative is no longer present in the active catalog.");
+          return;
+        }
+        setSelectedModelId(modelId);
+        setWizardStep("suggestion");
+      },
+      runPerformanceTest,
       copyText,
     },
   };

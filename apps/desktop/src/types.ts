@@ -270,6 +270,39 @@ export interface PerformanceSnapshot {
   contextLength?: number;
 }
 
+export interface PerformanceTestRecommendation {
+  direction: "faster" | "quality";
+  modelId: string;
+  modelName: string;
+  runtimeModelId: string;
+  estimatedFirstVisibleTokenMillis?: number;
+  estimatedGenerationTokensPerSecond: number;
+  reason: string;
+}
+
+export interface PerformanceTestResult {
+  benchmarkVersion: number;
+  testedAt: string;
+  assessment: "slow" | "balanced" | "fast";
+  summary: string;
+  firstTokenMillis: number;
+  firstVisibleTokenMillis?: number;
+  loadMillis: number;
+  promptTokensPerSecond: number;
+  generationTokensPerSecond: number;
+  promptTokenCount: number;
+  generatedTokenCount: number;
+  allocatedMemoryBytes: number;
+  allocatedVramBytes: number;
+  accelerator: "cpu" | "mixed" | "gpu" | "unavailable";
+  effectiveContextLength?: number;
+  expectedGenerationTokensPerSecond?: number;
+  evidence: string;
+  hardwareSummary: string;
+  workload: string;
+  recommendation?: PerformanceTestRecommendation;
+}
+
 export interface EndpointDetails {
   baseUrl: string;
   chatCompletionsUrl: string;
@@ -340,6 +373,7 @@ export interface RunningModelEntry {
   runtimeCapabilities: RuntimeCapabilities;
   modelSettings?: ModelSettings;
   installationValidation?: InstallationValidationReport;
+  performanceTest?: PerformanceTestResult;
   inventoryStatus?: "available" | "missing" | "needsReconnect";
   discovered?: boolean;
   pinned?: boolean;

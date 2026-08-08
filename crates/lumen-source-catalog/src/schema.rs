@@ -423,12 +423,7 @@ impl ModelListVariant {
             .map(|source| (source.url, source.retrieved_at, source.notes))
             .collect::<Vec<_>>();
         let requirements = self.requirements;
-        let _requirements_metadata = (
-            requirements.recommended_system_ram_bytes,
-            requirements.recommended_vram_bytes,
-            requirements.supported_architectures,
-            requirements.notes,
-        );
+        let _requirements_metadata = (requirements.supported_architectures, requirements.notes);
         let ollama_model_ref =
             (self.runtime.engine == "ollama").then(|| self.runtime.model_ref.clone());
         ModelVariant {
@@ -451,7 +446,9 @@ impl ModelListVariant {
             download_size_bytes: Some(self.model_size_bytes),
             requirements: Requirements {
                 min_ram_gb: bytes_to_gib(requirements.minimum_system_ram_bytes),
+                recommended_ram_gb: Some(bytes_to_gib(requirements.recommended_system_ram_bytes)),
                 min_vram_gb: requirements.minimum_vram_bytes.map(bytes_to_gib),
+                recommended_vram_gb: requirements.recommended_vram_bytes.map(bytes_to_gib),
                 min_storage_gb: bytes_to_gib(requirements.minimum_free_storage_bytes),
                 os: Some(requirements.supported_os),
                 accelerators: requirements.accelerators,
@@ -532,7 +529,11 @@ fn ollama_runtime() -> RuntimeEntry {
 #[serde(deny_unknown_fields)]
 pub struct Requirements {
     pub min_ram_gb: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommended_ram_gb: Option<f64>,
     pub min_vram_gb: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommended_vram_gb: Option<f64>,
     pub min_storage_gb: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub os: Option<Vec<OperatingSystem>>,

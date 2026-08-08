@@ -658,6 +658,35 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .full-performance-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .full-performance-grid .performance-card { min-height: 125px; padding: 20px; }
 .full-performance-grid .performance-card > strong { margin-top: 16px; font-size: 20px; }
+.performance-test-section { display: grid; gap: 16px; }
+.performance-test-intro, .performance-test-results { display: grid; gap: 14px; }
+.performance-test-progress { display: flex; align-items: center; gap: 12px; min-height: 84px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: rgba(10,15,21,.72); }
+.performance-test-progress div { display: grid; gap: 5px; }
+.performance-test-progress strong { font-size: 11px; }
+.performance-test-progress small, .performance-test-note { color: var(--muted); font-size: 9px; line-height: 1.55; }
+.performance-test-note { margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.018); }
+.performance-test-verdict { display: grid; gap: 5px; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid #8db6d6; border-radius: 10px; background: rgba(126,170,206,.05); }
+.performance-test-verdict.slow { border-left-color: #f3c86b; background: rgba(243,200,107,.05); }
+.performance-test-verdict.fast { border-left-color: #91c69f; background: rgba(145,198,159,.05); }
+.performance-test-verdict strong { font-size: 12px; }
+.performance-test-verdict span { color: #b9c4bd; font-size: 9px; line-height: 1.5; }
+.performance-test-verdict small { color: var(--muted); font: 500 8px ui-monospace, monospace; }
+.performance-test-details { display: grid; gap: 6px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; background: rgba(10,15,21,.55); }
+.performance-test-details p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.performance-test-details strong { color: #aeb7bd; }
+.performance-recommendation { display: grid; gap: 8px; padding: 16px; border: 1px solid rgba(126,170,206,.32); border-radius: 11px; background: rgba(126,170,206,.05); }
+.performance-recommendation.quality { border-color: rgba(178,141,216,.35); background: rgba(178,141,216,.05); }
+.performance-recommendation > span { color: var(--accent); font: 700 8px ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.performance-recommendation h3, .performance-recommendation p { margin: 0; }
+.performance-recommendation h3 { font-size: 14px; }
+.performance-recommendation p, .performance-recommendation small { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.performance-recommendation dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 2px 0; }
+.performance-recommendation dl div { padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.performance-recommendation dt { color: var(--muted); font-size: 8px; }
+.performance-recommendation dd { margin: 4px 0 0; font: 600 10px ui-monospace, monospace; }
+.performance-test-results.compact .full-performance-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.performance-test-results.compact .performance-card { min-height: 90px; padding: 13px; }
+.performance-test-results.compact .performance-card > strong { margin-top: 10px; font-size: 15px; }
 .performance-chart-card { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 13px; background: rgba(10,15,21,.86); }
 .chart-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 14px; }
 .chart-header h3 { margin: 0 0 6px; font-size: 15px; }
@@ -733,6 +762,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .validation-success strong { color: #91c69f; font-size: 11px; }
 .validation-success span { color: #b9c4bd; font-size: 9px; }
 .validation-success small { color: var(--muted); font: 500 8px ui-monospace, monospace; }
+.wizard-performance-test { display: grid; gap: 12px; width: min(760px, 100%); margin: 0 auto; padding: 16px; border: 1px solid rgba(126,170,206,.3); border-radius: 11px; background: rgba(126,170,206,.04); }
+.wizard-performance-test > div:first-child { display: grid; gap: 5px; }
+.wizard-performance-test > div:first-child strong { font-size: 11px; }
+.wizard-performance-test > div:first-child span { color: var(--muted); font-size: 9px; line-height: 1.5; }
+.wizard-performance-test > button { justify-self: start; }
 
 .license-card { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: rgba(12,18,24,.82); }
 .license-legal-notice { margin: 0; padding: 12px 14px; border: 1px solid rgba(243,200,107,.3); border-radius: 9px; background: rgba(243,200,107,.05); color: #c8b98f; font-size: 9px; line-height: 1.55; }
@@ -1150,6 +1184,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 
 @media (max-width: 620px) {
+  .performance-test-results.compact .full-performance-grid,
+  .performance-recommendation dl { grid-template-columns: 1fr; }
   .profile-picker, .profile-report dl { grid-template-columns: 1fr; }
   .license-permissions, .license-conditions { grid-template-columns: 1fr; }
   .license-heading { display: grid; }

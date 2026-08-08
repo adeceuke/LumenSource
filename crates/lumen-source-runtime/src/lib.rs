@@ -123,6 +123,21 @@ pub enum ChatProgress {
     Done,
 }
 
+/// Raw timings reported by Ollama for one standardized streaming request.
+/// Durations from Ollama are nanoseconds; first-token timings are measured by
+/// this client because the runtime response does not report them directly.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OllamaBenchmarkSample {
+    pub first_token_millis: Option<u64>,
+    pub first_visible_token_millis: Option<u64>,
+    pub total_duration_nanos: u64,
+    pub load_duration_nanos: u64,
+    pub prompt_eval_count: u64,
+    pub prompt_eval_duration_nanos: u64,
+    pub eval_count: u64,
+    pub eval_duration_nanos: u64,
+}
+
 pub trait ChatReporter: Send + Sync {
     fn report(&self, progress: ChatProgress);
 }
@@ -730,6 +745,53 @@ impl OllamaRuntime {
         Ok(())
     }
 
+    /// Runs one streaming inference request while retaining Ollama's final
+    /// counters. This is intentionally separate from normal chat so benchmark
+    /// collection cannot change the user-facing streaming event contract.
+    pub async fn benchmark_chat(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        options: &ChatOptions,
+    ) -> Result<OllamaBenchmarkSample, RuntimeError> {
+        let messages = messages_with_system_prompt(messages, options.system_prompt.as_deref());
+        let started = std::time::Instant::now();
+        let response = self
+            .client
+            .post(self.api_url("api/chat")?)
+            .json(&ChatRequest {
+                model,
+                messages: &messages,
+                stream: true,
+                keep_alive: ollama_keep_alive(options.keep_alive.as_deref()),
+                think: ollama_think(options.reasoning_level.as_deref()),
+                format: options.structured_output.unwrap_or(false).then_some("json"),
+                options: OllamaChatOptions::from(options),
+            })
+            .send()
+            .await?;
+        let mut stream = Self::checked(response).await?.bytes_stream();
+        let mut pending = Vec::new();
+        let mut sample = OllamaBenchmarkSample::default();
+        let mut done = false;
+        while let Some(chunk) = stream.next().await {
+            pending.extend_from_slice(&chunk?);
+            while let Some(index) = pending.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = pending.drain(..=index).collect();
+                done |= collect_benchmark_line(&line, started, &mut sample)?;
+            }
+        }
+        if !pending.is_empty() {
+            done |= collect_benchmark_line(&pending, started, &mut sample)?;
+        }
+        if !done {
+            return Err(RuntimeError::Remote(
+                "Ollama ended the benchmark stream without final metrics".to_owned(),
+            ));
+        }
+        Ok(sample)
+    }
+
     /// Loads an embedding-only model and keeps it resident without routing it
     /// through Ollama's unsupported generation endpoint.
     pub async fn start_embedding(&self, model: &str) -> Result<(), RuntimeError> {
@@ -922,6 +984,18 @@ struct ChatResponse {
     #[serde(default)]
     done: bool,
     error: Option<String>,
+    #[serde(default)]
+    total_duration: u64,
+    #[serde(default)]
+    load_duration: u64,
+    #[serde(default)]
+    prompt_eval_count: u64,
+    #[serde(default)]
+    prompt_eval_duration: u64,
+    #[serde(default)]
+    eval_count: u64,
+    #[serde(default)]
+    eval_duration: u64,
 }
 
 #[derive(Deserialize)]
@@ -1406,6 +1480,47 @@ fn report_chat_line(line: &[u8], reporter: &dyn ChatReporter) -> Result<bool, Ru
         reporter.report(ChatProgress::Done);
     }
     Ok(update.done)
+}
+
+fn collect_benchmark_line(
+    line: &[u8],
+    started: std::time::Instant,
+    sample: &mut OllamaBenchmarkSample,
+) -> Result<bool, RuntimeError> {
+    let line = line
+        .strip_suffix(b"\n")
+        .unwrap_or(line)
+        .strip_suffix(b"\r")
+        .unwrap_or(line);
+    if line.is_empty() {
+        return Ok(false);
+    }
+    let update: ChatResponse = serde_json::from_slice(line)?;
+    if let Some(error) = update.error {
+        return Err(RuntimeError::Remote(error));
+    }
+    if let Some(message) = update.message {
+        let generated = !message.thinking.is_empty() || !message.content.is_empty();
+        if generated && sample.first_token_millis.is_none() {
+            sample.first_token_millis = Some(elapsed_millis_u64(started));
+        }
+        if !message.content.is_empty() && sample.first_visible_token_millis.is_none() {
+            sample.first_visible_token_millis = Some(elapsed_millis_u64(started));
+        }
+    }
+    if update.done {
+        sample.total_duration_nanos = update.total_duration;
+        sample.load_duration_nanos = update.load_duration;
+        sample.prompt_eval_count = update.prompt_eval_count;
+        sample.prompt_eval_duration_nanos = update.prompt_eval_duration;
+        sample.eval_count = update.eval_count;
+        sample.eval_duration_nanos = update.eval_duration;
+    }
+    Ok(update.done)
+}
+
+fn elapsed_millis_u64(started: std::time::Instant) -> u64 {
+    started.elapsed().as_millis().try_into().unwrap_or(u64::MAX)
 }
 
 fn same_model_reference(left: &str, right: &str) -> bool {
@@ -1976,6 +2091,36 @@ mod tests {
             values.as_slice(),
             &[ChatProgress::Reasoning("Checking".to_owned())]
         );
+    }
+
+    #[test]
+    fn benchmark_collector_keeps_runtime_counters_and_visible_token_timing() {
+        let started = std::time::Instant::now();
+        let mut sample = OllamaBenchmarkSample::default();
+        let first = collect_benchmark_line(
+            br#"{"message":{"thinking":"Checking","content":""},"done":false}"#,
+            started,
+            &mut sample,
+        );
+        let visible = collect_benchmark_line(
+            br#"{"message":{"thinking":"","content":"Answer"},"done":false}"#,
+            started,
+            &mut sample,
+        );
+        let done = collect_benchmark_line(
+            br#"{"message":{"content":""},"done":true,"total_duration":900,"load_duration":100,"prompt_eval_count":512,"prompt_eval_duration":200,"eval_count":64,"eval_duration":600}"#,
+            started,
+            &mut sample,
+        );
+
+        assert!(matches!(first, Ok(false)));
+        assert!(matches!(visible, Ok(false)));
+        assert!(matches!(done, Ok(true)));
+        assert!(sample.first_token_millis.is_some());
+        assert!(sample.first_visible_token_millis.is_some());
+        assert_eq!(sample.prompt_eval_count, 512);
+        assert_eq!(sample.eval_count, 64);
+        assert_eq!(sample.load_duration_nanos, 100);
     }
 
     #[test]
