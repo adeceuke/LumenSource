@@ -580,6 +580,7 @@ export function useModelWizard({
         runtimeCapabilities: runtimeCapabilities(selected.runtimeId),
         modelSettings: validation.settings,
         installationValidation: validation,
+        inventoryStatus: "available",
         version: selected.version,
         location: wizardLocation,
         targetId,

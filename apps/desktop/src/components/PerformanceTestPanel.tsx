@@ -106,7 +106,7 @@ export function PerformanceTestResults({
         <p><strong>Evidence:</strong> {result.evidence}</p>
         <p><strong>Workload:</strong> {result.workload}</p>
         <p><strong>Hardware:</strong> {result.hardwareSummary}</p>
-        {result.expectedGenerationTokensPerSecond !== undefined && (
+        {typeof result.expectedGenerationTokensPerSecond === "number" && (
           <p><strong>Catalog generation measurement:</strong> {result.expectedGenerationTokensPerSecond.toFixed(1)} tok/s</p>
         )}
       </div>

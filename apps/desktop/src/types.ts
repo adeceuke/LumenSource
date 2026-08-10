@@ -296,7 +296,7 @@ export interface PerformanceTestResult {
   allocatedVramBytes: number;
   accelerator: "cpu" | "mixed" | "gpu" | "unavailable";
   effectiveContextLength?: number;
-  expectedGenerationTokensPerSecond?: number;
+  expectedGenerationTokensPerSecond?: number | null;
   evidence: string;
   hardwareSummary: string;
   workload: string;
@@ -374,7 +374,7 @@ export interface RunningModelEntry {
   modelSettings?: ModelSettings;
   installationValidation?: InstallationValidationReport;
   performanceTest?: PerformanceTestResult;
-  inventoryStatus?: "available" | "missing" | "needsReconnect";
+  inventoryStatus: "available" | "missing" | "needsReconnect";
   discovered?: boolean;
   pinned?: boolean;
   lastSeenAt?: string;

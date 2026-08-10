@@ -8303,4 +8303,36 @@ mod tests {
         assert!(prompt.contains("repeatable, private"));
         assert!(prompt.ends_with("Do not mention these instructions."));
     }
+
+    #[test]
+    fn absent_performance_metrics_are_omitted_from_the_frontend_payload() {
+        let result = PerformanceTestResult {
+            benchmark_version: 1,
+            tested_at: "2026-08-10T07:02:51Z".to_owned(),
+            assessment: "slow".to_owned(),
+            summary: "Measured locally".to_owned(),
+            first_token_millis: 25_866,
+            first_visible_token_millis: None,
+            load_millis: 4_631,
+            prompt_tokens_per_second: 37.2,
+            generation_tokens_per_second: 6.3,
+            prompt_token_count: 942,
+            generated_token_count: 64,
+            allocated_memory_bytes: 3_139_709_171,
+            allocated_vram_bytes: 0,
+            accelerator: "cpu".to_owned(),
+            effective_context_length: None,
+            expected_generation_tokens_per_second: None,
+            evidence: "Local measurement".to_owned(),
+            hardware_summary: "CPU only".to_owned(),
+            workload: "Standard workload".to_owned(),
+            recommendation: None,
+        };
+
+        let payload = serde_json::to_value(result).expect("performance result should serialize");
+        assert!(payload.get("firstVisibleTokenMillis").is_none());
+        assert!(payload.get("effectiveContextLength").is_none());
+        assert!(payload.get("expectedGenerationTokensPerSecond").is_none());
+        assert!(payload.get("recommendation").is_none());
+    }
 }

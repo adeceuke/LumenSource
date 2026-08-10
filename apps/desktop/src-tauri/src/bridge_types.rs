@@ -383,6 +383,7 @@ pub struct PerformanceTestResult {
     pub assessment: String,
     pub summary: String,
     pub first_token_millis: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_visible_token_millis: Option<u64>,
     pub load_millis: u64,
     pub prompt_tokens_per_second: f64,
@@ -392,11 +393,14 @@ pub struct PerformanceTestResult {
     pub allocated_memory_bytes: u64,
     pub allocated_vram_bytes: u64,
     pub accelerator: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_context_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_generation_tokens_per_second: Option<f64>,
     pub evidence: String,
     pub hardware_summary: String,
     pub workload: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recommendation: Option<PerformanceTestRecommendation>,
 }
 
@@ -407,6 +411,7 @@ pub struct PerformanceTestRecommendation {
     pub model_id: String,
     pub model_name: String,
     pub runtime_model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub estimated_first_visible_token_millis: Option<u64>,
     pub estimated_generation_tokens_per_second: f64,
     pub reason: String,
